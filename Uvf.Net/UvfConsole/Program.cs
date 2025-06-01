@@ -8,6 +8,15 @@ using System.Collections.Generic;
 
 namespace UvfConsole
 {
+    /// <summary>
+    /// Vault format selection for command line operations
+    /// </summary>
+    public enum VaultFormat
+    {
+        UVF,           // Universal Vault Format (default)
+        CryptomatorV8  // Legacy Cryptomator V8 format
+    }
+
     public class Program
     {
         // Configuration
@@ -16,7 +25,6 @@ namespace UvfConsole
         private const string DecryptedFolderPath = @"D:\temp\uvf\EncryptionTestDecrypted";
         private const string Password = "your-super-secret-password";
         private const bool OutputTreeInfo = false;
-        private const string VaultFileName = "vault.uvf";
 
         private static Stopwatch _overallStopwatch = new Stopwatch();
         private static long _totalBytesProcessedOverall = 0;
@@ -46,44 +54,78 @@ namespace UvfConsole
             }
         }
 
+        /// <summary>
+        /// Gets the appropriate vault filename based on the format
+        /// </summary>
+        private static string GetVaultFileName(VaultFormat format)
+        {
+            return format switch
+            {
+                VaultFormat.UVF => "vault.uvf",
+                VaultFormat.CryptomatorV8 => "masterkey.cryptomator",
+                _ => "vault.uvf"
+            };
+        }
+
+        /// <summary>
+        /// Parses command line arguments to determine vault format
+        /// </summary>
+        private static VaultFormat ParseVaultFormat(string[] args)
+        {
+            if (args.Contains("--cryptomator"))
+                return VaultFormat.CryptomatorV8;
+            
+            // Default to UVF (even if --uvf is explicitly specified or neither is specified)
+            return VaultFormat.UVF;
+        }
+
         public static void Main(string[] args)
         {
             if (args.Length == 0)
             {
-                Console.WriteLine("Usage: UvfConsole <encrypt|decrypt|testrun>");
+                Console.WriteLine("Usage: UvfConsole <encrypt|decrypt|testrun> [--uvf|--cryptomator]");
+                Console.WriteLine("  --uvf        : Use Universal Vault Format (default)");
+                Console.WriteLine("  --cryptomator: Use Cryptomator V8 format for legacy compatibility");
                 return;
             }
 
             string mode = args[0].ToLowerInvariant();
+            VaultFormat vaultFormat = ParseVaultFormat(args);
+            
+            Console.WriteLine($"Mode: {mode}");
+            Console.WriteLine($"Vault Format: {vaultFormat}");
+            
             Directory.CreateDirectory(VaultFolderPath);
 
-            string vaultFilePath = Path.Combine(VaultFolderPath, VaultFileName);
+            string vaultFileName = GetVaultFileName(vaultFormat);
+            string vaultFilePath = Path.Combine(VaultFolderPath, vaultFileName);
             byte[] vaultFileContent;
 
             if (mode == "encrypt")
             {
-                vaultFileContent = HandleEncryptMode(vaultFilePath);
+                vaultFileContent = HandleEncryptMode(vaultFilePath, vaultFormat);
                 if (vaultFileContent == null) return;
-                ProcessVault(mode, vaultFileContent);
+                ProcessVault(mode, vaultFileContent, vaultFormat);
             }
             else if (mode == "decrypt")
             {
-                vaultFileContent = HandleDecryptMode(vaultFilePath);
+                vaultFileContent = HandleDecryptMode(vaultFilePath, vaultFormat);
                 if (vaultFileContent == null) return;
-                ProcessVault(mode, vaultFileContent);
+                ProcessVault(mode, vaultFileContent, vaultFormat);
             }
             else if (mode == "testrun")
             {
-                HandleTestRunMode(vaultFilePath);
+                HandleTestRunMode(vaultFilePath, vaultFormat);
             }
             else
             {
                 Console.WriteLine("Invalid mode. Use 'encrypt', 'decrypt', or 'testrun'.");
+                Console.WriteLine("Usage: UvfConsole <encrypt|decrypt|testrun> [--uvf|--cryptomator]");
                 return;
             }
         }
 
-        private static byte[] HandleEncryptMode(string vaultFilePath)
+        private static byte[] HandleEncryptMode(string vaultFilePath, VaultFormat vaultFormat)
         {
             if (!Directory.Exists(SourceFolderPath))
             {
@@ -104,14 +146,20 @@ namespace UvfConsole
                 return File.ReadAllBytes(vaultFilePath);
             }
 
-            Console.WriteLine($"Vault file not found. Creating new one at: {vaultFilePath}");
-            byte[] vaultFileContent = Vault.CreateNewUvfVaultFileContent(Password);
+            Console.WriteLine($"Vault file not found. Creating new {vaultFormat} vault at: {vaultFilePath}");
+            byte[] vaultFileContent = vaultFormat switch
+            {
+                VaultFormat.UVF => Vault.CreateNewUvfVaultFileContent(Password),
+                VaultFormat.CryptomatorV8 => Vault.CreateNewCryptomatorV8VaultFileContent(Password),
+                _ => Vault.CreateNewUvfVaultFileContent(Password)
+            };
+            
             File.WriteAllBytes(vaultFilePath, vaultFileContent);
-            Console.WriteLine("New vault file created.");
+            Console.WriteLine($"New {vaultFormat} vault file created.");
             return vaultFileContent;
         }
 
-        private static byte[] HandleDecryptMode(string vaultFilePath)
+        private static byte[] HandleDecryptMode(string vaultFilePath, VaultFormat vaultFormat)
         {
             Console.WriteLine($"Starting decryption: {VaultFolderPath} -> {DecryptedFolderPath}");
             
@@ -131,9 +179,9 @@ namespace UvfConsole
             return File.ReadAllBytes(vaultFilePath);
         }
 
-        private static void HandleTestRunMode(string vaultFilePath)
+        private static void HandleTestRunMode(string vaultFilePath, VaultFormat vaultFormat)
         {
-            Console.WriteLine("===== Starting Test Run =====");
+            Console.WriteLine($"===== Starting Test Run (Format: {vaultFormat}) =====");
 
             CleanupTestDirectories();
 
@@ -152,7 +200,7 @@ namespace UvfConsole
 
 
             // Encryption Phase
-            Console.WriteLine("\n--- Test Run: Encryption Phase ---");
+            Console.WriteLine($"\n--- Test Run: Encryption Phase ({vaultFormat}) ---");
             if (!Directory.Exists(SourceFolderPath))
             {
                 Console.WriteLine($"Source folder {SourceFolderPath} does not exist. Skipping encryption phase.");
@@ -160,14 +208,21 @@ namespace UvfConsole
             else
             {
                 if (File.Exists(vaultFilePath)) File.Delete(vaultFilePath); // Ensure fresh vault file for test
-                byte[] vaultFileContentEnc = Vault.CreateNewUvfVaultFileContent(Password);
+                
+                byte[] vaultFileContentEnc = vaultFormat switch
+                {
+                    VaultFormat.UVF => Vault.CreateNewUvfVaultFileContent(Password),
+                    VaultFormat.CryptomatorV8 => Vault.CreateNewCryptomatorV8VaultFileContent(Password),
+                    _ => Vault.CreateNewUvfVaultFileContent(Password)
+                };
+                
                 File.WriteAllBytes(vaultFilePath, vaultFileContentEnc);
-                Console.WriteLine("New vault file created for test run encryption.");
+                Console.WriteLine($"New {vaultFormat} vault file created for test run encryption.");
 
                 _totalBytesProcessedOverall = 0;
                 _overallStopwatch.Restart();
 
-                using (Vault vault = Vault.LoadUvfVault(vaultFileContentEnc, Password))
+                using (Vault vault = LoadVault(vaultFileContentEnc, Password, vaultFormat))
                 {
                     DirectoryMetadata rootMetadataEnc = vault.GetRootDirectoryMetadata();
                     string rootDirPhysicalPathEnc = Path.Combine(VaultFolderPath, vault.GetRootDirectoryPath());
@@ -193,7 +248,7 @@ namespace UvfConsole
                 _totalBytesProcessedOverall = 0;
                 _overallStopwatch.Restart();
 
-                using (Vault vault = Vault.LoadUvfVault(vaultFileContentDec, Password))
+                using (Vault vault = LoadVault(vaultFileContentDec, Password, vaultFormat))
                 {
                     string rootDirPhysicalPathDec = Path.Combine(VaultFolderPath, vault.GetRootDirectoryPath());
                     string rootDirUvfPathDec = Path.Combine(rootDirPhysicalPathDec, "dir.uvf");
@@ -233,10 +288,23 @@ namespace UvfConsole
             Console.WriteLine("===== Test Run Complete =====");
         }
 
-        private static void ProcessVault(string mode, byte[] vaultFileContent)
+        /// <summary>
+        /// Loads a vault using the appropriate method based on the vault format
+        /// </summary>
+        private static Vault LoadVault(byte[] vaultFileContent, string password, VaultFormat vaultFormat)
         {
-            Console.WriteLine("Loading vault...");
-            using (Vault vault = Vault.LoadUvfVault(vaultFileContent, Password))
+            return vaultFormat switch
+            {
+                VaultFormat.UVF => Vault.LoadUvfVault(vaultFileContent, password),
+                VaultFormat.CryptomatorV8 => Vault.LoadCryptomatorV8Vault(vaultFileContent, password),
+                _ => Vault.LoadUvfVault(vaultFileContent, password)
+            };
+        }
+
+        private static void ProcessVault(string mode, byte[] vaultFileContent, VaultFormat vaultFormat)
+        {
+            Console.WriteLine($"Loading {vaultFormat} vault...");
+            using (Vault vault = LoadVault(vaultFileContent, Password, vaultFormat))
             {
                 Console.WriteLine("Vault loaded successfully.");
 

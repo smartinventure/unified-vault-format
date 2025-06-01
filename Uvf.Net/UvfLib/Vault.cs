@@ -25,6 +25,7 @@ using System.Collections.Generic; // Added for Dictionary and List
 using System.Linq; // Added for Linq operations if needed
 using UvfLib.V3; // Added for UVFMasterkeyImpl constants if any, and HKDFHelper
 using System.Buffers.Binary; // Added for BinaryPrimitives
+using CryptoOps = UvfLib.Common.CryptographicOperations;
 
 [assembly: System.Runtime.CompilerServices.InternalsVisibleTo("UvfLib.Tests")]
 
@@ -38,7 +39,7 @@ namespace UvfLib
     {
         private readonly Cryptor _cryptor;
         private readonly PerpetualMasterkey? _perpetualMasterkey; // For older formats or if UVFMasterkey can provide one
-        private readonly RevolvingMasterkey _revolvingMasterkey; // Main masterkey for UVF
+        private RevolvingMasterkey _revolvingMasterkey; // Main masterkey for UVF - made non-readonly for key rotation
         private static readonly RandomNumberGenerator CsPrng = RandomNumberGenerator.Create(); // Static instance for loading
         private bool _disposed = false;
 
@@ -693,5 +694,214 @@ namespace UvfLib
             throw new NotSupportedException("Use contextual FileNameEncryptor obtained via DirectoryMetadata.");
         }
 
+        // --- Key Rotation Methods ---
+
+        /// <summary>
+        /// Rotates the encryption keys for a UVF vault by adding a new seed.
+        /// This improves security by ensuring forward secrecy - files encrypted with new seeds
+        /// cannot be decrypted even if older seeds are compromised.
+        /// </summary>
+        /// <param name="encryptedUvfFileContent">The current byte content of the vault.uvf file.</param>
+        /// <param name="password">The vault password.</param>
+        /// <returns>A byte array containing the vault.uvf file with the new seed added.</returns>
+        /// <exception cref="ArgumentNullException">If file content or password is null.</exception>
+        /// <exception cref="InvalidPassphraseException">If the password is incorrect.</exception>
+        /// <exception cref="AuthenticationFailedException">If authentication fails during decryption.</exception>
+        /// <exception cref="CryptoException">If key generation or encryption fails.</exception>
+        public static byte[] RotateUvfVaultKey(byte[] encryptedUvfFileContent, string password)
+        {
+            if (encryptedUvfFileContent == null) throw new ArgumentNullException(nameof(encryptedUvfFileContent));
+            if (password == null) throw new ArgumentNullException(nameof(password));
+
+            try
+            {
+                // 1. Load the current vault payload
+                string jweString = Encoding.UTF8.GetString(encryptedUvfFileContent);
+                UvfMasterkeyPayload currentPayload = JweVaultManager.LoadVaultPayload(jweString, password);
+
+                // 2. Generate a new seed
+                byte[] newSeedValue = new byte[32]; // 256-bit seed
+                using (var rng = RandomNumberGenerator.Create())
+                {
+                    rng.GetBytes(newSeedValue);
+                }
+
+                // 3. Find the highest seed ID and increment it
+                int maxSeedId = 0;
+                if (currentPayload.Seeds != null && currentPayload.Seeds.Any())
+                {
+                    foreach (var seed in currentPayload.Seeds)
+                    {
+                        if (!string.IsNullOrEmpty(seed.Id))
+                        {
+                            try
+                            {
+                                // Decode the Base64Url seed ID to get the integer value
+                                byte[] seedIdBytes = Base64Url.Decode(seed.Id);
+                                if (seedIdBytes.Length >= 4)
+                                {
+                                    int seedId = BinaryPrimitives.ReadInt32BigEndian(seedIdBytes);
+                                    if (seedId > maxSeedId)
+                                    {
+                                        maxSeedId = seedId;
+                                    }
+                                }
+                            }
+                            catch
+                            {
+                                // Skip invalid seed IDs
+                                continue;
+                            }
+                        }
+                    }
+                }
+
+                int newSeedId = maxSeedId + 1;
+
+                // 4. Create new seed entry
+                byte[] newSeedIdBytes = new byte[4];
+                BinaryPrimitives.WriteInt32BigEndian(newSeedIdBytes, newSeedId);
+
+                var newSeed = new PayloadSeed
+                {
+                    Id = Base64Url.Encode(newSeedIdBytes),
+                    Value = Base64Url.Encode(newSeedValue),
+                    Created = DateTime.UtcNow.ToString("yyyy-MM-ddTHH:mm:ssZ")
+                };
+
+                // 5. Create updated payload with new seed
+                var updatedPayload = new UvfMasterkeyPayload
+                {
+                    UvfSpecVersion = currentPayload.UvfSpecVersion,
+                    Keys = currentPayload.Keys, // Keep existing keys
+                    Kdf = currentPayload.Kdf,   // Keep existing KDF settings
+                    Seeds = new List<PayloadSeed>(currentPayload.Seeds ?? new List<PayloadSeed>()),
+                    RootDirId = currentPayload.RootDirId // Keep existing root directory ID
+                };
+
+                // Add the new seed
+                updatedPayload.Seeds.Add(newSeed);
+
+                // 6. Re-encrypt the vault with the updated payload
+                string rotatedJweString = JweVaultManager.CreateVault(updatedPayload, password);
+                byte[] rotatedVaultContent = Encoding.UTF8.GetBytes(rotatedJweString);
+
+                // 7. Clean up sensitive data
+                CryptoOps.ZeroMemory(newSeedValue);
+
+                return rotatedVaultContent;
+            }
+            catch (Exception ex) when (!(ex is ArgumentNullException || ex is InvalidPassphraseException || 
+                                       ex is AuthenticationFailedException || ex is CryptoException))
+            {
+                throw new CryptoException("Key rotation failed", ex);
+            }
+        }
+
+        /// <summary>
+        /// Rotates the encryption keys for this vault instance by adding a new seed.
+        /// After rotation, new files and directories will use the new seed for encryption,
+        /// providing forward secrecy protection.
+        /// 
+        /// Note: This method updates the in-memory vault instance. To persist the changes
+        /// to disk, the vault file would need to be re-saved separately.
+        /// </summary>
+        /// <exception cref="InvalidOperationException">If the vault format doesn't support key rotation or vault is not properly initialized.</exception>
+        /// <exception cref="CryptoException">If key generation fails.</exception>
+        /// <exception cref="ObjectDisposedException">If the vault has been disposed.</exception>
+        public void RotateVaultKey()
+        {
+            if (_disposed) throw new ObjectDisposedException(nameof(Vault));
+
+            // Check if we have a revolving masterkey (UVF format)
+            if (_revolvingMasterkey == null)
+            {
+                throw new InvalidOperationException("Key rotation is only supported for UVF format vaults with revolving masterkeys.");
+            }
+
+            if (!(_revolvingMasterkey is UVFMasterkey uvfMasterkey))
+            {
+                throw new InvalidOperationException("Vault does not contain a UVF masterkey that supports rotation.");
+            }
+
+            try
+            {
+                // Generate new seed
+                byte[] newSeedValue = new byte[32]; // 256-bit seed
+                using (var rng = RandomNumberGenerator.Create())
+                {
+                    rng.GetBytes(newSeedValue);
+                }
+
+                // Generate new seed ID (increment the latest)
+                int newSeedId = uvfMasterkey.LatestSeed + 1;
+
+                // Create updated seed collection
+                var updatedSeeds = new Dictionary<int, byte[]>(uvfMasterkey.Seeds);
+                updatedSeeds[newSeedId] = newSeedValue;
+
+                // Create new masterkey with rotated seeds
+                var rotatedMasterkey = new V3.UVFMasterkeyImpl(
+                    updatedSeeds,
+                    uvfMasterkey.KdfSalt,
+                    uvfMasterkey.InitialSeed,
+                    newSeedId  // Update latest seed to the new one
+                );
+
+                // Dispose old masterkey
+                if (_revolvingMasterkey is IDisposable disposableOld)
+                {
+                    disposableOld.Dispose();
+                }
+
+                // Update the vault's masterkey
+                _revolvingMasterkey = rotatedMasterkey;
+
+                // Clean up sensitive data
+                CryptoOps.ZeroMemory(newSeedValue);
+            }
+            catch (Exception ex)
+            {
+                throw new CryptoException("Key rotation failed", ex);
+            }
+        }
+
+        /// <summary>
+        /// Gets the current seed ID being used for new operations.
+        /// Only available for UVF vaults that support key rotation.
+        /// </summary>
+        /// <returns>The current (latest) seed ID</returns>
+        /// <exception cref="InvalidOperationException">If the vault doesn't support key rotation</exception>
+        /// <exception cref="ObjectDisposedException">If the vault has been disposed</exception>
+        public int GetCurrentSeedId()
+        {
+            if (_disposed) throw new ObjectDisposedException(nameof(Vault));
+
+            if (_revolvingMasterkey is UVFMasterkey uvfMasterkey)
+            {
+                return uvfMasterkey.LatestSeed;
+            }
+
+            throw new InvalidOperationException("Current seed ID is only available for UVF vaults.");
+        }
+
+        /// <summary>
+        /// Gets all available seed IDs in this vault.
+        /// Only available for UVF vaults that support key rotation.
+        /// </summary>
+        /// <returns>Collection of all seed IDs</returns>
+        /// <exception cref="InvalidOperationException">If the vault doesn't support key rotation</exception>
+        /// <exception cref="ObjectDisposedException">If the vault has been disposed</exception>
+        public IEnumerable<int> GetAvailableSeedIds()
+        {
+            if (_disposed) throw new ObjectDisposedException(nameof(Vault));
+
+            if (_revolvingMasterkey is UVFMasterkey uvfMasterkey)
+            {
+                return uvfMasterkey.Seeds.Keys.ToList(); // Return a copy to prevent modification
+            }
+
+            throw new InvalidOperationException("Seed IDs are only available for UVF vaults.");
+        }
     }
 }
