@@ -12,6 +12,8 @@
 using UvfLib.Api;
 using UvfLib.V3;
 using UvfLib.Common;
+using System;
+using System.IO;
 
 namespace UvfLib.VaultHelpers
 {
@@ -86,6 +88,69 @@ namespace UvfLib.VaultHelpers
             }
 
             return expectedSize;
+        }
+
+        /// <summary>
+        /// Checks if a file exists in the vault by traversing the encrypted directory structure.
+        /// </summary>
+        /// <param name="cryptor">The cryptor instance</param>
+        /// <param name="vaultBasePath">The base path of the vault</param>
+        /// <param name="plaintextFilePath">The plaintext file path to check (e.g., "/myFolder/file.txt")</param>
+        /// <returns>True if the file exists, false otherwise</returns>
+        public static bool FileExists(Cryptor cryptor, string vaultBasePath, string plaintextFilePath)
+        {
+            if (cryptor?.DirectoryContentCryptor() == null) throw new InvalidOperationException("Directory cryptor not available.");
+            if (string.IsNullOrEmpty(vaultBasePath)) throw new ArgumentException("Vault base path cannot be null or empty", nameof(vaultBasePath));
+            if (string.IsNullOrEmpty(plaintextFilePath)) throw new ArgumentException("File path cannot be null or empty", nameof(plaintextFilePath));
+
+            try
+            {
+                // Normalize the path - remove leading/trailing slashes
+                string normalizedPath = plaintextFilePath.Trim('/');
+                if (string.IsNullOrEmpty(normalizedPath))
+                {
+                    // Empty path is not a valid file
+                    return false;
+                }
+
+                // Split into directory path and filename
+                string directoryPath;
+                string fileName;
+                
+                int lastSlashIndex = normalizedPath.LastIndexOf('/');
+                if (lastSlashIndex == -1)
+                {
+                    // File is in the root directory
+                    directoryPath = "";
+                    fileName = normalizedPath;
+                }
+                else
+                {
+                    directoryPath = normalizedPath.Substring(0, lastSlashIndex);
+                    fileName = normalizedPath.Substring(lastSlashIndex + 1);
+                }
+
+                // Traverse to the parent directory
+                var directoryResult = VaultDirectoryHelper.TraverseToDirectory(cryptor, vaultBasePath, "/" + directoryPath);
+                if (!directoryResult.HasValue)
+                {
+                    // Parent directory doesn't exist
+                    return false;
+                }
+
+                var (directoryMetadata, directoryPhysicalPath) = directoryResult.Value;
+
+                // Encrypt the filename using the parent directory's metadata
+                string encryptedFileName = VaultDirectoryHelper.EncryptFilenameInternal(cryptor, directoryMetadata, fileName);
+                string encryptedFilePath = Path.Combine(directoryPhysicalPath, encryptedFileName);
+
+                // Check if the encrypted file exists and is actually a file (not a directory)
+                return File.Exists(encryptedFilePath);
+            }
+            catch (Exception)
+            {
+                return false;
+            }
         }
     }
 } 

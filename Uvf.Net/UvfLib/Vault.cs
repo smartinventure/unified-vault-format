@@ -132,10 +132,11 @@ namespace UvfLib
         /// <returns>A byte array containing the encrypted master key file data.</returns>
         /// <exception cref="ArgumentNullException">If password is null.</exception>
         /// <exception cref="CryptoException">If key generation or encryption fails.</exception>
+        [Obsolete("Use CreateNewCryptomatorV8VaultFileContent instead")]
         public static byte[] CreateNewLegacyVaultKeyFileContent(string password, byte[]? pepper = null)
         {
-            // Delegate to VaultKeyHelper
-            return VaultKeyHelper.CreateNewVaultKeyFileContentInternal(password, pepper);
+            // Delegate to the new method for consistency
+            return CreateNewCryptomatorV8VaultFileContent(password, pepper);
         }
 
         /// <summary>
@@ -265,7 +266,7 @@ namespace UvfLib
         }
 
         /// <summary>
-        /// Loads a Legacy Cryptomator vault's Cryptor instance using the master key file content and password.
+        /// Loads a Legacy Cryptomator V8 vault's Cryptor instance using the master key file content and password.
         /// </summary>
         /// <param name="encryptedKeyFileContent">The byte content of the master key file.</param>
         /// <param name="password">The vault password.</param>
@@ -277,7 +278,7 @@ namespace UvfLib
         /// <exception cref="UnsupportedVaultFormatException">If the vault format is not supported.</exception>
         /// <exception cref="MasterkeyLoadingFailedException">For other key loading errors.</exception>
         /// <exception cref="CryptoException">For general cryptographic errors.</exception>
-        public static Vault LoadCryptomatorVault(byte[] encryptedKeyFileContent, string password, byte[]? pepper = null)
+        public static Vault LoadCryptomatorV8Vault(byte[] encryptedKeyFileContent, string password, byte[]? pepper = null)
         {
             if (encryptedKeyFileContent == null) throw new ArgumentNullException(nameof(encryptedKeyFileContent));
             if (password == null) throw new ArgumentNullException(nameof(password));
@@ -288,49 +289,17 @@ namespace UvfLib
             var keyAccessor = new MasterkeyFileAccess(effectivePepper, RandomNumberGenerator.Create());
             PerpetualMasterkey perpetualMasterkey = keyAccessor.Unlock(masterkeyFile, password);
             
-            // Attempt to adapt PerpetualMasterkey to RevolvingMasterkey for CryptorProvider
-            // This is a simplification; a full adapter might be more complex or not fully compatible.
-            RevolvingMasterkey? revolvingAdapter = null;
+            // For Cryptomator V8, we use the new CryptomatorV8 provider
             Api.Cryptor? cryptor = null;
             try 
             {
-                byte[] rawKey = perpetualMasterkey.GetRaw(); // Changed from GetRawKey()
-                try
-                {
-                    var seeds = new Dictionary<int, byte[]> { { 0, rawKey } }; 
-                    byte[] dummyKdfSalt = new byte[32]; 
-                    revolvingAdapter = new V3.UVFMasterkeyImpl(seeds, dummyKdfSalt, 0, 0);
-                }
-                finally
-                {
-                    UvfLib.Common.CryptographicOperations.ZeroMemory(rawKey);
-                }
-
-                // For legacy, the scheme was different. We need to map vault version to scheme.
-                // This part is tricky as CryptorProvider.Scheme might not directly map old versions.
-                // The original code had complex version detection.
-                // For simplicity, we'll assume if it's loaded here, it's pre-UVF.
-                // However, CryptorProvider.ForScheme expects a UVF-compatible scheme.
-                // This indicates a deeper architectural consideration for handling true legacy vaults vs UVF.
-                
-                // If the intention is to use the *new* UVF cryptors with an old key, that's an adaptation.
-                // If masterkeyFile.VaultVersion >= 8, it might be an early UVF draft attempt.
-                // For now, let's assume we want to use a UVF_DRAFT cryptor with the adapted key.
-                CryptorProvider.Scheme scheme = CryptorProvider.Scheme.UVF_DRAFT; // Or determine based on masterkeyFile.VaultVersion
-                if (masterkeyFile.VaultVersion < 8) {
-                    // This path would require a V1/V2 cryptor provider if they were distinct and available.
-                    // For now, we are focusing on UVF. This branch is problematic for true legacy.
-                     throw new UnsupportedVaultFormatException(new Uri("file://masterkey.cryptomator"), VaultFormat.Unknown, $"True legacy vault versions ({masterkeyFile.VaultVersion}) require a specific legacy CryptorProvider not used in this UVF-focused load path.");
-                }
-
-                CryptorProvider provider = CryptorProvider.ForScheme(scheme);
+                CryptorProvider provider = CryptorProvider.ForScheme(CryptorProvider.Scheme.SIV_GCM);
                 using var csprng = RandomNumberGenerator.Create();
-                cryptor = provider.Provide(revolvingAdapter, csprng);
-                return new Vault(cryptor, perpetualMasterkey, revolvingAdapter);
+                cryptor = provider.Provide(perpetualMasterkey, csprng);
+                return new Vault(cryptor, perpetualMasterkey);
             }
             catch (Exception)
             {
-                (revolvingAdapter as IDisposable)?.Dispose();
                 (cryptor as IDisposable)?.Dispose();
                 perpetualMasterkey.Dispose();
                 throw;
@@ -353,6 +322,57 @@ namespace UvfLib
             UvfMasterkeyPayload payload = JweVaultManager.LoadVaultPayload(oldJwe, oldPassword); // Decrypt with old
             string newJwe = JweVaultManager.CreateVault(payload, newPassword); // Re-encrypt with new
             return Encoding.UTF8.GetBytes(newJwe);
+        }
+
+        /// <summary>
+        /// Changes the password for an existing Cryptomator V8 vault file's content.
+        /// </summary>
+        /// <param name="encryptedKeyFileContent">The current byte content of the masterkey.cryptomator file.</param>
+        /// <param name="oldPassword">The current vault password.</param>
+        /// <param name="newPassword">The desired new vault password.</param>
+        /// <param name="pepper">Optional pepper to use during key derivation. If null, an empty pepper is used.</param>
+        /// <returns>A byte array containing the newly encrypted masterkey.cryptomator file data.</returns>
+        /// <exception cref="ArgumentNullException">If file content or passwords are null.</exception>
+        /// <exception cref="InvalidPassphraseException">If the oldPassword is incorrect.</exception>
+        /// <exception cref="AuthenticationFailedException">If the master key file MAC is invalid.</exception>
+        /// <exception cref="CryptoException">If key operations fail.</exception>
+        public static byte[] ChangeCryptomatorV8VaultPassword(byte[] encryptedKeyFileContent, string oldPassword, string newPassword, byte[]? pepper = null)
+        {
+            if (encryptedKeyFileContent == null) throw new ArgumentNullException(nameof(encryptedKeyFileContent));
+            if (oldPassword == null) throw new ArgumentNullException(nameof(oldPassword));
+            if (newPassword == null) throw new ArgumentNullException(nameof(newPassword));
+            byte[] effectivePepper = pepper ?? Array.Empty<byte>();
+
+            // Use MasterkeyFileAccess.ChangePassphrase method which handles the encryption/decryption
+            var keyAccessor = new MasterkeyFileAccess(effectivePepper, RandomNumberGenerator.Create());
+            return keyAccessor.ChangePassphrase(encryptedKeyFileContent, oldPassword, newPassword);
+        }
+
+        /// <summary>
+        /// Creates the encrypted master key file content for a new Cryptomator V8 vault.
+        /// </summary>
+        /// <param name="password">The password for the new vault.</param>
+        /// <param name="pepper">Optional pepper to use during key derivation. If null, an empty pepper is used.</param>
+        /// <returns>A byte array containing the encrypted master key file data.</returns>
+        /// <exception cref="ArgumentNullException">If password is null.</exception>
+        /// <exception cref="CryptoException">If key generation or encryption fails.</exception>
+        public static byte[] CreateNewCryptomatorV8VaultFileContent(string password, byte[]? pepper = null)
+        {
+            // Delegate to VaultKeyHelper (this was previously CreateNewLegacyVaultKeyFileContent)
+            return VaultKeyHelper.CreateNewVaultKeyFileContentInternal(password, pepper);
+        }
+
+        /// <summary>
+        /// Creates a new Cryptomator V8 vault file (masterkey.cryptomator) at the specified path.
+        /// </summary>
+        /// <param name="filePath">The path where the vault file will be created.</param>
+        /// <param name="password">The password for the new vault.</param>
+        /// <param name="pepper">Optional pepper to use during key derivation. If null, an empty pepper is used.</param>
+        public static void CreateNewCryptomatorV8Vault(string filePath, string password, byte[]? pepper = null)
+        {
+            if (string.IsNullOrEmpty(filePath)) throw new ArgumentNullException(nameof(filePath));
+            byte[] vaultFileContent = CreateNewCryptomatorV8VaultFileContent(password, pepper);
+            File.WriteAllBytes(filePath, vaultFileContent);
         }
 
         // --- Instance Methods for Operations ---

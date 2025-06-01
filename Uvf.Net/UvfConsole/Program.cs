@@ -4,6 +4,7 @@ using UvfLib.V3;
 using UvfLib.VaultHelpers;
 using System.Diagnostics;
 using System.Linq;
+using System.Collections.Generic;
 
 namespace UvfConsole
 {
@@ -20,11 +21,36 @@ namespace UvfConsole
         private static Stopwatch _overallStopwatch = new Stopwatch();
         private static long _totalBytesProcessedOverall = 0;
 
+        // Nested class for test run verification
+        private class FileVerificationInfo
+        {
+            public string RelativePath { get; }
+            public string SourceHash { get; } // Null for directories
+            public bool IsDirectory { get; }
+            public bool ExistsInDecrypted { get; set; }
+            public string DecryptedHash { get; set; } // Null for directories, or if not found/not a file
+            public bool HashesMatch => !IsDirectory && SourceHash != null && DecryptedHash != null && SourceHash == DecryptedHash && !SourceHash.StartsWith("ERROR") && !DecryptedHash.StartsWith("ERROR");
+            public bool TypeMismatch { get; set; } // e.g. source is file, decrypted is dir
+            public bool SourceHashError => SourceHash != null && SourceHash.StartsWith("ERROR");
+            public bool DecryptedHashError => DecryptedHash != null && DecryptedHash.StartsWith("ERROR");
+
+
+            public FileVerificationInfo(string relativePath, bool isDirectory, string sourceHash = null)
+            {
+                RelativePath = relativePath;
+                IsDirectory = isDirectory;
+                SourceHash = sourceHash;
+                ExistsInDecrypted = false;
+                DecryptedHash = null;
+                TypeMismatch = false;
+            }
+        }
+
         public static void Main(string[] args)
         {
             if (args.Length == 0)
             {
-                Console.WriteLine("Usage: UvfConsole <encrypt|decrypt>");
+                Console.WriteLine("Usage: UvfConsole <encrypt|decrypt|testrun>");
                 return;
             }
 
@@ -38,19 +64,23 @@ namespace UvfConsole
             {
                 vaultFileContent = HandleEncryptMode(vaultFilePath);
                 if (vaultFileContent == null) return;
+                ProcessVault(mode, vaultFileContent);
             }
             else if (mode == "decrypt")
             {
                 vaultFileContent = HandleDecryptMode(vaultFilePath);
                 if (vaultFileContent == null) return;
+                ProcessVault(mode, vaultFileContent);
+            }
+            else if (mode == "testrun")
+            {
+                HandleTestRunMode(vaultFilePath);
             }
             else
             {
-                Console.WriteLine("Invalid mode. Use 'encrypt' or 'decrypt'.");
+                Console.WriteLine("Invalid mode. Use 'encrypt', 'decrypt', or 'testrun'.");
                 return;
             }
-
-            ProcessVault(mode, vaultFileContent);
         }
 
         private static byte[] HandleEncryptMode(string vaultFilePath)
@@ -99,6 +129,108 @@ namespace UvfConsole
             }
 
             return File.ReadAllBytes(vaultFilePath);
+        }
+
+        private static void HandleTestRunMode(string vaultFilePath)
+        {
+            Console.WriteLine("===== Starting Test Run =====");
+
+            CleanupTestDirectories();
+
+            Console.WriteLine("\n--- Test Run: Analyzing Source Directory ---");
+            var sourceItems = new Dictionary<string, FileVerificationInfo>();
+            if (Directory.Exists(SourceFolderPath))
+            {
+                CollectAndHashSourceItems(SourceFolderPath, SourceFolderPath, sourceItems);
+                Console.WriteLine($"Collected {sourceItems.Count} items (files and directories) from source.");
+            }
+            else
+            {
+                Console.WriteLine($"Source folder {SourceFolderPath} not found. Test run will proceed with empty source.");
+            }
+            Console.WriteLine("--- Test Run: Source Analysis Complete ---");
+
+
+            // Encryption Phase
+            Console.WriteLine("\n--- Test Run: Encryption Phase ---");
+            if (!Directory.Exists(SourceFolderPath))
+            {
+                Console.WriteLine($"Source folder {SourceFolderPath} does not exist. Skipping encryption phase.");
+            }
+            else
+            {
+                if (File.Exists(vaultFilePath)) File.Delete(vaultFilePath); // Ensure fresh vault file for test
+                byte[] vaultFileContentEnc = Vault.CreateNewUvfVaultFileContent(Password);
+                File.WriteAllBytes(vaultFilePath, vaultFileContentEnc);
+                Console.WriteLine("New vault file created for test run encryption.");
+
+                _totalBytesProcessedOverall = 0;
+                _overallStopwatch.Restart();
+
+                using (Vault vault = Vault.LoadUvfVault(vaultFileContentEnc, Password))
+                {
+                    DirectoryMetadata rootMetadataEnc = vault.GetRootDirectoryMetadata();
+                    string rootDirPhysicalPathEnc = Path.Combine(VaultFolderPath, vault.GetRootDirectoryPath());
+                    Directory.CreateDirectory(rootDirPhysicalPathEnc);
+
+                    _totalBytesProcessedOverall = ProcessDirectory(vault, SourceFolderPath, rootMetadataEnc, rootDirPhysicalPathEnc);
+                }
+                _overallStopwatch.Stop();
+                PrintSpeed("Test Run Encrypted", _totalBytesProcessedOverall, _overallStopwatch.Elapsed);
+            }
+            Console.WriteLine("--- Test Run: Encryption Phase Complete ---");
+
+            // Decryption Phase
+            Console.WriteLine("\n--- Test Run: Decryption Phase ---");
+            if (!File.Exists(vaultFilePath))
+            {
+                 Console.WriteLine($"Vault file {vaultFilePath} does not exist (likely because source was empty or encryption failed). Skipping decryption phase.");
+            }
+            else
+            {
+                byte[] vaultFileContentDec = File.ReadAllBytes(vaultFilePath);
+
+                _totalBytesProcessedOverall = 0;
+                _overallStopwatch.Restart();
+
+                using (Vault vault = Vault.LoadUvfVault(vaultFileContentDec, Password))
+                {
+                    string rootDirPhysicalPathDec = Path.Combine(VaultFolderPath, vault.GetRootDirectoryPath());
+                    string rootDirUvfPathDec = Path.Combine(rootDirPhysicalPathDec, "dir.uvf");
+
+                    if (!File.Exists(rootDirUvfPathDec))
+                    {
+                        Console.Error.WriteLine($"ERROR in TestRun: Root dir.uvf not found at {rootDirUvfPathDec} after encryption phase. Decryption may fail or be incomplete.");
+                        // Attempt to decrypt anyway if possible, or handle based on vault structure
+                         Directory.CreateDirectory(DecryptedFolderPath); // Ensure target exists
+                    }
+                    else
+                    {
+                        byte[] rootDirBytesDec = File.ReadAllBytes(rootDirUvfPathDec);
+                        DirectoryMetadata rootMetadataDec = vault.DecryptDirectoryMetadata(rootDirBytesDec);
+                        _totalBytesProcessedOverall = DecryptDirectory(vault, rootMetadataDec, rootDirPhysicalPathDec, DecryptedFolderPath);
+                    }
+                }
+                _overallStopwatch.Stop();
+                PrintSpeed("Test Run Decrypted", _totalBytesProcessedOverall, _overallStopwatch.Elapsed);
+            }
+            Console.WriteLine("--- Test Run: Decryption Phase Complete ---");
+
+            // Verification Phase
+            Console.WriteLine("\n--- Test Run: Verification Phase ---");
+            var unexpectedDecryptedItems = new List<string>();
+            if (Directory.Exists(DecryptedFolderPath))
+            {
+                 VerifyDecryptedItems(DecryptedFolderPath, DecryptedFolderPath, sourceItems, unexpectedDecryptedItems);
+            }
+            else
+            {
+                Console.WriteLine($"Decrypted folder {DecryptedFolderPath} not found. Skipping verification of decrypted items.");
+            }
+            Console.WriteLine("--- Test Run: Verification Phase Complete ---");
+
+            PrintTestRunSummary(sourceItems, unexpectedDecryptedItems, SourceFolderPath, DecryptedFolderPath);
+            Console.WriteLine("===== Test Run Complete =====");
         }
 
         private static void ProcessVault(string mode, byte[] vaultFileContent)
@@ -550,6 +682,270 @@ namespace UvfConsole
                     LogDirectoryTreeRecursive(entry, newIndent, true);
                 }
             }
+        }
+
+        // --- Helper methods for TestRun mode ---
+
+        private static void CleanupTestDirectories()
+        {
+            Console.WriteLine($"Cleaning up test directories: {VaultFolderPath} and {DecryptedFolderPath}");
+
+            try
+            {
+                if (Directory.Exists(VaultFolderPath))
+                {
+                    Directory.Delete(VaultFolderPath, true);
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Warning: Could not fully delete vault folder {VaultFolderPath}: {ex.Message}");
+            }
+            Directory.CreateDirectory(VaultFolderPath);
+
+            try
+            {
+                if (Directory.Exists(DecryptedFolderPath))
+                {
+                    Directory.Delete(DecryptedFolderPath, true);
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Warning: Could not fully delete decrypted folder {DecryptedFolderPath}: {ex.Message}");
+            }
+            Directory.CreateDirectory(DecryptedFolderPath);
+            Console.WriteLine("Cleanup complete.");
+        }
+
+        private static string GetRelativePath(string fullPath, string basePath)
+        {
+            if (string.IsNullOrEmpty(basePath)) return fullPath;
+
+            // Normalize base path to ensure it ends with a directory separator
+            if (!basePath.EndsWith(Path.DirectorySeparatorChar.ToString()))
+            {
+                basePath += Path.DirectorySeparatorChar;
+            }
+
+            if (fullPath.StartsWith(basePath, StringComparison.OrdinalIgnoreCase))
+            {
+                return fullPath.Substring(basePath.Length);
+            }
+            return fullPath; 
+        }
+
+        private static void CollectAndHashSourceItems(string currentItemPath, string rootBasePath, Dictionary<string, FileVerificationInfo> items)
+        {
+            // Process current item (could be the initial rootBasePath itself or a subdirectory)
+            if (Directory.Exists(currentItemPath))
+            {
+                // Add this directory to items if it's not the root itself being processed with an empty relative path
+                string dirRelativePath = GetRelativePath(currentItemPath, rootBasePath);
+                if (!string.IsNullOrEmpty(dirRelativePath) && !items.ContainsKey(dirRelativePath))
+                {
+                    items.Add(dirRelativePath, new FileVerificationInfo(dirRelativePath, true));
+                }
+
+                // Process files in current directory
+                foreach (string filePath in Directory.GetFiles(currentItemPath))
+                {
+                    string fileRelativePath = GetRelativePath(filePath, rootBasePath);
+                    string hash = null;
+                    try
+                    {
+                        using (FileStream fs = File.OpenRead(filePath))
+                        {
+                            hash = FastHash.GetHash(fs);
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        Console.WriteLine($"ERROR hashing source file {filePath}: {ex.Message}");
+                        hash = $"ERROR_HASHING: {ex.Message}";
+                    }
+                    if (!items.ContainsKey(fileRelativePath)) // Should not happen if logic is correct, but safeguard
+                    {
+                         items.Add(fileRelativePath, new FileVerificationInfo(fileRelativePath, false, hash));
+                    }
+                }
+
+                // Process subdirectories recursively
+                foreach (string subDirPath in Directory.GetDirectories(currentItemPath))
+                {
+                    CollectAndHashSourceItems(subDirPath, rootBasePath, items);
+                }
+            }
+            // If currentItemPath is a file (should not happen with initial call), it's an error in calling logic.
+            // This function is designed to be called with a directory path.
+        }
+        
+        private static void VerifyDecryptedItems(string currentItemPath, string rootDecryptedPath, Dictionary<string, FileVerificationInfo> sourceItems, List<string> unexpectedItems)
+        {
+            if (Directory.Exists(currentItemPath))
+            {
+                string dirRelativePath = GetRelativePath(currentItemPath, rootDecryptedPath);
+
+                if (!string.IsNullOrEmpty(dirRelativePath)) // Don't process the root decrypted folder itself as an item to verify
+                {
+                    if (sourceItems.TryGetValue(dirRelativePath, out var dirInfo))
+                    {
+                        if (dirInfo.IsDirectory)
+                        {
+                            dirInfo.ExistsInDecrypted = true;
+                        }
+                        else // Source was file, decrypted is dir
+                        {
+                            dirInfo.ExistsInDecrypted = true; // It exists, but...
+                            dirInfo.TypeMismatch = true;
+                        }
+                    }
+                    else
+                    {
+                        unexpectedItems.Add($"Unexpected directory: {dirRelativePath}");
+                    }
+                }
+
+                // Process files
+                foreach (string filePath in Directory.GetFiles(currentItemPath))
+                {
+                    string fileRelativePath = GetRelativePath(filePath, rootDecryptedPath);
+                    string hash = null;
+                    try
+                    {
+                        using (FileStream fs = File.OpenRead(filePath))
+                        {
+                            hash = FastHash.GetHash(fs);
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        Console.WriteLine($"ERROR hashing decrypted file {filePath}: {ex.Message}");
+                        hash = $"ERROR_HASHING: {ex.Message}";
+                    }
+
+                    if (sourceItems.TryGetValue(fileRelativePath, out var fileInfo))
+                    {
+                        if (!fileInfo.IsDirectory)
+                        {
+                            fileInfo.ExistsInDecrypted = true;
+                            fileInfo.DecryptedHash = hash;
+                        }
+                        else // Source was dir, decrypted is file
+                        {
+                            fileInfo.ExistsInDecrypted = true; // It exists, but...
+                            fileInfo.TypeMismatch = true;
+                            fileInfo.DecryptedHash = hash; // Store hash anyway if needed for debug
+                        }
+                    }
+                    else
+                    {
+                        unexpectedItems.Add($"Unexpected file: {fileRelativePath} (Hash: {hash})");
+                    }
+                }
+
+                // Process subdirectories
+                foreach (string subDirPath in Directory.GetDirectories(currentItemPath))
+                {
+                    VerifyDecryptedItems(subDirPath, rootDecryptedPath, sourceItems, unexpectedItems);
+                }
+            }
+        }
+
+        private static void PrintTestRunSummary(Dictionary<string, FileVerificationInfo> sourceItems, List<string> unexpectedItems, string sourceBasePath, string decryptedBasePath)
+        {
+            Console.WriteLine("\n--- Test Run Summary ---");
+            bool allGood = true;
+            int missingCount = 0;
+            int hashMismatchCount = 0;
+            int typeMismatchCount = 0;
+            int sourceHashErrorCount = 0;
+            int decryptedHashErrorCount = 0;
+
+            if (!Directory.Exists(sourceBasePath) && sourceItems.Any())
+            {
+                 Console.WriteLine($"WARNING: Source path {sourceBasePath} does not exist, but source items were somehow collected. This is unexpected.");
+            }
+            if (!Directory.Exists(decryptedBasePath) && (sourceItems.Any(si => si.Value.ExistsInDecrypted) || unexpectedItems.Any() ))
+            {
+                 Console.WriteLine($"WARNING: Decrypted path {decryptedBasePath} does not exist, but decrypted items were somehow processed. This is unexpected.");
+            }
+
+
+            foreach (var entry in sourceItems.OrderBy(kvp => kvp.Key))
+            {
+                var info = entry.Value;
+                string itemType = info.IsDirectory ? "Directory" : "File";
+
+                if (info.SourceHashError && !info.IsDirectory)
+                {
+                    Console.WriteLine($"SOURCE HASH ERROR: [{info.RelativePath}] - {info.SourceHash}");
+                    allGood = false; // Hashing error is a failure
+                    sourceHashErrorCount++;
+                }
+
+                if (!info.ExistsInDecrypted)
+                {
+                    Console.WriteLine($"MISSING in decrypted: [{info.RelativePath}] (Type: {itemType})");
+                    allGood = false;
+                    missingCount++;
+                }
+                else // Item exists in decrypted
+                {
+                    if (info.TypeMismatch)
+                    {
+                        Console.WriteLine($"TYPE MISMATCH: [{info.RelativePath}] Source is {itemType}, decrypted is {(info.IsDirectory ? "File" : "Directory")}.");
+                        allGood = false;
+                        typeMismatchCount++;
+                    }
+                    
+                    if (!info.IsDirectory) // It's a file and it exists
+                    {
+                        if(info.DecryptedHashError)
+                        {
+                            Console.WriteLine($"DECRYPTED HASH ERROR: [{info.RelativePath}] - {info.DecryptedHash}");
+                            allGood = false;
+                            decryptedHashErrorCount++;
+                        }
+                        else if (!info.HashesMatch && !info.SourceHashError) // Only check hash if no errors in hashing
+                        {
+                            Console.WriteLine($"HASH MISMATCH: [{info.RelativePath}]");
+                            // Console.WriteLine($"  Source Hash: {info.SourceHash}, Decrypted Hash: {info.DecryptedHash}");
+                            allGood = false;
+                            hashMismatchCount++;
+                        }
+                    }
+                }
+            }
+
+            if (unexpectedItems.Any())
+            {
+                allGood = false;
+                Console.WriteLine($"\nUnexpected items found in decrypted folder ({decryptedBasePath}):");
+                foreach (var unexpectedPath in unexpectedItems.OrderBy(p => p))
+                {
+                    Console.WriteLine($"  - {unexpectedPath}");
+                }
+            }
+
+            Console.WriteLine("\n--- Overall Result ---");
+            if (allGood)
+            {
+                Console.WriteLine("SUCCESS: All source items exist in decrypted folder with matching content and types (or source/decrypted was empty as expected).");
+            }
+            else
+            {
+                Console.WriteLine("FAILURE: Discrepancies found.");
+                if (missingCount > 0) Console.WriteLine($"  Missing items in decrypted: {missingCount}");
+                if (hashMismatchCount > 0) Console.WriteLine($"  Hash mismatches: {hashMismatchCount}");
+                if (typeMismatchCount > 0) Console.WriteLine($"  Type mismatches: {typeMismatchCount}");
+                if (unexpectedItems.Count > 0) Console.WriteLine($"  Unexpected items in decrypted: {unexpectedItems.Count}");
+                if (sourceHashErrorCount > 0) Console.WriteLine($"  Errors hashing source files: {sourceHashErrorCount}");
+                if (decryptedHashErrorCount > 0) Console.WriteLine($"  Errors hashing decrypted files: {decryptedHashErrorCount}");
+            }
+            Console.WriteLine($"Source Path: {sourceBasePath}");
+            Console.WriteLine($"Decrypted Path: {decryptedBasePath}");
+            Console.WriteLine("--- End of Test Run Summary ---");
         }
     }
 } 
