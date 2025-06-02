@@ -15,7 +15,7 @@ using System.Security.Cryptography;
 using System.Text;
 // using System.Text.Json; // No longer directly needed here for payload construction
 using UvfLib.Api; // For UVFMasterkey for type hinting if needed
-using UvfLib.Common; // For CryptographicOperations
+using UvfLib.Common; // For CryptographicOperations and MasterkeyFileAccess
 using UvfLib.Jwe; // For JweVaultManager and UvfMasterkeyPayload
 using UvfLib.V3; // For UVFMasterkeyImpl
 
@@ -34,41 +34,17 @@ namespace UvfLib.VaultHelpers
         public static byte[] CreateNewVaultKeyFileContentInternal(string password, byte[]? pepper)
         {
             if (string.IsNullOrEmpty(password)) throw new ArgumentNullException(nameof(password));
-            // Pepper usage remains a point for future consideration if needed before PBKDF2.
-
-            byte[]? masterKeyBytes = null;
-            byte[]? hmacKeyBytes = null;
-            UVFMasterkey? uvfKey = null;
-
+            
+            // For Cryptomator V8, we need to create a traditional JSON masterkey file, not JWE
+            // Use MasterkeyFileAccess to create the proper format
             try
             {
-                // 1. Generate new raw key material
-                masterKeyBytes = RandomNumberGenerator.GetBytes(32); // AES-256 key
-                hmacKeyBytes = RandomNumberGenerator.GetBytes(32);   // HMAC-SHA256 key
-
-                // 2. Create a UVFMasterkeyImpl instance from the raw keys.
-                // This instance will represent a new master key set.
-                // We use the more explicit constructor or static factory method if available.
-                // Using the constructor that takes individual keys:
-                uvfKey = new UVFMasterkeyImpl(masterKeyBytes, hmacKeyBytes, seeds: null, kdfSalt: null, rootDirIdBase64: null, initialSeed: 0, latestSeed: 0);
-                // Or, using a static factory like UVFMasterkeyImpl.CreateFromRaw(masterKeyBytes, hmacKeyBytes);
-                // depending on which is preferred and how it initializes default seeds/versions internally.
-
-                // 3. Get the UvfMasterkeyPayload from the new UVFMasterkeyImpl instance.
-                // This requires UVFMasterkeyImpl to have the ToMasterkeyPayload() method.
-                UvfMasterkeyPayload payload = ((UVFMasterkeyImpl)uvfKey).ToMasterkeyPayload();
-            
-                // 4. Create the JWE string using JweVaultManager
-                string jweString = JweVaultManager.CreateVault(payload, password);
-                return Encoding.UTF8.GetBytes(jweString);
+                var masterkeyFile = MasterkeyFileAccess.CreateFromPassphrase(password);
+                return masterkeyFile.ToJson();
             }
-            finally
+            catch (Exception ex)
             {
-                // Ensure sensitive key material is zeroed out
-                if (masterKeyBytes != null) System.Security.Cryptography.CryptographicOperations.ZeroMemory(masterKeyBytes);
-                if (hmacKeyBytes != null) System.Security.Cryptography.CryptographicOperations.ZeroMemory(hmacKeyBytes);
-                // The UVFMasterkeyImpl instance should handle zeroing its internal keys upon disposal if it implements IDisposable.
-                (uvfKey as IDisposable)?.Dispose(); 
+                throw new CryptoException("Failed to create Cryptomator V8 vault file content", ex);
             }
         }
 

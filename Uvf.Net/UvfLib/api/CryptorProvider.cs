@@ -43,6 +43,7 @@ namespace UvfLib.Api
             return scheme switch
             {
                 Scheme.UVF_DRAFT => new V3.CryptorProviderImpl(),
+                Scheme.SIV_GCM => new CryptomatorV8.CryptorProviderImpl(),
                 _ => throw new NotSupportedException($"Scheme not supported: {scheme}")
             };
         }

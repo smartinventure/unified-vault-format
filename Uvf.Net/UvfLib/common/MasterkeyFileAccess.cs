@@ -150,56 +150,73 @@ namespace UvfLib.Common
                 throw new ArgumentException("Passphrase cannot be empty", nameof(passphrase));
             }
 
-            // Generate random masterkey
-            byte[] masterkey = new byte[KEY_LEN_BYTES];
+            // Generate random masterkey (combined encryption + MAC key)
+            byte[] combinedMasterkey = new byte[KEY_LEN_BYTES + MAC_LEN_BYTES]; // 64 bytes total
             using (var rng = RandomNumberGenerator.Create())
             {
-                rng.GetBytes(masterkey);
+                rng.GetBytes(combinedMasterkey);
             }
 
-            // Generate random nonce
-            byte[] nonce = new byte[NONCE_LEN_BYTES];
+            // Split the combined key into encryption and MAC keys
+            byte[] encKey = new byte[KEY_LEN_BYTES];
+            byte[] macKey = new byte[MAC_LEN_BYTES];
+            Buffer.BlockCopy(combinedMasterkey, 0, encKey, 0, KEY_LEN_BYTES);
+            Buffer.BlockCopy(combinedMasterkey, KEY_LEN_BYTES, macKey, 0, MAC_LEN_BYTES);
+
+            // Generate random salt
+            byte[] salt = new byte[NONCE_LEN_BYTES];
             using (var rng = RandomNumberGenerator.Create())
             {
-                rng.GetBytes(nonce);
+                rng.GetBytes(salt);
             }
 
-            var masterkeyFile = CreateNew(masterkey, costParam, blockSize, parallelism);
+            var masterkeyFile = CreateNew(combinedMasterkey, costParam, blockSize, parallelism);
 
             try
             {
                 // Derive key-encryption key from passphrase
                 byte[] passphraseDerivedKey = DerivePassphraseKey(
                     Encoding.UTF8.GetBytes(passphrase),
-                    nonce,
-                    null,
+                    salt,
+                    null, // No pepper for static method
                     costParam,
                     blockSize,
                     parallelism);
 
-                // Split derived key
+                // Use the first part as KEK for key wrapping
                 byte[] kek = new byte[KEY_LEN_BYTES];
-                byte[] macKey = new byte[MAC_LEN_BYTES];
-
                 Buffer.BlockCopy(passphraseDerivedKey, 0, kek, 0, KEY_LEN_BYTES);
-                Buffer.BlockCopy(passphraseDerivedKey, KEY_LEN_BYTES, macKey, 0, MAC_LEN_BYTES);
 
-                // Encrypt masterkey with kek
-                byte[] encryptedMasterkey = EncryptMasterkey(masterkey, kek);
+                // Wrap (encrypt) both keys separately using AES Key Wrap
+                byte[] wrappedEncKey = AesKeyWrap.Wrap(kek, encKey);
+                byte[] wrappedMacKey = AesKeyWrap.Wrap(kek, macKey);
 
-                // Calculate MAC
-                byte[] mac = CalculateMac(macKey, encryptedMasterkey);
+                // Calculate version MAC using the raw MAC key
+                byte[] versionMac;
+                using (var hmac = new HMACSHA256(macKey))
+                {
+                    // Convert vault version to big-endian bytes
+                    byte[] versionBytes = BitConverter.GetBytes(masterkeyFile.VaultVersion);
+                    if (BitConverter.IsLittleEndian)
+                    {
+                        Array.Reverse(versionBytes);
+                    }
+                    versionMac = hmac.ComputeHash(versionBytes);
+                }
 
-                // Store in masterkey file
-                masterkeyFile.PrimaryMasterkey = Convert.ToBase64String(encryptedMasterkey);
-                masterkeyFile.PrimaryMasterkeyNonce = Convert.ToBase64String(nonce);
-                masterkeyFile.PrimaryMasterkeyMac = Convert.ToBase64String(mac);
+                // Store in the format expected by Unlock method
+                masterkeyFile.ScryptSalt = salt;
+                masterkeyFile.EncMasterKey = wrappedEncKey;
+                masterkeyFile.MacMasterKey = wrappedMacKey;
+                masterkeyFile.VersionMac = versionMac;
 
                 return masterkeyFile;
             }
             finally
             {
-                CryptographicOperations.ZeroMemory(masterkey);
+                CryptographicOperations.ZeroMemory(combinedMasterkey);
+                CryptographicOperations.ZeroMemory(encKey);
+                CryptographicOperations.ZeroMemory(macKey);
             }
         }
 
@@ -280,11 +297,9 @@ namespace UvfLib.Common
                 Buffer.BlockCopy(pepper, 0, combinedSalt, salt.Length, pepper.Length);
             }
 
-            // !! Correction: Java code passes N directly, not logN !!
-            // Do NOT convert costParamN_or_LogN assuming it's logN.
-            // Pass it directly as the N parameter to BouncyCastle.
-            // int costParamN = 1 << costParamN_or_LogN; 
-            int costParamN = costParamN_or_LogN; // Use the value directly as N
+            // The cost parameter is stored as log2(N), so we need to convert it to N
+            // For example: costParamN_or_LogN = 17 means N = 2^17 = 131072
+            int costParamN = 1 << costParamN_or_LogN; // Convert log2(N) to N
             int derivedKeyLength = KEY_LEN_BYTES + MAC_LEN_BYTES; // 64 bytes
 
             try

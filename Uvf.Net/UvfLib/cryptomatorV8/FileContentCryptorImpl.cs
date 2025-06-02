@@ -85,7 +85,7 @@ namespace UvfLib.CryptomatorV8
             }
 
             FileHeaderImpl headerImpl = FileHeaderImpl.Cast(header);
-            using var contentKey = headerImpl.GetPayload().GetContentKey();
+            var contentKey = headerImpl.GetPayload().GetContentKey();
 
             // Create nonce: 8 bytes chunk number (big endian) + 4 random bytes
             byte[] nonce = new byte[Constants.GCM_NONCE_SIZE];
@@ -160,7 +160,7 @@ namespace UvfLib.CryptomatorV8
             }
 
             FileHeaderImpl headerImpl = FileHeaderImpl.Cast(header);
-            using var contentKey = headerImpl.GetPayload().GetContentKey();
+            var contentKey = headerImpl.GetPayload().GetContentKey();
 
             var span = ciphertextChunk.Span;
             

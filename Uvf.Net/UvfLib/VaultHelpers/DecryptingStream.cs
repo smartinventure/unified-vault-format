@@ -184,17 +184,11 @@ namespace UvfLib.VaultHelpers
             return totalBytesRead;
         }
 
-        private bool ReadAndDecryptNextChunk()
+        private bool ReadAndDecryptNextChunk(bool incrementChunkNumber = true)
         {
             if (_endOfStreamReached) return false;
 
-#if DEBUG
-            _metrics.StartTiming();
-#endif
             int bytesRead = ReadUpTo(_inputStream, _ciphertextChunkBuffer, 0, CIPHERTEXT_CHUNK_SIZE);
-#if DEBUG
-            _metrics.StopTiming(ref _metrics.TotalOperation1TimeMs); // StreamRead
-#endif
 
             if (bytesRead == 0)
             {
@@ -211,14 +205,11 @@ namespace UvfLib.VaultHelpers
                 throw new InvalidCiphertextException($"Incomplete ciphertext chunk read (read {bytesRead}, needed at least {minCiphertextSize}). Possible truncation or corruption.");
             }
 
-#if DEBUG
-            _metrics.StartTiming();
-#endif
+            // CRITICAL FIX: Clear the plaintext buffer before decryption to prevent leftover data
+            _plaintextChunkBuffer.Span.Clear();
+
             BinaryPrimitives.WriteInt64BigEndian(_aadBuffer.AsSpan(0, 8), _currentChunkNumber);
-#if DEBUG
-            _metrics.StopTiming(ref _metrics.TotalOperation2TimeMs); // AADPrep
-            _metrics.StartTiming();
-#endif
+
             _plaintextBufferLength = ((V3.FileContentCryptorImpl)_cryptor.FileContentCryptor()).DecryptChunk(
                 _fileContentAesGcm,
                 new ReadOnlyMemory<byte>(_ciphertextChunkBuffer, 0, bytesRead),
@@ -226,17 +217,19 @@ namespace UvfLib.VaultHelpers
                 _currentChunkNumber, 
                 _aadBuffer 
             );
-#if DEBUG
-            _metrics.StopTiming(ref _metrics.TotalOperation3TimeMs); // DecryptOp
-            _metrics.IncrementChunksProcessed();
-#endif
-            _currentChunkNumber++; 
 
             _plaintextBufferPosition = 0;
             if (bytesRead < CIPHERTEXT_CHUNK_SIZE)
             {
                 _endOfStreamReached = true;
             }
+            
+            // FIXED: Only increment chunk number if requested (for sequential reads)
+            if (incrementChunkNumber)
+            {
+                _currentChunkNumber++; 
+            }
+            
             return true;
         }
 
@@ -388,14 +381,14 @@ namespace UvfLib.VaultHelpers
             long targetPosition = GetChunkStartPosition(targetChunkNumber);
             _inputStream.Position = targetPosition;
 
-            // Reset state
+            // Reset state to target chunk
             _currentChunkNumber = targetChunkNumber;
             _plaintextBufferPosition = 0;
             _plaintextBufferLength = 0;
             _endOfStreamReached = false;
 
-            // Read and decrypt the chunk
-            ReadAndDecryptNextChunk();
+            // Read and decrypt the chunk WITHOUT incrementing chunk number
+            ReadAndDecryptNextChunk(incrementChunkNumber: false);
 
 #if DEBUG
             _metrics.StopTiming(ref _metrics.TotalOperation4TimeMs); // Seek
@@ -404,6 +397,5 @@ namespace UvfLib.VaultHelpers
 
         public override void SetLength(long value) => throw new NotSupportedException("DecryptingStream length cannot be set.");
         public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException("DecryptingStream does not support writing.");
-
     }
 }
