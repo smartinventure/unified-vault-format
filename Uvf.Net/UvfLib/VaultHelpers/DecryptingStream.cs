@@ -58,10 +58,10 @@ namespace UvfLib.VaultHelpers
 #if DEBUG
             _metrics = new PerformanceMetrics("DecryptingStream")
             {
-                Operation1Name = "StreamRead",
-                Operation2Name = "AADPrep",
+                Operation1Name = "NonceExt",
+                Operation2Name = "AADPrep", 
                 Operation3Name = "DecryptOp",
-                Operation4Name = "Seek" // Added seek operation tracking
+                Operation4Name = "BuffCopy"
             };
 #endif
 
@@ -69,14 +69,8 @@ namespace UvfLib.VaultHelpers
             if (_cryptor.FileHeaderCryptor() == null || _cryptor.FileContentCryptor() == null)
                 throw new InvalidOperationException("Cryptor not fully initialized for file operations.");
 
-            // Calculate virtual length if input stream supports seeking
-            if (_inputStream.CanSeek)
-            {
-                long encryptedLength = _inputStream.Length;
-                _virtualLength = CalculateDecryptedLength(encryptedLength);
-            }
-
-            // Allocate buffers using the constants
+            // Calculate virtual length
+            _virtualLength = CalculateDecryptedLength(_inputStream.Length);
             _ciphertextChunkBuffer = new byte[CIPHERTEXT_CHUNK_SIZE];
             _plaintextChunkBuffer = new Memory<byte>(new byte[PLAINTEXT_CHUNK_SIZE]);
 
@@ -89,15 +83,45 @@ namespace UvfLib.VaultHelpers
             }
             _fileHeader = _cryptor.FileHeaderCryptor().DecryptHeader(encryptedHeader);
 
-            // 1.1 Initialize AesGcm for file content
-            var fileContentKeyBytes = ((V3.FileHeaderImpl)_fileHeader).GetContentKey().GetEncoded();
-            _fileContentAesGcm = new AesGcm(fileContentKeyBytes);
-            // Assuming DestroyableSecretKey.GetEncoded() returns a copy, the original within FileHeader is managed by its Dispose.
-
-            // Initialize AAD buffer: 8 bytes for chunk number + header nonce length
-            ReadOnlySpan<byte> headerNonce = ((V3.FileHeaderImpl)_fileHeader).GetNonce();
-            _aadBuffer = new byte[8 + headerNonce.Length];
-            headerNonce.CopyTo(_aadBuffer.AsSpan(8)); // Copy header nonce to the latter part of AAD buffer
+            // Handle both V3 and CryptomatorV8 header types
+            if (_fileHeader is V3.FileHeaderImpl v3Header)
+            {
+                // V3 implementation
+                var fileContentKeyBytes = v3Header.GetContentKey().GetEncoded();
+                _fileContentAesGcm = new AesGcm(fileContentKeyBytes);
+                
+                // Initialize AAD buffer: 8 bytes for chunk number + header nonce length
+                ReadOnlySpan<byte> headerNonce = v3Header.GetNonce();
+                _aadBuffer = new byte[8 + headerNonce.Length];
+                headerNonce.CopyTo(_aadBuffer.AsSpan(8)); // Copy header nonce to the latter part of AAD buffer
+            }
+            else if (_fileHeader is CryptomatorV8.FileHeaderImpl v8Header)
+            {
+                // CryptomatorV8 implementation - copy key bytes to prevent destruction issues
+                var payload = v8Header.GetPayload();
+                var contentKey = payload.GetContentKey();
+                
+                if (contentKey.IsDestroyed)
+                {
+                    throw new InvalidOperationException("Content key has been destroyed before use");
+                }
+                
+                // Make a copy of the key bytes to prevent access after destruction
+                var originalBytes = contentKey.GetEncoded();
+                byte[] fileContentKeyBytes = new byte[originalBytes.Length];
+                Buffer.BlockCopy(originalBytes, 0, fileContentKeyBytes, 0, originalBytes.Length);
+                
+                _fileContentAesGcm = new AesGcm(fileContentKeyBytes);
+                
+                // Initialize AAD buffer: 8 bytes for chunk number + header nonce length  
+                ReadOnlySpan<byte> headerNonce = v8Header.GetNonce();
+                _aadBuffer = new byte[8 + headerNonce.Length];
+                headerNonce.CopyTo(_aadBuffer.AsSpan(8)); // Copy header nonce to the latter part of AAD buffer
+            }
+            else
+            {
+                throw new NotSupportedException($"Unsupported FileHeader type: {_fileHeader.GetType().FullName}");
+            }
         }
 
         private long CalculateDecryptedLength(long encryptedLength)
@@ -210,13 +234,45 @@ namespace UvfLib.VaultHelpers
 
             BinaryPrimitives.WriteInt64BigEndian(_aadBuffer.AsSpan(0, 8), _currentChunkNumber);
 
-            _plaintextBufferLength = ((V3.FileContentCryptorImpl)_cryptor.FileContentCryptor()).DecryptChunk(
-                _fileContentAesGcm,
-                new ReadOnlyMemory<byte>(_ciphertextChunkBuffer, 0, bytesRead),
-                _plaintextChunkBuffer,
-                _currentChunkNumber, 
-                _aadBuffer 
-            );
+            // Handle both V3 and CryptomatorV8 implementations
+            if (_cryptor.FileContentCryptor() is V3.FileContentCryptorImpl v3Cryptor)
+            {
+                // V3 implementation
+                _plaintextBufferLength = v3Cryptor.DecryptChunk(
+                    _fileContentAesGcm,
+                    new ReadOnlyMemory<byte>(_ciphertextChunkBuffer, 0, bytesRead),
+                    _plaintextChunkBuffer,
+                    _currentChunkNumber, 
+                    _aadBuffer 
+                );
+            }
+            else if (_cryptor.FileContentCryptor() is CryptomatorV8.FileContentCryptorImpl v8Cryptor)
+            {
+                // CryptomatorV8 implementation - use same approach as V3
+                // Extract nonce from the beginning of ciphertext
+                byte[] nonce = new byte[CryptomatorV8.Constants.GCM_NONCE_SIZE];
+                Buffer.BlockCopy(_ciphertextChunkBuffer, 0, nonce, 0, CryptomatorV8.Constants.GCM_NONCE_SIZE);
+                
+                // Extract ciphertext and tag
+                int ciphertextLength = bytesRead - CryptomatorV8.Constants.GCM_NONCE_SIZE - CryptomatorV8.Constants.GCM_TAG_SIZE;
+                byte[] ciphertext = new byte[ciphertextLength];
+                byte[] tag = new byte[CryptomatorV8.Constants.GCM_TAG_SIZE];
+                
+                Buffer.BlockCopy(_ciphertextChunkBuffer, CryptomatorV8.Constants.GCM_NONCE_SIZE, ciphertext, 0, ciphertextLength);
+                Buffer.BlockCopy(_ciphertextChunkBuffer, CryptomatorV8.Constants.GCM_NONCE_SIZE + ciphertextLength, tag, 0, CryptomatorV8.Constants.GCM_TAG_SIZE);
+                
+                // Decrypt using AES-GCM directly (same approach as EncryptingStream)
+                byte[] plaintext = new byte[ciphertextLength];
+                _fileContentAesGcm.Decrypt(nonce, ciphertext, tag, plaintext);
+                
+                // Copy plaintext to buffer
+                plaintext.CopyTo(_plaintextChunkBuffer.Span);
+                _plaintextBufferLength = plaintext.Length;
+            }
+            else
+            {
+                throw new NotSupportedException($"Unsupported FileContentCryptor type: {_cryptor.FileContentCryptor().GetType().FullName}");
+            }
 
             _plaintextBufferPosition = 0;
             if (bytesRead < CIPHERTEXT_CHUNK_SIZE)
