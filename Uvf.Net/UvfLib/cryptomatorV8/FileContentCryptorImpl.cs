@@ -74,29 +74,30 @@ namespace UvfLib.CryptomatorV8
         /// Encrypts a chunk of data using AES-GCM.
         /// </summary>
         /// <param name="cleartextChunk">The plaintext chunk</param>
-        /// <param name="chunkNumber">The chunk number (for nonce derivation)</param>
+        /// <param name="chunkNumber">The chunk number (used for nonce generation)</param>
         /// <param name="header">The file header containing the content key</param>
         /// <returns>The encrypted chunk (nonce + ciphertext + tag)</returns>
         public Memory<byte> EncryptChunk(ReadOnlyMemory<byte> cleartextChunk, long chunkNumber, FileHeader header)
         {
             if (cleartextChunk.Length > Constants.PAYLOAD_SIZE)
             {
-                throw new ArgumentException($"Chunk too large: {cleartextChunk.Length} bytes, max: {Constants.PAYLOAD_SIZE}");
+                throw new ArgumentException($"Cleartext chunk too large: {cleartextChunk.Length} bytes, max: {Constants.PAYLOAD_SIZE}");
             }
 
             FileHeaderImpl headerImpl = FileHeaderImpl.Cast(header);
             var contentKey = headerImpl.GetPayload().GetContentKey();
 
-            // Create nonce: 8 bytes chunk number (big endian) + 4 random bytes
+            // Generate random nonce
             byte[] nonce = new byte[Constants.GCM_NONCE_SIZE];
-            BinaryPrimitives.WriteInt64BigEndian(nonce.AsSpan(0, 8), chunkNumber);
-            _random.GetBytes(nonce.AsSpan(8, 4));
+            _random.GetBytes(nonce);
 
-            // Prepare result buffer
-            byte[] result = new byte[Constants.GCM_NONCE_SIZE + cleartextChunk.Length + Constants.GCM_TAG_SIZE];
-            
-            // Copy nonce to result
-            Buffer.BlockCopy(nonce, 0, result, 0, Constants.GCM_NONCE_SIZE);
+            // Construct AAD according to specification: bigEndian(chunkNumber) . headerNonce
+            byte[] chunkNumberBytes = new byte[8];
+            BinaryPrimitives.WriteInt64BigEndian(chunkNumberBytes, chunkNumber);
+            byte[] headerNonce = headerImpl.GetNonce();
+            byte[] aad = new byte[chunkNumberBytes.Length + headerNonce.Length];
+            Array.Copy(chunkNumberBytes, 0, aad, 0, chunkNumberBytes.Length);
+            Array.Copy(headerNonce, 0, aad, chunkNumberBytes.Length, headerNonce.Length);
 
             try
             {
@@ -105,22 +106,23 @@ namespace UvfLib.CryptomatorV8
                 byte[] tag = new byte[Constants.GCM_TAG_SIZE];
 
                 using var gcmAlg = new AesGcm(contentKey.GetEncoded());
-                gcmAlg.Encrypt(nonce, cleartextChunk.Span, ciphertext, tag);
+                gcmAlg.Encrypt(nonce, cleartextChunk.Span, ciphertext, tag, aad);
 
-                // Copy ciphertext and tag to result
-                Buffer.BlockCopy(ciphertext, 0, result, Constants.GCM_NONCE_SIZE, ciphertext.Length);
-                Buffer.BlockCopy(tag, 0, result, Constants.GCM_NONCE_SIZE + ciphertext.Length, Constants.GCM_TAG_SIZE);
+                // Combine all components: nonce + ciphertext + tag
+                byte[] result = new byte[Constants.GCM_NONCE_SIZE + cleartextChunk.Length + Constants.GCM_TAG_SIZE];
+                Array.Copy(nonce, 0, result, 0, Constants.GCM_NONCE_SIZE);
+                Array.Copy(ciphertext, 0, result, Constants.GCM_NONCE_SIZE, ciphertext.Length);
+                Array.Copy(tag, 0, result, Constants.GCM_NONCE_SIZE + ciphertext.Length, Constants.GCM_TAG_SIZE);
 
-                // Clear temporary arrays
-                UvfLib.Common.CryptographicOperations.ZeroMemory(ciphertext);
-                UvfLib.Common.CryptographicOperations.ZeroMemory(tag);
+                return new Memory<byte>(result);
             }
             finally
             {
+                // Clear sensitive data
                 UvfLib.Common.CryptographicOperations.ZeroMemory(nonce);
+                UvfLib.Common.CryptographicOperations.ZeroMemory(chunkNumberBytes);
+                UvfLib.Common.CryptographicOperations.ZeroMemory(aad);
             }
-
-            return new Memory<byte>(result);
         }
 
         /// <summary>
@@ -172,12 +174,13 @@ namespace UvfLib.CryptomatorV8
 
             try
             {
-                // Verify chunk number matches nonce
-                long nonceChunkNumber = BinaryPrimitives.ReadInt64BigEndian(nonce.AsSpan(0, 8));
-                if (nonceChunkNumber != chunkNumber)
-                {
-                    throw new AuthenticationFailedException($"Chunk number mismatch: expected {chunkNumber}, found {nonceChunkNumber}");
-                }
+                // Construct AAD according to specification: bigEndian(chunkNumber) . headerNonce
+                byte[] chunkNumberBytes = new byte[8];
+                BinaryPrimitives.WriteInt64BigEndian(chunkNumberBytes, chunkNumber);
+                byte[] headerNonce = headerImpl.GetNonce();
+                byte[] aad = new byte[chunkNumberBytes.Length + headerNonce.Length];
+                Array.Copy(chunkNumberBytes, 0, aad, 0, chunkNumberBytes.Length);
+                Array.Copy(headerNonce, 0, aad, chunkNumberBytes.Length, headerNonce.Length);
 
                 // Decrypt using AES-GCM
                 byte[] decryptedPayload = new byte[payloadLength];
@@ -185,7 +188,7 @@ namespace UvfLib.CryptomatorV8
                 try
                 {
                     using var gcmAlg = new AesGcm(contentKey.GetEncoded());
-                    gcmAlg.Decrypt(nonce, encryptedPayload, tag, decryptedPayload);
+                    gcmAlg.Decrypt(nonce, encryptedPayload, tag, decryptedPayload, aad);
                 }
                 catch (CryptographicException ex)
                 {
@@ -196,7 +199,7 @@ namespace UvfLib.CryptomatorV8
             }
             finally
             {
-                // Clear temporary arrays
+                // Clear sensitive data
                 UvfLib.Common.CryptographicOperations.ZeroMemory(nonce);
                 UvfLib.Common.CryptographicOperations.ZeroMemory(encryptedPayload);
                 UvfLib.Common.CryptographicOperations.ZeroMemory(tag);

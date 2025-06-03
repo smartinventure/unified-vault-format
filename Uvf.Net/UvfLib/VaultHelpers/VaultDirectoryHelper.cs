@@ -73,22 +73,43 @@ namespace UvfLib.VaultHelpers
         // --- Vault Format Specific Helpers ---
 
         /// <summary>
-        /// Gets the directory metadata filename based on the vault format.
+        /// Gets the directory metadata filename based on the vault format and directory type.
         /// </summary>
         /// <param name="cryptor">The cryptor instance</param>
+        /// <param name="directoryMetadata">The directory metadata (optional, used to determine if it's root directory)</param>
         /// <returns>The directory metadata filename</returns>
-        public static string GetDirectoryMetadataFilename(Cryptor cryptor)
+        public static string GetDirectoryMetadataFilename(Cryptor cryptor, DirectoryMetadata directoryMetadata = null)
         {
             if (cryptor?.DirectoryContentCryptor() == null) throw new InvalidOperationException("Directory cryptor not available.");
             
             // Check if this is a Cryptomator v8 cryptor
             if (cryptor.DirectoryContentCryptor().GetType().FullName?.Contains("CryptomatorV8") == true)
             {
-                return "dirid.c9r";
+                // For Cryptomator v8, differentiate between root and non-root directories
+                if (directoryMetadata != null)
+                {
+                    var rootMetadata = cryptor.DirectoryContentCryptor().RootDirectoryMetadata();
+                    if (directoryMetadata.Equals(rootMetadata))
+                    {
+                        return "dirid.c9r"; // Root directory uses dirid.c9r
+                    }
+                }
+                return "dir.c9r"; // Subdirectories use dir.c9r
             }
             
             // Default to UVF format
             return "dir.uvf";
+        }
+
+        /// <summary>
+        /// Gets the directory metadata filename based on the vault format.
+        /// For backwards compatibility, this assumes non-root directory for Cryptomator v8.
+        /// </summary>
+        /// <param name="cryptor">The cryptor instance</param>
+        /// <returns>The directory metadata filename</returns>
+        public static string GetDirectoryMetadataFilename(Cryptor cryptor)
+        {
+            return GetDirectoryMetadataFilename(cryptor, null);
         }
 
         /// <summary>
@@ -154,7 +175,7 @@ namespace UvfLib.VaultHelpers
             }
 
             // For non-root directories or UVF format, check if the metadata file exists
-            string metadataFilename = GetDirectoryMetadataFilename(cryptor);
+            string metadataFilename = GetDirectoryMetadataFilename(cryptor, directoryMetadata);
             string metadataFilePath = Path.Combine(directoryPath, metadataFilename);
             return File.Exists(metadataFilePath);
         }
@@ -204,7 +225,7 @@ namespace UvfLib.VaultHelpers
                     }
 
                     // Check if directory metadata exists
-                    string metadataFilename = GetDirectoryMetadataFilename(cryptor);
+                    string metadataFilename = GetDirectoryMetadataFilename(cryptor, currentDirMetadata);
                     string dirMetadataPath = Path.Combine(encryptedSegmentPath, metadataFilename);
                     if (!File.Exists(dirMetadataPath))
                     {
@@ -279,7 +300,7 @@ namespace UvfLib.VaultHelpers
                     }
 
                     // Check if directory metadata exists
-                    string metadataFilename = GetDirectoryMetadataFilename(cryptor);
+                    string metadataFilename = GetDirectoryMetadataFilename(cryptor, currentDirMetadata);
                     string dirMetadataPath = Path.Combine(encryptedSegmentPath, metadataFilename);
                     if (!File.Exists(dirMetadataPath))
                     {

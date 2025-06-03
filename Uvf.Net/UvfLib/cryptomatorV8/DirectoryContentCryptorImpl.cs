@@ -60,13 +60,14 @@ namespace UvfLib.CryptomatorV8
 
         /// <summary>
         /// Decrypts directory metadata.
-        /// In v2, directory IDs are stored in plaintext, so no decryption is needed.
+        /// In Cryptomator v8 (based on v2), directory IDs are stored in plaintext in dir.c9r files.
         /// </summary>
-        /// <param name="ciphertext">The raw bytes from dir.c9r file</param>
+        /// <param name="ciphertext">The raw bytes from dir.c9r file (actually plaintext directory ID)</param>
         /// <returns>The directory metadata</returns>
         public DirectoryMetadata DecryptDirectoryMetadata(byte[] ciphertext)
         {
-            // In v2, dirId is stored in plaintext
+            // In Cryptomator v8 (based on v2), directory IDs are stored in plaintext
+            // The 'ciphertext' parameter is actually plaintext directory ID bytes
             return new DirectoryMetadataImpl(ciphertext);
         }
 

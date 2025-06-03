@@ -637,6 +637,7 @@ namespace UvfConsole
 
             long bytesProcessedInThisCall = 0;
             string metadataFilename = vault.GetDirectoryMetadataFilename();
+            string rootMetadataFilename = vault.IsCryptomatorV8() ? "dirid.c9r" : "dir.uvf";
             Console.WriteLine($"  Looking for metadata filename: {metadataFilename}");
 
             // Process all encrypted files in the current directory
@@ -645,7 +646,8 @@ namespace UvfConsole
                 string encryptedName = Path.GetFileName(encryptedFilePath);
                 Console.WriteLine($"  Processing file: {encryptedName}");
                 
-                if (encryptedName == metadataFilename) 
+                // Skip metadata files (both current directory and root directory metadata)
+                if (encryptedName == metadataFilename || encryptedName == rootMetadataFilename) 
                 {
                     Console.WriteLine($"    Skipping metadata file: {encryptedName}");
                     continue; // Skip metadata file
@@ -730,16 +732,39 @@ namespace UvfConsole
                     Console.WriteLine($"  Processing encrypted subdirectory: {encryptedSubDirName} -> {decryptedSubDirName}");
 
                     // Load and decrypt the subdirectory's metadata
-                    string subDirMetadataPath = Path.Combine(encryptedSubDirPath, metadataFilename);
+                    // Use the specific metadata filename for this subdirectory context
+                    string expectedSubDirMetadataFilename = vault.IsCryptomatorV8() ? "dir.c9r" : "dir.uvf";
+                    string subDirMetadataPath = Path.Combine(encryptedSubDirPath, expectedSubDirMetadataFilename);
                     if (!File.Exists(subDirMetadataPath))
                     {
-                        Console.Error.WriteLine($"    ERROR: Missing {metadataFilename} in subdirectory: {encryptedSubDirPath}");
+                        Console.Error.WriteLine($"    ERROR: Missing {expectedSubDirMetadataFilename} in subdirectory: {encryptedSubDirPath}");
                         continue;
                     }
 
                     Console.WriteLine($"    Loading metadata from: {subDirMetadataPath}");
                     byte[] encryptedMetadata = File.ReadAllBytes(subDirMetadataPath);
                     DirectoryMetadata subDirMetadata = vault.DecryptDirectoryMetadata(encryptedMetadata);
+
+                    // For Cryptomator v8, the actual content is in a different directory calculated from the directory ID
+                    string actualContentPath;
+                    if (vault.IsCryptomatorV8())
+                    {
+                        // Calculate the path where the actual directory content is stored
+                        actualContentPath = Path.Combine(VaultFolderPath, vault.GetDirectoryPath(subDirMetadata));
+                        Console.WriteLine($"    Cryptomator v8: Actual content path: {actualContentPath}");
+                        Console.WriteLine($"    Directory ID from metadata: {subDirMetadata.DirId}");
+                        
+                        if (!Directory.Exists(actualContentPath))
+                        {
+                            Console.Error.WriteLine($"    ERROR: Actual content directory not found: {actualContentPath}");
+                            continue;
+                        }
+                    }
+                    else
+                    {
+                        // For UVF format, content is in the same directory as the metadata
+                        actualContentPath = encryptedSubDirPath;
+                    }
 
                     // Check if subdirectory is already decrypted with correct structure
                     bool decryptSubDir = true;
@@ -759,9 +784,9 @@ namespace UvfConsole
                         Directory.CreateDirectory(targetDecryptedSubDirPath);
                     }
 
-                    // Recursively decrypt the subdirectory
-                    Console.WriteLine($"    Recursively processing subdirectory: {targetDecryptedSubDirPath}");
-                    bytesProcessedInThisCall += DecryptDirectory(vault, subDirMetadata, encryptedSubDirPath, targetDecryptedSubDirPath);
+                    // Recursively decrypt the subdirectory using the actual content path
+                    Console.WriteLine($"    Recursively processing subdirectory from: {actualContentPath} -> {targetDecryptedSubDirPath}");
+                    bytesProcessedInThisCall += DecryptDirectory(vault, subDirMetadata, actualContentPath, targetDecryptedSubDirPath);
                 }
                 catch (Exception ex)
                 {
@@ -1862,244 +1887,27 @@ namespace UvfConsole
 
         private static void ProcessCryptomatorV8Vault(Vault vault, CancellationToken cancellationToken)
         {
-            Console.WriteLine("\n--- Cryptomator v8 Root Directory Discovery ---");
+            Console.WriteLine("\n--- Cryptomator v8 Direct Root Access ---");
 
-            // Debug: Check what root directory path is calculated
+            // Calculate root directory path directly - this is deterministic and always correct
             var rootMetadata = vault.GetRootDirectoryMetadata();
             var rootPath = vault.GetDirectoryPath(rootMetadata);
             var fullRootPath = Path.Combine(VaultFolderPath, rootPath);
             
-            Console.WriteLine($"DEBUG: Root metadata directory ID length: {rootMetadata.DirId?.Length ?? -1}");
-            Console.WriteLine($"DEBUG: Calculated root path: {rootPath}");
-            Console.WriteLine($"DEBUG: Full root path: {fullRootPath}");
-            Console.WriteLine($"DEBUG: Root directory exists: {Directory.Exists(fullRootPath)}");
+            Console.WriteLine($"Calculated root path: {rootPath}");
+            Console.WriteLine($"Full root path: {fullRootPath}");
             
-            if (Directory.Exists(fullRootPath))
+            // Verify the calculated root directory exists (sanity check)
+            if (!Directory.Exists(fullRootPath))
             {
-                var files = Directory.GetFiles(fullRootPath, "*.c9r").Where(f => !f.EndsWith("dirid.c9r")).ToArray();
-                Console.WriteLine($"DEBUG: Root directory contains {files.Length} encrypted files");
-                
-                // Try decrypting with root metadata
-                foreach (var file in files.Take(2)) // Test first 2 files
-                {
-                    try
-                    {
-                        var filename = Path.GetFileName(file);
-                        var decrypted = vault.DecryptFilename(filename, rootMetadata);
-                        Console.WriteLine($"DEBUG: Successfully decrypted root file: {filename} -> {decrypted}");
-                    }
-                    catch (Exception ex)
-                    {
-                        var filename = Path.GetFileName(file);
-                        Console.WriteLine($"DEBUG: Failed to decrypt root file {filename}: {ex.Message}");
-                    }
-                }
+                throw new InvalidOperationException($"Calculated root directory not found at: {fullRootPath}");
             }
-
-            // Find all directories in the vault
-            var allDirectories = FindAllDirectories(Path.Combine(VaultFolderPath, "d"));
-            Console.WriteLine($"Found {allDirectories.Count} encrypted directories in vault");
-
-            // Try to find the root directory by testing known filenames
-            var knownFiles = new[] { "CMU-1.szi", "license.txt", "myStream.test", "CopySubfoldersFromMoveIndex.sh" };
-            var rootDirectoryPath = FindRootDirectoryByKnownFiles(vault, allDirectories, knownFiles);
             
-            if (rootDirectoryPath != null)
-            {
-                Console.WriteLine($"Root directory identified: {rootDirectoryPath}");
-                
-                // Load the metadata for this directory
-                var metadataPath = Path.Combine(rootDirectoryPath, vault.GetDirectoryMetadataFilename());
-                if (File.Exists(metadataPath))
-                {
-                    var metadataBytes = File.ReadAllBytes(metadataPath);
-                    var actualRootMetadata = vault.DecryptDirectoryMetadata(metadataBytes);
-                    
-                    Console.WriteLine($"Decrypting from actual root: {rootDirectoryPath} -> {DecryptedFolderPath}");
-                    DecryptDirectory(vault, actualRootMetadata, rootDirectoryPath, DecryptedFolderPath);
-                }
-                else
-                {
-                    Console.WriteLine("ERROR: Root directory metadata file not found");
-                }
-            }
-            else
-            {
-                Console.WriteLine("Could not identify root directory - trying fallback approach");
-                
-                // Fallback: decrypt all found directories
-                foreach (var dir in allDirectories)
-                {
-                    var dirName = Path.GetFileName(dir);
-                    var outputSubDir = Path.Combine(DecryptedFolderPath, $"Directory_{dirName}");
-                    Directory.CreateDirectory(outputSubDir);
-                    
-                    var metadataPath = Path.Combine(dir, vault.GetDirectoryMetadataFilename());
-                    if (File.Exists(metadataPath))
-                    {
-                        try
-                        {
-                            var metadataBytes = File.ReadAllBytes(metadataPath);
-                            var dirMetadata = vault.DecryptDirectoryMetadata(metadataBytes);
-                            
-                            Console.WriteLine($"Decrypting directory: {dir} -> {outputSubDir}");
-                            DecryptDirectory(vault, dirMetadata, dir, outputSubDir);
-                        }
-                        catch (Exception ex)
-                        {
-                            Console.WriteLine($"❌ ERROR decrypting directory {dir}: {ex.Message}");
-                        }
-                    }
-                }
-            }
-
-            // DEBUG: Test theory that one of the found directories is actually the root
-            Console.WriteLine($"\nDEBUG: Testing theory that one of the found directories is the root...");
-            foreach (var dir in allDirectories)
-            {
-                var dirName = Path.GetFileName(dir);
-                Console.WriteLine($"\nDEBUG: Testing if {dirName} is the root directory:");
-                
-                var files = Directory.GetFiles(dir, "*.c9r").Where(f => !f.EndsWith("dirid.c9r")).ToArray();
-                Console.WriteLine($"  Files found: {files.Length}");
-                
-                // Try decrypting a few files using the root metadata
-                foreach (var file in files.Take(3))
-                {
-                    try
-                    {
-                        var filename = Path.GetFileName(file);
-                        var decrypted = vault.DecryptFilename(filename, rootMetadata);
-                        Console.WriteLine($"  ✅ SUCCESS: {filename} -> {decrypted}");
-                    }
-                    catch (Exception ex)
-                    {
-                        var filename = Path.GetFileName(file);
-                        Console.WriteLine($"  ❌ FAILED: {filename} -> {ex.Message}");
-                    }
-                }
-            }
-
-            // DEBUG: Test if we can decrypt the directory metadata files
-            Console.WriteLine($"\nDEBUG: Testing directory metadata decryption...");
-            foreach (var dir in allDirectories)
-            {
-                var dirName = Path.GetFileName(dir);
-                var metadataPath = Path.Combine(dir, vault.GetDirectoryMetadataFilename());
-                
-                if (File.Exists(metadataPath))
-                {
-                    try
-                    {
-                        var metadataBytes = File.ReadAllBytes(metadataPath);
-                        var dirMetadata = vault.DecryptDirectoryMetadata(metadataBytes);
-                        
-                        Console.WriteLine($"  {dirName}: Successfully decrypted metadata");
-                        Console.WriteLine($"    Directory ID (string): {dirMetadata.DirId}");
-                        
-                        // Decode the Base64Url string to get raw bytes
-                        try
-                        {
-                            var dirIdBytes = UvfLib.Common.Base64Url.Decode(dirMetadata.DirId);
-                            Console.WriteLine($"    Directory ID length: {dirIdBytes?.Length ?? -1}");
-                            Console.WriteLine($"    Directory ID (hex): {(dirIdBytes != null ? BitConverter.ToString(dirIdBytes).Replace("-", "") : "null")}");
-                        }
-                        catch (Exception ex)
-                        {
-                            Console.WriteLine($"    Failed to decode directory ID: {ex.Message}");
-                        }
-                        
-                        // Test what directory path this would generate
-                        var calculatedPath = vault.GetDirectoryPath(dirMetadata);
-                        Console.WriteLine($"    Calculated path: {calculatedPath}");
-                        
-                    }
-                    catch (Exception ex)
-                    {
-                        Console.WriteLine($"  {dirName}: Failed to decrypt metadata - {ex.Message}");
-                    }
-                }
-                else
-                {
-                    Console.WriteLine($"  {dirName}: No metadata file found");
-                }
-            }
-
-            // DEBUG: Test v3 algorithm for root directory hash
-            Console.WriteLine($"\nDEBUG: Testing v3 hash algorithm for root directory...");
-            TestV3HashAlgorithm(vault);
-
-            // DEBUG: Test our hash calculation step by step
-            Console.WriteLine($"\nDEBUG: Our calculated root path vs actual directories...");
-            Console.WriteLine($"  Our calculation: d/VT/4LAU6OWKNCOOKXTMRWW3E7V35JDCBP");
-            Console.WriteLine($"  Actual dirs found: d/V4/LQRSXGFPTO6ERYLTNDPKKYHWNE2T4E, d/LF/IPDWIDREHZ4IKDBK2HRTYT343S3RTV");
-            Console.WriteLine($"  → Hash calculation mismatch - our algorithm produces different results than real Cryptomator");
-
-            // DEBUG: Summary of root directory issue
-            Console.WriteLine($"\nDEBUG: ✅ ROOT DIRECTORY HASH CALCULATION FIXED!");
-            Console.WriteLine($"  ✅ Our calculation now matches: d/V4/LQRSXGFPTO6ERYLTNDPKKYHWNE2T4E");
-            Console.WriteLine($"  ✅ Root directory found and exists!");
-            Console.WriteLine($"  ❌ Next issue: Filename decryption still fails - need to fix associated data");
-            Console.WriteLine($"  💡 Root directory uses its own directory ID (from dirid.c9r) as associated data, not empty bytes");
-
-            // DEBUG: Test the actual directory ID from dirid.c9r
-            Console.WriteLine($"\nDEBUG: Testing actual directory ID from root dirid.c9r file...");
-            var rootDirPath = Path.Combine(VaultFolderPath, "d", "V4", "LQRSXGFPTO6ERYLTNDPKKYHWNE2T4E");
-            var diridPath = Path.Combine(rootDirPath, "dirid.c9r");
+            Console.WriteLine($"✅ Root directory exists and is ready for decryption");
             
-            if (File.Exists(diridPath))
-            {
-                try
-                {
-                    Console.WriteLine($"Reading root dirid.c9r file: {diridPath}");
-                    byte[] encryptedDirId = File.ReadAllBytes(diridPath);
-                    Console.WriteLine($"Encrypted dirid.c9r size: {encryptedDirId.Length} bytes");
-                    
-                    // Decrypt the dirid.c9r file as a regular file to get the actual directory ID
-                    // The dirid.c9r contains the directory ID as encrypted file content
-                    using (var ms = new MemoryStream(encryptedDirId))
-                    using (var decryptingStream = vault.GetDecryptingStream(ms))
-                    using (var resultMs = new MemoryStream())
-                    {
-                        decryptingStream.CopyTo(resultMs);
-                        byte[] actualRootDirId = resultMs.ToArray();
-                        
-                        Console.WriteLine($"Actual root directory ID length: {actualRootDirId.Length} bytes");
-                        Console.WriteLine($"Actual root directory ID (hex): {Convert.ToHexString(actualRootDirId)}");
-                        Console.WriteLine($"Actual root directory ID (base64url): {UvfLib.Common.Base64Url.Encode(actualRootDirId)}");
-                        
-                        // Test filename decryption using the ACTUAL directory ID
-                        Console.WriteLine($"\nDEBUG: Testing filename decryption with ACTUAL directory ID...");
-                        var testFiles = Directory.GetFiles(rootDirPath, "*.c9r").Where(f => !f.EndsWith("dirid.c9r")).Take(2);
-                        
-                        foreach (var testFile in testFiles)
-                        {
-                            try
-                            {
-                                var filename = Path.GetFileName(testFile);
-                                
-                                // Create a DirectoryMetadata with the ACTUAL directory ID
-                                var actualRootMetadata = new UvfLib.CryptomatorV8.DirectoryMetadataImpl(actualRootDirId);
-                                var decryptedName = vault.DecryptFilename(filename, actualRootMetadata);
-                                
-                                Console.WriteLine($"  ✅ SUCCESS with ACTUAL dirId: {filename} -> {decryptedName}");
-                            }
-                            catch (Exception ex)
-                            {
-                                Console.WriteLine($"  ❌ FAILED with ACTUAL dirId: {Path.GetFileName(testFile)} -> {ex.Message}");
-                            }
-                        }
-                    }
-                }
-                catch (Exception ex)
-                {
-                    Console.WriteLine($"❌ Failed to decrypt root dirid.c9r: {ex.Message}");
-                }
-            }
-            else
-            {
-                Console.WriteLine($"❌ Root dirid.c9r file not found at: {diridPath}");
-            }
+            // Start decryption directly from the calculated root
+            Console.WriteLine($"Decrypting from calculated root: {fullRootPath} -> {DecryptedFolderPath}");
+            DecryptDirectory(vault, rootMetadata, fullRootPath, DecryptedFolderPath);
         }
 
         private static void ProcessStandardVault(Vault vault, CancellationToken cancellationToken)
@@ -2151,7 +1959,44 @@ namespace UvfConsole
                     
                     Console.WriteLine($"  Found {encryptedFiles.Length} encrypted files to test");
                     
-                    // Try to decrypt filenames using ROOT metadata (not the directory's own metadata)
+                    // Check if this is the exact calculated root directory (precise match)
+                    var metadataPath = Path.Combine(directory, vault.GetDirectoryMetadataFilename());
+                    var calculatedRootPath = vault.GetDirectoryPath(rootMetadata);
+                    // Normalize paths for comparison
+                    var normalizedCalculatedPath = calculatedRootPath.Replace('/', Path.DirectorySeparatorChar);
+                    var normalizedActualPath = directory.Replace(VaultFolderPath, "").TrimStart(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+                    bool isExactRootMatch = normalizedCalculatedPath.Equals(normalizedActualPath, StringComparison.OrdinalIgnoreCase);
+                    
+                    DirectoryMetadata directoryMetadata;
+                    
+                    if (isExactRootMatch && vault.IsCryptomatorV8())
+                    {
+                        // For the exact root directory in Cryptomator v8, use programmatically generated metadata
+                        Console.WriteLine($"  This is the exact calculated root directory - using programmatic root metadata");
+                        directoryMetadata = rootMetadata;
+                    }
+                    else if (File.Exists(metadataPath))
+                    {
+                        // For subdirectories, load metadata from file
+                        try
+                        {
+                            var metadataBytes = File.ReadAllBytes(metadataPath);
+                            directoryMetadata = vault.DecryptDirectoryMetadata(metadataBytes);
+                            Console.WriteLine($"  Loaded directory metadata from file (this is a subdirectory)");
+                        }
+                        catch (Exception ex)
+                        {
+                            Console.WriteLine($"  Failed to decrypt directory metadata: {ex.Message}");
+                            continue;
+                        }
+                    }
+                    else
+                    {
+                        Console.WriteLine($"  No metadata file found in directory");
+                        continue;
+                    }
+                    
+                    // Try to decrypt filenames using this directory's metadata
                     foreach (var encryptedFile in encryptedFiles)
                     {
                         try
@@ -2159,8 +2004,7 @@ namespace UvfConsole
                             var encryptedFilename = Path.GetFileName(encryptedFile);
                             Console.WriteLine($"  Testing decryption of: {encryptedFilename}");
                             
-                            // THIS IS THE KEY CHANGE: Use ROOT metadata to decrypt filenames
-                            var decryptedFilename = vault.DecryptFilename(encryptedFilename, rootMetadata);
+                            var decryptedFilename = vault.DecryptFilename(encryptedFilename, directoryMetadata);
                             Console.WriteLine($"    SUCCESS: {encryptedFilename} -> {decryptedFilename}");
                             
                             if (knownFiles.Contains(decryptedFilename))

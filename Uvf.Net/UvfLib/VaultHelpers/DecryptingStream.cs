@@ -248,7 +248,7 @@ namespace UvfLib.VaultHelpers
             }
             else if (_cryptor.FileContentCryptor() is CryptomatorV8.FileContentCryptorImpl v8Cryptor)
             {
-                // CryptomatorV8 implementation - use same approach as V3
+                // CryptomatorV8 implementation - construct AAD according to specification
                 // Extract nonce from the beginning of ciphertext
                 byte[] nonce = new byte[CryptomatorV8.Constants.GCM_NONCE_SIZE];
                 Buffer.BlockCopy(_ciphertextChunkBuffer, 0, nonce, 0, CryptomatorV8.Constants.GCM_NONCE_SIZE);
@@ -261,9 +261,21 @@ namespace UvfLib.VaultHelpers
                 Buffer.BlockCopy(_ciphertextChunkBuffer, CryptomatorV8.Constants.GCM_NONCE_SIZE, ciphertext, 0, ciphertextLength);
                 Buffer.BlockCopy(_ciphertextChunkBuffer, CryptomatorV8.Constants.GCM_NONCE_SIZE + ciphertextLength, tag, 0, CryptomatorV8.Constants.GCM_TAG_SIZE);
                 
-                // Decrypt using AES-GCM directly (same approach as EncryptingStream)
+                // Construct AAD according to specification: bigEndian(chunkNumber) . headerNonce
+                byte[] chunkNumberBytes = new byte[8];
+                BinaryPrimitives.WriteInt64BigEndian(chunkNumberBytes, _currentChunkNumber);
+                
+                // Get header nonce from file header
+                byte[] headerNonce = ((CryptomatorV8.FileHeaderImpl)_fileHeader).GetNonce();
+                
+                // Combine chunkNumber + headerNonce as AAD
+                byte[] aad = new byte[chunkNumberBytes.Length + headerNonce.Length];
+                Array.Copy(chunkNumberBytes, 0, aad, 0, chunkNumberBytes.Length);
+                Array.Copy(headerNonce, 0, aad, chunkNumberBytes.Length, headerNonce.Length);
+                
+                // Decrypt using AES-GCM with proper AAD
                 byte[] plaintext = new byte[ciphertextLength];
-                _fileContentAesGcm.Decrypt(nonce, ciphertext, tag, plaintext);
+                _fileContentAesGcm.Decrypt(nonce, ciphertext, tag, plaintext, aad);
                 
                 // Copy plaintext to buffer
                 plaintext.CopyTo(_plaintextChunkBuffer.Span);

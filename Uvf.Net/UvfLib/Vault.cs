@@ -962,13 +962,24 @@ namespace UvfLib
         }
 
         /// <summary>
-        /// Gets the directory metadata filename for this vault format.
+        /// Gets the directory metadata filename for this vault format and directory type.
         /// </summary>
-        /// <returns>The directory metadata filename ("dirid.c9r" for Cryptomator v8, "dir.uvf" for UVF)</returns>
-        public string GetDirectoryMetadataFilename()
+        /// <param name="directoryMetadata">The directory metadata (optional, used to determine if it's root directory)</param>
+        /// <returns>The directory metadata filename</returns>
+        public string GetDirectoryMetadataFilename(DirectoryMetadata directoryMetadata = null)
         {
             if (_disposed) throw new ObjectDisposedException(nameof(Vault));
-            return IsCryptomatorV8() ? "dirid.c9r" : "dir.uvf";
+            return VaultDirectoryHelper.GetDirectoryMetadataFilename(_cryptor, directoryMetadata);
+        }
+
+        /// <summary>
+        /// Gets the directory metadata filename for this vault format.
+        /// For backwards compatibility, this assumes non-root directory for Cryptomator v8.
+        /// </summary>
+        /// <returns>The directory metadata filename</returns>
+        public string GetDirectoryMetadataFilename()
+        {
+            return GetDirectoryMetadataFilename(null);
         }
 
         /// <summary>
