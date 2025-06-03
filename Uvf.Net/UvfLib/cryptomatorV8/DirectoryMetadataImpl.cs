@@ -19,7 +19,7 @@ namespace UvfLib.CryptomatorV8
     /// Directory metadata implementation for Cryptomator v2.
     /// In v2, directory IDs are stored in plaintext and there's no SeedId concept.
     /// </summary>
-    internal class DirectoryMetadataImpl : DirectoryMetadata
+    public class DirectoryMetadataImpl : DirectoryMetadata
     {
         private readonly byte[] _dirId;
 

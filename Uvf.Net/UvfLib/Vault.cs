@@ -13,14 +13,15 @@
 
 // Copyright (c) Smart In Venture GmbH 2025 of the C# Porting
 
+using System;
+using System.IO;
 using System.Security.Cryptography;
+using System.Text;
+using System.Text.Json;
 using UvfLib.Api;
 using UvfLib.Common;
 using UvfLib.VaultHelpers; // Added for VaultKeyHelper
 using UvfLib.Jwe; // For JweVaultManager and UvfMasterkeyPayload
-using System.IO; // For File operations
-using System.Text; // For Encoding
-using System.Text.Json; // For JsonSerializer
 using System.Collections.Generic; // Added for Dictionary and List
 using System.Linq; // Added for Linq operations if needed
 using UvfLib.V3; // Added for UVFMasterkeyImpl constants if any, and HKDFHelper
@@ -364,6 +365,48 @@ namespace UvfLib
         }
 
         /// <summary>
+        /// Creates the vault.cryptomator JWT configuration file content for a new Cryptomator V8 vault.
+        /// This file contains vault configuration like format version, cipher combo, and shortening threshold.
+        /// </summary>
+        /// <returns>A byte array containing the vault.cryptomator JWT file data.</returns>
+        /// <exception cref="CryptoException">If JWT creation fails.</exception>
+        public static byte[] CreateNewCryptomatorV8VaultConfigContent()
+        {
+            try
+            {
+                // Create JWT payload with vault configuration
+                var payload = new
+                {
+                    jti = Guid.NewGuid().ToString(), // Unique identifier for this vault
+                    format = 8,                       // Vault format version
+                    cipherCombo = "SIV_GCM",         // Cipher combination used
+                    shorteningThreshold = 220        // Filename shortening threshold
+                };
+
+                // For simplicity, create an unsigned JWT (algorithm: "none")
+                // Real Cryptomator uses HMAC-SHA256, but we'll start with a simpler approach
+                string header = Convert.ToBase64String(Encoding.UTF8.GetBytes(
+                    """{"kid":"masterkeyfile:masterkey.cryptomator","alg":"HS256","typ":"JWT"}"""))
+                    .TrimEnd('='); // Remove padding
+
+                string payloadJson = System.Text.Json.JsonSerializer.Serialize(payload);
+                string payloadBase64 = Convert.ToBase64String(Encoding.UTF8.GetBytes(payloadJson))
+                    .TrimEnd('='); // Remove padding
+
+                // Create a dummy signature for now (real implementation would use HMAC-SHA256)
+                string signature = Convert.ToBase64String(new byte[32]) // 32 bytes = 256 bits
+                    .TrimEnd('='); // Remove padding
+
+                string jwt = $"{header}.{payloadBase64}.{signature}";
+                return Encoding.UTF8.GetBytes(jwt);
+            }
+            catch (Exception ex)
+            {
+                throw new CryptoException("Failed to create Cryptomator V8 vault config content", ex);
+            }
+        }
+
+        /// <summary>
         /// Creates a new Cryptomator V8 vault file (masterkey.cryptomator) at the specified path.
         /// </summary>
         /// <param name="filePath">The path where the vault file will be created.</param>
@@ -374,6 +417,30 @@ namespace UvfLib
             if (string.IsNullOrEmpty(filePath)) throw new ArgumentNullException(nameof(filePath));
             byte[] vaultFileContent = CreateNewCryptomatorV8VaultFileContent(password, pepper);
             File.WriteAllBytes(filePath, vaultFileContent);
+        }
+
+        /// <summary>
+        /// Creates both masterkey.cryptomator and vault.cryptomator files for a complete Cryptomator V8 vault.
+        /// </summary>
+        /// <param name="vaultDirectory">The directory where the vault files will be created.</param>
+        /// <param name="password">The password for the new vault.</param>
+        /// <param name="pepper">Optional pepper to use during key derivation. If null, an empty pepper is used.</param>
+        public static void CreateNewCryptomatorV8VaultComplete(string vaultDirectory, string password, byte[]? pepper = null)
+        {
+            if (string.IsNullOrEmpty(vaultDirectory)) throw new ArgumentNullException(nameof(vaultDirectory));
+            
+            // Create the directory if it doesn't exist
+            Directory.CreateDirectory(vaultDirectory);
+            
+            // Create masterkey.cryptomator
+            string masterkeyPath = Path.Combine(vaultDirectory, "masterkey.cryptomator");
+            byte[] masterkeyContent = CreateNewCryptomatorV8VaultFileContent(password, pepper);
+            File.WriteAllBytes(masterkeyPath, masterkeyContent);
+            
+            // Create vault.cryptomator
+            string vaultConfigPath = Path.Combine(vaultDirectory, "vault.cryptomator");
+            byte[] vaultConfigContent = CreateNewCryptomatorV8VaultConfigContent();
+            File.WriteAllBytes(vaultConfigPath, vaultConfigContent);
         }
 
         // --- Instance Methods for Operations ---
@@ -867,31 +934,47 @@ namespace UvfLib
         }
 
         /// <summary>
-        /// Gets the current seed ID being used for new operations.
-        /// Only available for UVF vaults that support key rotation.
+        /// Gets the current seed ID for the vault.
         /// </summary>
-        /// <returns>The current (latest) seed ID</returns>
-        /// <exception cref="InvalidOperationException">If the vault doesn't support key rotation</exception>
-        /// <exception cref="ObjectDisposedException">If the vault has been disposed</exception>
+        /// <returns>The current seed ID</returns>
         public int GetCurrentSeedId()
         {
             if (_disposed) throw new ObjectDisposedException(nameof(Vault));
-
-            if (_revolvingMasterkey is UVFMasterkey uvfMasterkey)
+            
+            if (_revolvingMasterkey is V3.UVFMasterkeyImpl uvfMasterkey)
             {
                 return uvfMasterkey.LatestSeed;
             }
-
-            throw new InvalidOperationException("Current seed ID is only available for UVF vaults.");
+            
+            // For legacy formats, return a default seed ID
+            return 0;
         }
 
         /// <summary>
-        /// Gets all available seed IDs in this vault.
-        /// Only available for UVF vaults that support key rotation.
+        /// Checks if this vault is using Cryptomator v8 format.
         /// </summary>
-        /// <returns>Collection of all seed IDs</returns>
-        /// <exception cref="InvalidOperationException">If the vault doesn't support key rotation</exception>
-        /// <exception cref="ObjectDisposedException">If the vault has been disposed</exception>
+        /// <returns>True if this is a Cryptomator v8 vault, false otherwise</returns>
+        public bool IsCryptomatorV8()
+        {
+            if (_disposed) throw new ObjectDisposedException(nameof(Vault));
+            if (_cryptor?.DirectoryContentCryptor() == null) return false;
+            return _cryptor.DirectoryContentCryptor().GetType().FullName?.Contains("CryptomatorV8") == true;
+        }
+
+        /// <summary>
+        /// Gets the directory metadata filename for this vault format.
+        /// </summary>
+        /// <returns>The directory metadata filename ("dirid.c9r" for Cryptomator v8, "dir.uvf" for UVF)</returns>
+        public string GetDirectoryMetadataFilename()
+        {
+            if (_disposed) throw new ObjectDisposedException(nameof(Vault));
+            return IsCryptomatorV8() ? "dirid.c9r" : "dir.uvf";
+        }
+
+        /// <summary>
+        /// Gets the available seed IDs for the vault.
+        /// </summary>
+        /// <returns>An enumerable of available seed IDs</returns>
         public IEnumerable<int> GetAvailableSeedIds()
         {
             if (_disposed) throw new ObjectDisposedException(nameof(Vault));

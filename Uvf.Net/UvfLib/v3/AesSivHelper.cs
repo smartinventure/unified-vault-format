@@ -100,7 +100,7 @@ namespace UvfLib.V3
             // Process associated data if present
             foreach (byte[] s in associatedData)
             {
-                if (s != null && s.Length > 0)
+                if (s != null)  // Process all non-null arrays, including empty ones
                 {
                     byte[] adMac = MacWithBouncyCastle(cmac, s);
                     byte[] doubledD = Dbl(d);

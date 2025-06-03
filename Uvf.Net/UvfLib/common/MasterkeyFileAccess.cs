@@ -288,18 +288,39 @@ namespace UvfLib.Common
 
         private static byte[] DerivePassphraseKey(byte[] passphraseBytes, byte[] salt, byte[]? pepper, int costParamN_or_LogN, int blockSize, int parallelism)
         {
-            // Combine salt and pepper (if pepper is provided)
-            int pepperLength = pepper?.Length ?? 0;
-            byte[] combinedSalt = new byte[salt.Length + pepperLength];
-            Buffer.BlockCopy(salt, 0, combinedSalt, 0, salt.Length);
-            if (pepper != null)
+            if (passphraseBytes == null) throw new ArgumentNullException(nameof(passphraseBytes));
+            if (salt == null) throw new ArgumentNullException(nameof(salt));
+
+            // Combine salt and pepper into a single salt
+            byte[] combinedSalt;
+            if (pepper != null && pepper.Length > 0)
             {
+                combinedSalt = new byte[salt.Length + pepper.Length];
+                Buffer.BlockCopy(salt, 0, combinedSalt, 0, salt.Length);
                 Buffer.BlockCopy(pepper, 0, combinedSalt, salt.Length, pepper.Length);
             }
+            else
+            {
+                combinedSalt = new byte[salt.Length];
+                Buffer.BlockCopy(salt, 0, combinedSalt, 0, salt.Length);
+            }
 
-            // The cost parameter is stored as log2(N), so we need to convert it to N
-            // For example: costParamN_or_LogN = 17 means N = 2^17 = 131072
-            int costParamN = 1 << costParamN_or_LogN; // Convert log2(N) to N
+            // Determine if costParamN_or_LogN is already the N value or if it's log2(N)
+            int costParamN;
+            
+            // Check if the value is already a power of 2 and > 1 (indicating it's the N value directly)
+            if (costParamN_or_LogN > 1 && (costParamN_or_LogN & (costParamN_or_LogN - 1)) == 0)
+            {
+                // It's already the N value (used in version 999 masterkey files)
+                costParamN = costParamN_or_LogN;
+            }
+            else
+            {
+                // It's log2(N), so convert it to N
+                // For example: costParamN_or_LogN = 17 means N = 2^17 = 131072
+                costParamN = 1 << costParamN_or_LogN;
+            }
+            
             int derivedKeyLength = KEY_LEN_BYTES + MAC_LEN_BYTES; // 64 bytes
 
             try

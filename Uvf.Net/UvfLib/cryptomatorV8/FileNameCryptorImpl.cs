@@ -49,28 +49,69 @@ namespace UvfLib.CryptomatorV8
             using var encKey = _masterkey.GetEncKey();
             using var macKey = _masterkey.GetMacKey();
             
-            // Combine the keys for AES-SIV (64 bytes total: 32 for enc + 32 for mac)
-            byte[] combinedKey = new byte[64];
-            Buffer.BlockCopy(encKey.GetEncoded(), 0, combinedKey, 0, 32);
-            Buffer.BlockCopy(macKey.GetEncoded(), 0, combinedKey, 32, 32);
+            // Java version: siv.get().encrypt(ek, mk, cleartextDirectoryId)
+            // We need to modify our AES-SIV helper to accept separate keys like Java
+            // For now, let's create a version that matches exactly how Java does it
             
             try
             {
-                // Encrypt the directory ID using AES-SIV
-                byte[] encryptedBytes = AesSivHelper.Encrypt(combinedKey, cleartextDirectoryId, Array.Empty<byte>());
+                // CORRECT key order discovered: Java AES-SIV expects [macKey][encKey]
+                byte[] combinedKey = new byte[64];
+                Buffer.BlockCopy(macKey.GetEncoded(), 0, combinedKey, 0, 32);   // First 32 bytes: MAC key  
+                Buffer.BlockCopy(encKey.GetEncoded(), 0, combinedKey, 32, 32); // Last 32 bytes: encryption key
+                
+                // Encrypt the directory ID using AES-SIV (no associated data per official docs)
+                byte[] encryptedBytes = AesSivHelper.Encrypt(combinedKey, cleartextDirectoryId, null);
                 
                 // Hash the encrypted bytes using SHA-1
                 using var sha1 = SHA1.Create();
                 byte[] hashedBytes = sha1.ComputeHash(encryptedBytes);
                 
-                // Encode as base32
-                return ToBase32(hashedBytes);
+                // Use Google Guava compatible Base32 encoding (no padding)
+                string result = ToBase32GoogleGuava(hashedBytes);
+                Console.WriteLine($"DEBUG: v2 algorithm (CORRECT key order) for dirId (length {cleartextDirectoryId.Length}): {result}");
+                
+                return result;
             }
             finally
             {
-                // Clear the combined key
-                UvfLib.Common.CryptographicOperations.ZeroMemory(combinedKey);
+                // Keys are disposed automatically via using statements
             }
+        }
+
+        /// <summary>
+        /// Google Guava compatible Base32 encoding (no padding, specific alphabet)
+        /// </summary>
+        private static string ToBase32GoogleGuava(byte[] input)
+        {
+            if (input == null || input.Length == 0)
+                return string.Empty;
+
+            // Google Guava uses the standard RFC 4648 Base32 alphabet without padding
+            const string alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
+            
+            var result = new StringBuilder((input.Length * 8 + 4) / 5);
+            int buffer = 0;
+            int bitsLeft = 0;
+
+            foreach (byte b in input)
+            {
+                buffer = (buffer << 8) | b;
+                bitsLeft += 8;
+
+                while (bitsLeft >= 5)
+                {
+                    result.Append(alphabet[(buffer >> (bitsLeft - 5)) & 0x1F]);
+                    bitsLeft -= 5;
+                }
+            }
+
+            if (bitsLeft > 0)
+            {
+                result.Append(alphabet[(buffer << (5 - bitsLeft)) & 0x1F]);
+            }
+
+            return result.ToString();
         }
 
         /// <summary>
@@ -108,15 +149,15 @@ namespace UvfLib.CryptomatorV8
             using var encKey = _masterkey.GetEncKey();
             using var macKey = _masterkey.GetMacKey();
             
-            // Combine the keys for AES-SIV (64 bytes total: 32 for enc + 32 for mac)
+            // CORRECT key order: [macKey][encKey] (same as directory hashing)
             byte[] combinedKey = new byte[64];
-            Buffer.BlockCopy(encKey.GetEncoded(), 0, combinedKey, 0, 32);
-            Buffer.BlockCopy(macKey.GetEncoded(), 0, combinedKey, 32, 32);
+            Buffer.BlockCopy(macKey.GetEncoded(), 0, combinedKey, 0, 32);   // First 32 bytes: MAC key  
+            Buffer.BlockCopy(encKey.GetEncoded(), 0, combinedKey, 32, 32); // Last 32 bytes: encryption key
             
             try
             {
                 byte[] cleartextBytes = Encoding.UTF8.GetBytes(cleartextName);
-                // Flatten the associatedData into a single byte array or pass the first one
+                // Always pass the directory ID as-is (including empty array for root directory)
                 byte[] ad = associatedData?.Length > 0 ? associatedData[0] : Array.Empty<byte>();
                 byte[] encryptedBytes = AesSivHelper.Encrypt(combinedKey, cleartextBytes, ad);
                 
@@ -155,15 +196,15 @@ namespace UvfLib.CryptomatorV8
             using var encKey = _masterkey.GetEncKey();
             using var macKey = _masterkey.GetMacKey();
             
-            // Combine the keys for AES-SIV (64 bytes total: 32 for enc + 32 for mac)
+            // CORRECT key order: [macKey][encKey] (same as directory hashing)
             byte[] combinedKey = new byte[64];
-            Buffer.BlockCopy(encKey.GetEncoded(), 0, combinedKey, 0, 32);
-            Buffer.BlockCopy(macKey.GetEncoded(), 0, combinedKey, 32, 32);
+            Buffer.BlockCopy(macKey.GetEncoded(), 0, combinedKey, 0, 32);   // First 32 bytes: MAC key  
+            Buffer.BlockCopy(encKey.GetEncoded(), 0, combinedKey, 32, 32); // Last 32 bytes: encryption key
             
             try
             {
                 byte[] encryptedBytes = FromBase64Url(ciphertextName);
-                // Flatten the associatedData into a single byte array or pass the first one
+                // Always pass the directory ID as-is (including empty array for root directory)
                 byte[] ad = associatedData?.Length > 0 ? associatedData[0] : Array.Empty<byte>();
                 byte[] cleartextBytes = AesSivHelper.Decrypt(combinedKey, encryptedBytes, ad);
                 
