@@ -1,6 +1,6 @@
 using System;
 using System.IO;
-using UvfLib.Api;
+using UvfLib.Core.Api;
 
 namespace UvfLib.Tests.Streams
 {

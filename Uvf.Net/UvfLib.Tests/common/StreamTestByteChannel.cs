@@ -1,6 +1,6 @@
 using System;
 using System.IO;
-using UvfLib.Common;
+using UvfLib.Core.Common;
 
 namespace UvfLib.Tests.Common
 {

@@ -1,10 +1,10 @@
 using BenchmarkDotNet.Attributes;
 using BenchmarkDotNet.Running;
-using UvfLib.Api;
-using UvfLib.Common;
-using UvfLib.V3;
 using System;
 using System.Security.Cryptography;
+using UvfLib._old.v3;
+using UvfLib._old.common;
+using UvfLib._old.api;
 
 // Adjust namespace to correct benchmark project location
 namespace UvfLib.Benchmarks.v3

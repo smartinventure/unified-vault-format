@@ -10,9 +10,14 @@
 // Copyright (c) Smart In Venture GmbH 2025 of the C# Porting
 
 
-using UvfLib.Api;
 using System.Security.Cryptography;
 using System.Buffers.Binary;
+using UvfLib.Core.V3;
+using UvfLib.Core.Api;
+using UvfLib.Core.CryptomatorV8;
+
+
+
 #if DEBUG
 using System.Diagnostics; // For Stopwatch
 #endif
@@ -42,7 +47,7 @@ namespace UvfLib.VaultHelpers
         private readonly PerformanceMetrics _metrics;
 #endif
 
-        private const int CLEARTEXT_CHUNK_SIZE = V3.Constants.PAYLOAD_SIZE; // Reverted to use constant
+        private const int CLEARTEXT_CHUNK_SIZE = UvfLib.Core.V3.Constants.PAYLOAD_SIZE; // Reverted to use constant
         private readonly Memory<byte> _ciphertextChunkBuffer; // Reusable buffer for encrypted output
 
         public EncryptingStream(Cryptor cryptor, Stream outputStream, bool leaveOpen)
@@ -51,7 +56,6 @@ namespace UvfLib.VaultHelpers
             _outputStream = outputStream ?? throw new ArgumentNullException(nameof(outputStream));
             _leaveOpen = leaveOpen;
             _random = RandomNumberGenerator.Create();
-            _perChunkNonce = new byte[V3.Constants.GCM_NONCE_SIZE];
 
 #if DEBUG
             _metrics = new PerformanceMetrics("EncryptingStream")
@@ -68,17 +72,52 @@ namespace UvfLib.VaultHelpers
                 throw new InvalidOperationException("Cryptor not fully initialized for file operations.");
 
             _fileHeader = _cryptor.FileHeaderCryptor().Create();
-            var fileContentKeyBytes = ((V3.FileHeaderImpl)_fileHeader).GetContentKey().GetEncoded();
-            _fileContentAesGcm = new AesGcm(fileContentKeyBytes);
+
+            // Handle both V3 and CryptomatorV8 header types
+            if (_fileHeader is UvfLib.Core.V3.FileHeaderImpl v3Header)
+            {
+                // V3 implementation
+                var fileContentKeyBytes = v3Header.GetContentKey().GetEncoded();
+                _fileContentAesGcm = new AesGcm(fileContentKeyBytes);
+                _perChunkNonce = new byte[UvfLib.Core.V3.Constants.GCM_NONCE_SIZE];
+                
+                // Initialize AAD buffer for V3: 8 bytes for chunk number + header nonce length
+                ReadOnlySpan<byte> headerNonce = v3Header.GetNonce();
+                _aadBuffer = new byte[8 + headerNonce.Length];
+                headerNonce.CopyTo(_aadBuffer.AsSpan(8));
+            }
+            else if (_fileHeader is Core.CryptomatorV8.FileHeaderImpl v8Header)
+            {
+                // CryptomatorV8 implementation - copy key bytes to prevent destruction issues
+                var payload = v8Header.GetPayload();
+                var contentKey = payload.GetContentKey();
+                
+                if (contentKey.IsDestroyed)
+                {
+                    throw new InvalidOperationException("Content key has been destroyed before use");
+                }
+                
+                // Make a copy of the key bytes to prevent access after destruction
+                var originalBytes = contentKey.GetEncoded();
+                byte[] fileContentKeyBytes = new byte[originalBytes.Length];
+                Buffer.BlockCopy(originalBytes, 0, fileContentKeyBytes, 0, originalBytes.Length);
+                
+                _fileContentAesGcm = new AesGcm(fileContentKeyBytes);
+                _perChunkNonce = new byte[Core.CryptomatorV8.Constants.GCM_NONCE_SIZE];
+                
+                // Initialize AAD buffer for V8: 8 bytes for chunk number + header nonce length  
+                ReadOnlySpan<byte> headerNonce = v8Header.GetNonce();
+                _aadBuffer = new byte[8 + headerNonce.Length];
+                headerNonce.CopyTo(_aadBuffer.AsSpan(8));
+            }
+            else
+            {
+                throw new NotSupportedException($"Unsupported FileHeader type: {_fileHeader.GetType().FullName}");
+            }
 
             _cleartextChunkBuffer = new byte[CLEARTEXT_CHUNK_SIZE]; // Uses the constant
             // Ciphertext buffer size should also be based on the constant PAYLOAD_SIZE via CleartextChunkSize() or directly
             _ciphertextChunkBuffer = new Memory<byte>(new byte[_cryptor.FileContentCryptor().CiphertextChunkSize()]);
-            
-            // Initialize AAD buffer: 8 bytes for chunk number + header nonce length
-            ReadOnlySpan<byte> headerNonce = ((V3.FileHeaderImpl)_fileHeader).GetNonce();
-            _aadBuffer = new byte[8 + headerNonce.Length];
-            headerNonce.CopyTo(_aadBuffer.AsSpan(8)); // Copy header nonce to the latter part of AAD buffer
         }
 
         private void EnsureHeaderWritten()
@@ -119,42 +158,71 @@ namespace UvfLib.VaultHelpers
 
         private void EncryptAndWriteChunk(ReadOnlyMemory<byte> cleartextChunk)
         {
-#if DEBUG
-            _metrics.StartTiming();
-#endif
             _random.GetBytes(_perChunkNonce);
-#if DEBUG
-            _metrics.StopTiming(ref _metrics.TotalOperation1TimeMs); // NonceGen
-            _metrics.StartTiming();
-#endif
+
             BinaryPrimitives.WriteInt64BigEndian(_aadBuffer.AsSpan(0, 8), _currentChunkNumber);
-#if DEBUG
-            _metrics.StopTiming(ref _metrics.TotalOperation2TimeMs); // AADPrep
-            _metrics.StartTiming();
-#endif
-            ((V3.FileContentCryptorImpl)_cryptor.FileContentCryptor()).EncryptChunk(
-                _fileContentAesGcm,
-                cleartextChunk,
-                _ciphertextChunkBuffer, 
-                _currentChunkNumber,
-                _perChunkNonce, 
-                _aadBuffer 
-            );
-#if DEBUG
-            _metrics.StopTiming(ref _metrics.TotalOperation3TimeMs); // EncryptOp
-#endif
-            _currentChunkNumber++; 
-            
-            int actualEncryptedLength = V3.Constants.GCM_NONCE_SIZE + cleartextChunk.Length + V3.Constants.GCM_TAG_SIZE;
-            
-#if DEBUG
-            _metrics.StartTiming();
-#endif
-            _outputStream.Write(_ciphertextChunkBuffer.Slice(0, actualEncryptedLength).Span);
-#if DEBUG
-            _metrics.StopTiming(ref _metrics.TotalOperation4TimeMs); // StreamWrite
-            _metrics.IncrementChunksProcessed();
-#endif
+
+            // Handle both V3 and CryptomatorV8 implementations
+            if (_cryptor.FileContentCryptor() is UvfLib.Core.V3.FileContentCryptorImpl v3Cryptor)
+            {
+                // V3 implementation
+                int expectedEncryptedLength = UvfLib.Core.V3.Constants.GCM_NONCE_SIZE + cleartextChunk.Length + UvfLib.Core.V3.Constants.GCM_TAG_SIZE;
+                _ciphertextChunkBuffer.Slice(0, expectedEncryptedLength).Span.Clear();
+                
+                v3Cryptor.EncryptChunk(
+                    _fileContentAesGcm,
+                    cleartextChunk,
+                    _ciphertextChunkBuffer, 
+                    _currentChunkNumber,
+                    _perChunkNonce, 
+                    _aadBuffer 
+                );
+                
+                _currentChunkNumber++; 
+                
+                int actualEncryptedLength = UvfLib.Core.V3.Constants.GCM_NONCE_SIZE + cleartextChunk.Length + UvfLib.Core.V3.Constants.GCM_TAG_SIZE;
+                
+                if (actualEncryptedLength != expectedEncryptedLength)
+                {
+                    throw new InvalidOperationException($"Encrypted length mismatch: expected {expectedEncryptedLength}, actual {actualEncryptedLength}");
+                }
+                
+                _outputStream.Write(_ciphertextChunkBuffer.Slice(0, actualEncryptedLength).Span);
+            }
+            else if (_cryptor.FileContentCryptor() is Core.CryptomatorV8.FileContentCryptorImpl v8Cryptor)
+            {
+                // CryptomatorV8 implementation - use proper random nonce and AAD according to specification
+                int expectedEncryptedLength = Core.CryptomatorV8.Constants.GCM_NONCE_SIZE + cleartextChunk.Length + Core.CryptomatorV8.Constants.GCM_TAG_SIZE;
+                _ciphertextChunkBuffer.Slice(0, expectedEncryptedLength).Span.Clear();
+                
+                // Generate completely random nonce (as per Cryptomator specification)
+                byte[] nonce = new byte[Core.CryptomatorV8.Constants.GCM_NONCE_SIZE];
+                _random.GetBytes(nonce);
+                
+                // Copy nonce to the beginning of ciphertext buffer
+                nonce.CopyTo(_ciphertextChunkBuffer.Span);
+                
+                // Construct AAD: bigEndian(chunkNumber) . headerNonce (as per specification)
+                BinaryPrimitives.WriteInt64BigEndian(_aadBuffer.AsSpan(0, 8), _currentChunkNumber);
+                
+                // Encrypt using AES-GCM with proper AAD
+                byte[] ciphertext = new byte[cleartextChunk.Length];
+                byte[] tag = new byte[Core.CryptomatorV8.Constants.GCM_TAG_SIZE];
+                
+                _fileContentAesGcm.Encrypt(nonce, cleartextChunk.Span, ciphertext, tag, _aadBuffer);
+                
+                // Copy ciphertext and tag to the buffer
+                ciphertext.CopyTo(_ciphertextChunkBuffer.Span.Slice(Core.CryptomatorV8.Constants.GCM_NONCE_SIZE));
+                tag.CopyTo(_ciphertextChunkBuffer.Span.Slice(Core.CryptomatorV8.Constants.GCM_NONCE_SIZE + cleartextChunk.Length));
+                
+                _currentChunkNumber++;
+                
+                _outputStream.Write(_ciphertextChunkBuffer.Slice(0, expectedEncryptedLength).Span);
+            }
+            else
+            {
+                throw new NotSupportedException($"Unsupported FileContentCryptor type: {_cryptor.FileContentCryptor().GetType().FullName}");
+            }
         }
 
         public override void Flush()
@@ -169,6 +237,7 @@ namespace UvfLib.VaultHelpers
                 _bufferPosition = 0; // Clear buffer after flushing
             }
 
+            // CRITICAL: Ensure underlying stream is properly flushed
             _outputStream.Flush(); // Flush the underlying stream
         }
 
@@ -181,6 +250,15 @@ namespace UvfLib.VaultHelpers
                     try
                     {
                         Flush();
+                        
+                        // ADDITIONAL SAFETY: Explicit flush and sync before closing
+                        _outputStream.Flush();
+                        
+                        // Force OS to sync to disk if it's a FileStream
+                        if (_outputStream is FileStream fileStream)
+                        {
+                            fileStream.Flush(true); // Force OS flush
+                        }
                     }
                     finally
                     {

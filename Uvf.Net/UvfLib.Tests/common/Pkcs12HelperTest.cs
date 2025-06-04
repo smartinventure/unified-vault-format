@@ -1,8 +1,8 @@
 using Microsoft.VisualStudio.TestTools.UnitTesting;
-using UvfLib.Common;
 using System;
 using System.IO;
 using System.Security.Cryptography;
+using UvfLib.Core.Common;
 
 namespace UvfLib.Tests.Common
 {

@@ -1,13 +1,14 @@
 using Microsoft.VisualStudio.TestTools.UnitTesting;
-using UvfLib.Api;
-using UvfLib.Common;
+using UvfLib.Core.Common;
 using UvfLib.Tests.Common;
-using UvfLib.V3;
+using UvfLib.Core.V3;
 using System;
 using System.Collections.Generic;
 using System.Security.Cryptography;
 using System.Text;
-using System.Linq; // Added for Enumerable.Repeat
+using System.Linq;
+using UvfLib.Core.V3;
+using UvfLib.Core.Api; // Added for Enumerable.Repeat
 
 namespace UvfLib.Tests.V3
 {

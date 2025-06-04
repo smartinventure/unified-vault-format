@@ -1,4 +1,4 @@
-using UvfLib.Common;
+using UvfLib.Core.Common;
 
 namespace UvfLib.Tests.Common
 {

@@ -9,11 +9,11 @@
 
 // Copyright (c) Smart In Venture GmbH 2025 of the C# Porting
 
-using UvfLib.Api;
-using UvfLib.V3;
-using UvfLib.Common;
 using System;
 using System.IO;
+using UvfLib.Core.Common;
+using UvfLib.Core.V3;
+using UvfLib.Core.Api;
 
 namespace UvfLib.VaultHelpers
 {

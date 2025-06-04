@@ -1,15 +1,16 @@
 using Microsoft.VisualStudio.TestTools.UnitTesting;
-using UvfLib.Api;
-using UvfLib.Common;
 using UvfLib.Tests.Common;
-using UvfLib.V3;
-using V3Constants = UvfLib.V3.Constants;
+using UvfLib.Core.V3;
+using V3Constants = UvfLib.Core.V3.Constants;
 using System;
 using System.Buffers;
 using System.Collections.Generic;
 using System.Security.Cryptography;
 using System.Text;
 using Moq;
+using UvfLib.Core.V3;
+using UvfLib.Core.Common;
+using UvfLib.Core.Api;
 
 namespace UvfLib.Tests.V3
 {
@@ -61,7 +62,7 @@ namespace UvfLib.Tests.V3
             // We need to simulate NULL_RANDOM's effect here.
             byte[] zeroNonce = new byte[FileHeaderImpl.NONCE_LEN]; // 12 bytes
             byte[] zeroKeyBytes = new byte[FileHeaderImpl.CONTENT_KEY_LEN]; // 32 bytes
-            using DestroyableSecretKey zeroContentKey = new DestroyableSecretKey(zeroKeyBytes, UvfLib.V3.Constants.CONTENT_ENC_ALG); // "AES"
+            using DestroyableSecretKey zeroContentKey = new DestroyableSecretKey(zeroKeyBytes, V3Constants.CONTENT_ENC_ALG); // "AES"
             using FileHeader header = new FileHeaderImpl(TestRevision, zeroNonce, zeroContentKey);
 
             // Expected ciphertext from Java test (Base64 decoded)

@@ -10,10 +10,14 @@
 // Copyright (c) Smart In Venture GmbH 2025 of the C# Porting
 
 
-using UvfLib.Api;
-using UvfLib.V3;
 using System.Security.Cryptography;
 using System.Buffers.Binary;
+using UvfLib.Core.V3;
+using UvfLib.Core.Api;
+using UvfLib.Core.CryptomatorV8;
+
+
+
 #if DEBUG
 using System.Diagnostics;
 #endif
@@ -40,14 +44,17 @@ namespace UvfLib.VaultHelpers
         private bool _endOfStreamReached = false;
         private long _virtualPosition = 0;  // Track position in decrypted stream
         private readonly long _virtualLength;  // Total decrypted length
+        private readonly int _plaintextChunkSize;
+        private readonly int _ciphertextChunkSize;
+        private readonly int _headerSize;
 
 #if DEBUG
         private readonly PerformanceMetrics _metrics;
 #endif
 
-        // Revert to using constants from V3.Constants
-        private const int PLAINTEXT_CHUNK_SIZE = V3.Constants.PAYLOAD_SIZE;
-        private const int CIPHERTEXT_CHUNK_SIZE = V3.Constants.CHUNK_SIZE;
+        // Constants - will be the same for both formats
+        private const int PLAINTEXT_CHUNK_SIZE = 32 * 1024; // 32KB
+        private const int CIPHERTEXT_CHUNK_SIZE = 12 + 32 * 1024 + 16; // nonce + payload + tag
 
         public DecryptingStream(Cryptor cryptor, Stream inputStream, bool leaveOpen)
         {
@@ -55,13 +62,27 @@ namespace UvfLib.VaultHelpers
             _inputStream = inputStream ?? throw new ArgumentNullException(nameof(inputStream));
             _leaveOpen = leaveOpen;
 
+            // Determine format-specific constants
+            if (_cryptor.FileContentCryptor() is UvfLib.Core.CryptomatorV8.FileContentCryptorImpl)
+            {
+                _plaintextChunkSize = UvfLib.Core.CryptomatorV8.Constants.PAYLOAD_SIZE;
+                _ciphertextChunkSize = UvfLib.Core.CryptomatorV8.Constants.CHUNK_SIZE;
+                _headerSize = UvfLib.Core.CryptomatorV8.FileHeaderImpl.SIZE;
+            }
+            else
+            {
+                _plaintextChunkSize = UvfLib.Core.V3.Constants.PAYLOAD_SIZE;
+                _ciphertextChunkSize = UvfLib.Core.V3.Constants.CHUNK_SIZE;
+                _headerSize = UvfLib.Core.V3.FileHeaderImpl.SIZE;
+            }
+
 #if DEBUG
             _metrics = new PerformanceMetrics("DecryptingStream")
             {
-                Operation1Name = "StreamRead",
-                Operation2Name = "AADPrep",
+                Operation1Name = "NonceExt",
+                Operation2Name = "AADPrep", 
                 Operation3Name = "DecryptOp",
-                Operation4Name = "Seek" // Added seek operation tracking
+                Operation4Name = "BuffCopy"
             };
 #endif
 
@@ -69,19 +90,13 @@ namespace UvfLib.VaultHelpers
             if (_cryptor.FileHeaderCryptor() == null || _cryptor.FileContentCryptor() == null)
                 throw new InvalidOperationException("Cryptor not fully initialized for file operations.");
 
-            // Calculate virtual length if input stream supports seeking
-            if (_inputStream.CanSeek)
-            {
-                long encryptedLength = _inputStream.Length;
-                _virtualLength = CalculateDecryptedLength(encryptedLength);
-            }
-
-            // Allocate buffers using the constants
+            // Calculate virtual length
+            _virtualLength = CalculateDecryptedLength(_inputStream.Length);
             _ciphertextChunkBuffer = new byte[CIPHERTEXT_CHUNK_SIZE];
             _plaintextChunkBuffer = new Memory<byte>(new byte[PLAINTEXT_CHUNK_SIZE]);
 
             // 1. Read and decrypt header
-            byte[] encryptedHeader = new byte[FileHeaderImpl.SIZE];
+            byte[] encryptedHeader = new byte[UvfLib.Core.V3.FileHeaderImpl.SIZE];
             int bytesRead = ReadExactly(_inputStream, encryptedHeader, 0, encryptedHeader.Length);
             if (bytesRead < encryptedHeader.Length)
             {
@@ -89,21 +104,51 @@ namespace UvfLib.VaultHelpers
             }
             _fileHeader = _cryptor.FileHeaderCryptor().DecryptHeader(encryptedHeader);
 
-            // 1.1 Initialize AesGcm for file content
-            var fileContentKeyBytes = ((V3.FileHeaderImpl)_fileHeader).GetContentKey().GetEncoded();
-            _fileContentAesGcm = new AesGcm(fileContentKeyBytes);
-            // Assuming DestroyableSecretKey.GetEncoded() returns a copy, the original within FileHeader is managed by its Dispose.
-
-            // Initialize AAD buffer: 8 bytes for chunk number + header nonce length
-            ReadOnlySpan<byte> headerNonce = ((V3.FileHeaderImpl)_fileHeader).GetNonce();
-            _aadBuffer = new byte[8 + headerNonce.Length];
-            headerNonce.CopyTo(_aadBuffer.AsSpan(8)); // Copy header nonce to the latter part of AAD buffer
+            // Handle both V3 and CryptomatorV8 header types
+            if (_fileHeader is UvfLib.Core.V3.FileHeaderImpl v3Header)
+            {
+                // V3 implementation
+                var fileContentKeyBytes = v3Header.GetContentKey().GetEncoded();
+                _fileContentAesGcm = new AesGcm(fileContentKeyBytes);
+                
+                // Initialize AAD buffer: 8 bytes for chunk number + header nonce length
+                ReadOnlySpan<byte> headerNonce = v3Header.GetNonce();
+                _aadBuffer = new byte[8 + headerNonce.Length];
+                headerNonce.CopyTo(_aadBuffer.AsSpan(8)); // Copy header nonce to the latter part of AAD buffer
+            }
+            else if (_fileHeader is UvfLib.Core.CryptomatorV8.FileHeaderImpl v8Header)
+            {
+                // CryptomatorV8 implementation - copy key bytes to prevent destruction issues
+                var payload = v8Header.GetPayload();
+                var contentKey = payload.GetContentKey();
+                
+                if (contentKey.IsDestroyed)
+                {
+                    throw new InvalidOperationException("Content key has been destroyed before use");
+                }
+                
+                // Make a copy of the key bytes to prevent access after destruction
+                var originalBytes = contentKey.GetEncoded();
+                byte[] fileContentKeyBytes = new byte[originalBytes.Length];
+                Buffer.BlockCopy(originalBytes, 0, fileContentKeyBytes, 0, originalBytes.Length);
+                
+                _fileContentAesGcm = new AesGcm(fileContentKeyBytes);
+                
+                // Initialize AAD buffer: 8 bytes for chunk number + header nonce length  
+                ReadOnlySpan<byte> headerNonce = v8Header.GetNonce();
+                _aadBuffer = new byte[8 + headerNonce.Length];
+                headerNonce.CopyTo(_aadBuffer.AsSpan(8)); // Copy header nonce to the latter part of AAD buffer
+            }
+            else
+            {
+                throw new NotSupportedException($"Unsupported FileHeader type: {_fileHeader.GetType().FullName}");
+            }
         }
 
         private long CalculateDecryptedLength(long encryptedLength)
         {
             // Remove header size
-            long contentLength = encryptedLength - FileHeaderImpl.SIZE;
+            long contentLength = encryptedLength - UvfLib.Core.V3.FileHeaderImpl.SIZE;
             if (contentLength <= 0) return 0;
 
             // Calculate number of complete chunks
@@ -114,9 +159,9 @@ namespace UvfLib.VaultHelpers
             long decryptedBytes = completeChunks * PLAINTEXT_CHUNK_SIZE;
 
             // Handle last partial chunk if any
-            if (remainingBytes > V3.Constants.GCM_NONCE_SIZE + V3.Constants.GCM_TAG_SIZE)
+            if (remainingBytes > UvfLib.Core.V3.Constants.GCM_NONCE_SIZE + UvfLib.Core.V3.Constants.GCM_TAG_SIZE)
             {
-                decryptedBytes += remainingBytes - (V3.Constants.GCM_NONCE_SIZE + V3.Constants.GCM_TAG_SIZE);
+                decryptedBytes += remainingBytes - (UvfLib.Core.V3.Constants.GCM_NONCE_SIZE + UvfLib.Core.V3.Constants.GCM_TAG_SIZE);
             }
 
             return decryptedBytes;
@@ -184,17 +229,11 @@ namespace UvfLib.VaultHelpers
             return totalBytesRead;
         }
 
-        private bool ReadAndDecryptNextChunk()
+        private bool ReadAndDecryptNextChunk(bool incrementChunkNumber = true)
         {
             if (_endOfStreamReached) return false;
 
-#if DEBUG
-            _metrics.StartTiming();
-#endif
             int bytesRead = ReadUpTo(_inputStream, _ciphertextChunkBuffer, 0, CIPHERTEXT_CHUNK_SIZE);
-#if DEBUG
-            _metrics.StopTiming(ref _metrics.TotalOperation1TimeMs); // StreamRead
-#endif
 
             if (bytesRead == 0)
             {
@@ -204,39 +243,68 @@ namespace UvfLib.VaultHelpers
                 return false;
             }
 
-            int minCiphertextSize = V3.Constants.GCM_NONCE_SIZE + V3.Constants.GCM_TAG_SIZE;
+            int minCiphertextSize = UvfLib.Core.V3.Constants.GCM_NONCE_SIZE + UvfLib.Core.V3.Constants.GCM_TAG_SIZE;
             if (bytesRead < minCiphertextSize)
             {
                 _endOfStreamReached = true;
                 throw new InvalidCiphertextException($"Incomplete ciphertext chunk read (read {bytesRead}, needed at least {minCiphertextSize}). Possible truncation or corruption.");
             }
 
-#if DEBUG
-            _metrics.StartTiming();
-#endif
+            // CRITICAL FIX: Clear the plaintext buffer before decryption to prevent leftover data
+            _plaintextChunkBuffer.Span.Clear();
+
             BinaryPrimitives.WriteInt64BigEndian(_aadBuffer.AsSpan(0, 8), _currentChunkNumber);
-#if DEBUG
-            _metrics.StopTiming(ref _metrics.TotalOperation2TimeMs); // AADPrep
-            _metrics.StartTiming();
-#endif
-            _plaintextBufferLength = ((V3.FileContentCryptorImpl)_cryptor.FileContentCryptor()).DecryptChunk(
-                _fileContentAesGcm,
-                new ReadOnlyMemory<byte>(_ciphertextChunkBuffer, 0, bytesRead),
-                _plaintextChunkBuffer,
-                _currentChunkNumber, 
-                _aadBuffer 
-            );
-#if DEBUG
-            _metrics.StopTiming(ref _metrics.TotalOperation3TimeMs); // DecryptOp
-            _metrics.IncrementChunksProcessed();
-#endif
-            _currentChunkNumber++; 
+
+            // Handle both V3 and CryptomatorV8 implementations
+            if (_cryptor.FileContentCryptor() is UvfLib.Core.V3.FileContentCryptorImpl v3Cryptor)
+            {
+                // V3 implementation
+                _plaintextBufferLength = v3Cryptor.DecryptChunk(
+                    _fileContentAesGcm,
+                    new ReadOnlyMemory<byte>(_ciphertextChunkBuffer, 0, bytesRead),
+                    _plaintextChunkBuffer,
+                    _currentChunkNumber, 
+                    _aadBuffer 
+                );
+            }
+            else if (_cryptor.FileContentCryptor() is UvfLib.Core.CryptomatorV8.FileContentCryptorImpl v8Cryptor)
+            {
+                // CryptomatorV8 implementation - use Core method for consistency
+                try
+                {
+                    var decryptedChunk = v8Cryptor.DecryptChunk(
+                        new ReadOnlyMemory<byte>(_ciphertextChunkBuffer, 0, bytesRead),
+                        _currentChunkNumber,
+                        _fileHeader,
+                        true // authenticate
+                    );
+                    
+                    // Copy decrypted data to buffer
+                    decryptedChunk.CopyTo(_plaintextChunkBuffer);
+                    _plaintextBufferLength = decryptedChunk.Length;
+                }
+                catch (Exception ex) when (ex is CryptographicException || ex.GetType().Name.Contains("Authentication"))
+                {
+                    throw new System.Security.Cryptography.AuthenticationTagMismatchException($"Chunk {_currentChunkNumber} authentication failed", ex);
+                }
+            }
+            else
+            {
+                throw new NotSupportedException($"Unsupported FileContentCryptor type: {_cryptor.FileContentCryptor().GetType().FullName}");
+            }
 
             _plaintextBufferPosition = 0;
             if (bytesRead < CIPHERTEXT_CHUNK_SIZE)
             {
                 _endOfStreamReached = true;
             }
+            
+            // FIXED: Only increment chunk number if requested (for sequential reads)
+            if (incrementChunkNumber)
+            {
+                _currentChunkNumber++; 
+            }
+            
             return true;
         }
 
@@ -369,7 +437,7 @@ namespace UvfLib.VaultHelpers
 
         private long GetChunkStartPosition(long chunkNumber)
         {
-            return FileHeaderImpl.SIZE + (chunkNumber * CIPHERTEXT_CHUNK_SIZE);
+            return UvfLib.Core.V3.FileHeaderImpl.SIZE + (chunkNumber * CIPHERTEXT_CHUNK_SIZE);
         }
 
         private void SeekToChunk(long targetChunkNumber)
@@ -388,14 +456,14 @@ namespace UvfLib.VaultHelpers
             long targetPosition = GetChunkStartPosition(targetChunkNumber);
             _inputStream.Position = targetPosition;
 
-            // Reset state
+            // Reset state to target chunk
             _currentChunkNumber = targetChunkNumber;
             _plaintextBufferPosition = 0;
             _plaintextBufferLength = 0;
             _endOfStreamReached = false;
 
-            // Read and decrypt the chunk
-            ReadAndDecryptNextChunk();
+            // Read and decrypt the chunk WITHOUT incrementing chunk number
+            ReadAndDecryptNextChunk(incrementChunkNumber: false);
 
 #if DEBUG
             _metrics.StopTiming(ref _metrics.TotalOperation4TimeMs); // Seek
@@ -404,6 +472,5 @@ namespace UvfLib.VaultHelpers
 
         public override void SetLength(long value) => throw new NotSupportedException("DecryptingStream length cannot be set.");
         public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException("DecryptingStream does not support writing.");
-
     }
 }

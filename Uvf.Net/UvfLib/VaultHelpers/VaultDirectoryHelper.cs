@@ -10,9 +10,11 @@
 // Copyright (c) Smart In Venture GmbH 2025 of the C# Porting
 
 
-using UvfLib.Api;
 using System;
 using System.IO;
+using UvfLib.Core.Api;
+using UvfLib.Core.V3;
+using UvfLib.Core.Common;
 
 namespace UvfLib.VaultHelpers
 {
@@ -21,6 +23,24 @@ namespace UvfLib.VaultHelpers
     /// </summary>
     internal static class VaultDirectoryHelper
     {
+        /// <summary>
+        /// Converts public DirectoryMetadata to Core DirectoryMetadata.
+        /// </summary>
+        private static UvfLib.Core.Api.DirectoryMetadata ToCore(DirectoryMetadata publicMetadata)
+        {
+            if (publicMetadata == null) throw new ArgumentNullException(nameof(publicMetadata));
+            return publicMetadata.GetCoreMetadata();
+        }
+
+        /// <summary>
+        /// Converts Core DirectoryMetadata to public DirectoryMetadata.
+        /// </summary>
+        private static DirectoryMetadata ToPublic(UvfLib.Core.Api.DirectoryMetadata coreMetadata)
+        {
+            if (coreMetadata == null) throw new ArgumentNullException(nameof(coreMetadata));
+            return new DirectoryMetadata(coreMetadata);
+        }
+
         // --- Directory Metadata Handling --- 
 
         public static byte[] EncryptDirectoryMetadataInternal(Cryptor cryptor, DirectoryMetadata metadata)
@@ -28,14 +48,15 @@ namespace UvfLib.VaultHelpers
             if (cryptor?.DirectoryContentCryptor() == null) throw new InvalidOperationException("Directory cryptor not available.");
             if (metadata == null) throw new ArgumentNullException(nameof(metadata));
 
-            // Assuming the implementation handles potential type casting if needed
-            return cryptor.DirectoryContentCryptor().EncryptDirectoryMetadata(metadata);
+            var coreMetadata = ToCore(metadata);
+            return cryptor.DirectoryContentCryptor().EncryptDirectoryMetadata(coreMetadata);
         }
 
         public static DirectoryMetadata CreateNewDirectoryMetadataInternal(Cryptor cryptor)
         {
             if (cryptor?.DirectoryContentCryptor() == null) throw new InvalidOperationException("Directory cryptor not available.");
-            return cryptor.DirectoryContentCryptor().NewDirectoryMetadata();
+            var coreMetadata = cryptor.DirectoryContentCryptor().NewDirectoryMetadata();
+            return ToPublic(coreMetadata);
         }
 
         // --- Filename Handling (Contextual) ---
@@ -46,7 +67,8 @@ namespace UvfLib.VaultHelpers
             if (directoryMetadata == null) throw new ArgumentNullException(nameof(directoryMetadata));
             if (plaintextFilename == null) throw new ArgumentNullException(nameof(plaintextFilename));
 
-            var nameEncryptor = cryptor.DirectoryContentCryptor().FileNameEncryptor(directoryMetadata);
+            var coreMetadata = ToCore(directoryMetadata);
+            var nameEncryptor = cryptor.DirectoryContentCryptor().FileNameEncryptor(coreMetadata);
             return nameEncryptor.Encrypt(plaintextFilename);
         }
 
@@ -56,7 +78,8 @@ namespace UvfLib.VaultHelpers
             if (directoryMetadata == null) throw new ArgumentNullException(nameof(directoryMetadata));
             if (encryptedFilename == null) throw new ArgumentNullException(nameof(encryptedFilename));
 
-            var nameDecryptor = cryptor.DirectoryContentCryptor().FileNameDecryptor(directoryMetadata);
+            var coreMetadata = ToCore(directoryMetadata);
+            var nameDecryptor = cryptor.DirectoryContentCryptor().FileNameDecryptor(coreMetadata);
             return nameDecryptor.Decrypt(encryptedFilename);
         }
 
@@ -67,7 +90,121 @@ namespace UvfLib.VaultHelpers
             if (cryptor?.DirectoryContentCryptor() == null) throw new InvalidOperationException("Directory cryptor not available.");
             if (directoryMetadata == null) throw new ArgumentNullException(nameof(directoryMetadata));
 
-            return cryptor.DirectoryContentCryptor().DirPath(directoryMetadata);
+            var coreMetadata = ToCore(directoryMetadata);
+            return cryptor.DirectoryContentCryptor().DirPath(coreMetadata);
+        }
+
+        // --- Vault Format Specific Helpers ---
+
+        /// <summary>
+        /// Gets the directory metadata filename based on the vault format and directory type.
+        /// </summary>
+        /// <param name="cryptor">The cryptor instance</param>
+        /// <param name="directoryMetadata">The directory metadata (optional, used to determine if it's root directory)</param>
+        /// <returns>The directory metadata filename</returns>
+        public static string GetDirectoryMetadataFilename(Cryptor cryptor, DirectoryMetadata directoryMetadata = null)
+        {
+            if (cryptor?.DirectoryContentCryptor() == null) throw new InvalidOperationException("Directory cryptor not available.");
+            
+            // Check if this is a Cryptomator v8 cryptor
+            if (cryptor.DirectoryContentCryptor().GetType().FullName?.Contains("CryptomatorV8") == true)
+            {
+                // For Cryptomator v8, differentiate between root and non-root directories
+                if (directoryMetadata != null)
+                {
+                    var coreRootMetadata = cryptor.DirectoryContentCryptor().RootDirectoryMetadata();
+                    var rootMetadata = ToPublic(coreRootMetadata);
+                    if (directoryMetadata.Equals(rootMetadata))
+                    {
+                        return "dirid.c9r"; // Root directory uses dirid.c9r
+                    }
+                }
+                return "dir.c9r"; // Subdirectories use dir.c9r
+            }
+            
+            // Default to UVF format
+            return "dir.uvf";
+        }
+
+        /// <summary>
+        /// Gets the directory metadata filename based on the vault format.
+        /// For backwards compatibility, this assumes non-root directory for Cryptomator v8.
+        /// </summary>
+        /// <param name="cryptor">The cryptor instance</param>
+        /// <returns>The directory metadata filename</returns>
+        public static string GetDirectoryMetadataFilename(Cryptor cryptor)
+        {
+            return GetDirectoryMetadataFilename(cryptor, null);
+        }
+
+        /// <summary>
+        /// Checks if the cryptor is for Cryptomator v8 format.
+        /// </summary>
+        /// <param name="cryptor">The cryptor instance</param>
+        /// <returns>True if this is a Cryptomator v8 cryptor</returns>
+        public static bool IsCryptomatorV8(Cryptor cryptor)
+        {
+            if (cryptor?.DirectoryContentCryptor() == null) return false;
+            return cryptor.DirectoryContentCryptor().GetType().FullName?.Contains("CryptomatorV8") == true;
+        }
+
+        /// <summary>
+        /// Checks if directory metadata should be saved to a file for the given directory.
+        /// For Cryptomator v8 root directory, metadata is not saved to a file.
+        /// </summary>
+        /// <param name="cryptor">The cryptor instance</param>
+        /// <param name="directoryMetadata">The directory metadata to check</param>
+        /// <returns>True if metadata should be saved to a file, false otherwise</returns>
+        public static bool ShouldSaveDirectoryMetadata(Cryptor cryptor, DirectoryMetadata directoryMetadata)
+        {
+            if (cryptor?.DirectoryContentCryptor() == null) throw new InvalidOperationException("Directory cryptor not available.");
+            if (directoryMetadata == null) throw new ArgumentNullException(nameof(directoryMetadata));
+
+            // For Cryptomator v8, check if this is the root directory
+            if (IsCryptomatorV8(cryptor))
+            {
+                var coreRootMetadata = cryptor.DirectoryContentCryptor().RootDirectoryMetadata();
+                var rootMetadata = ToPublic(coreRootMetadata);
+                if (directoryMetadata.Equals(rootMetadata))
+                {
+                    return false; // Root directory metadata is not saved to file in v8
+                }
+            }
+
+            // For all other cases (UVF format or v8 non-root directories), save metadata
+            return true;
+        }
+
+        /// <summary>
+        /// Checks if a directory metadata file exists for the given directory.
+        /// For Cryptomator v8 root directory, this always returns true since root metadata is generated.
+        /// </summary>
+        /// <param name="cryptor">The cryptor instance</param>
+        /// <param name="directoryPath">The physical directory path</param>
+        /// <param name="directoryMetadata">The directory metadata (used to check if it's root)</param>
+        /// <returns>True if directory metadata exists or can be generated</returns>
+        public static bool DirectoryMetadataExists(Cryptor cryptor, string directoryPath, DirectoryMetadata directoryMetadata)
+        {
+            if (cryptor?.DirectoryContentCryptor() == null) throw new InvalidOperationException("Directory cryptor not available.");
+            if (string.IsNullOrEmpty(directoryPath)) throw new ArgumentException("Directory path cannot be null or empty", nameof(directoryPath));
+            if (directoryMetadata == null) throw new ArgumentNullException(nameof(directoryMetadata));
+
+            // For Cryptomator v8, check if this is the root directory
+            if (IsCryptomatorV8(cryptor))
+            {
+                // Root directory in Cryptomator v8 has empty directory ID and no dir.c9r file
+                var coreRootMetadata = cryptor.DirectoryContentCryptor().RootDirectoryMetadata();
+                var rootMetadata = ToPublic(coreRootMetadata);
+                if (directoryMetadata.Equals(rootMetadata))
+                {
+                    return true; // Root metadata is always available
+                }
+            }
+
+            // For non-root directories or UVF format, check if the metadata file exists
+            string metadataFilename = GetDirectoryMetadataFilename(cryptor, directoryMetadata);
+            string metadataFilePath = Path.Combine(directoryPath, metadataFilename);
+            return File.Exists(metadataFilePath);
         }
 
         // --- Vault Traversal ---
@@ -98,8 +235,10 @@ namespace UvfLib.VaultHelpers
                 string[] pathSegments = normalizedPath.Split('/', StringSplitOptions.RemoveEmptyEntries);
                 
                 // Start from root directory
-                DirectoryMetadata currentDirMetadata = cryptor.DirectoryContentCryptor().RootDirectoryMetadata();
-                string currentPhysicalPath = Path.Combine(vaultBasePath, cryptor.DirectoryContentCryptor().DirPath(currentDirMetadata));
+                var coreCurrentDirMetadata = cryptor.DirectoryContentCryptor().RootDirectoryMetadata();
+                var currentDirMetadata = ToPublic(coreCurrentDirMetadata);
+                var coreMetadataForPath = ToCore(currentDirMetadata);
+                string currentPhysicalPath = Path.Combine(vaultBasePath, cryptor.DirectoryContentCryptor().DirPath(coreMetadataForPath));
 
                 // Traverse each path segment
                 foreach (string segment in pathSegments)
@@ -114,9 +253,10 @@ namespace UvfLib.VaultHelpers
                         return false;
                     }
 
-                    // Check if dir.uvf exists in the encrypted directory
-                    string dirUvfPath = Path.Combine(encryptedSegmentPath, "dir.uvf");
-                    if (!File.Exists(dirUvfPath))
+                    // Check if directory metadata exists
+                    string metadataFilename = GetDirectoryMetadataFilename(cryptor, currentDirMetadata);
+                    string dirMetadataPath = Path.Combine(encryptedSegmentPath, metadataFilename);
+                    if (!File.Exists(dirMetadataPath))
                     {
                         return false;
                     }
@@ -124,8 +264,9 @@ namespace UvfLib.VaultHelpers
                     // Load and decrypt the metadata for the next level
                     try
                     {
-                        byte[] encryptedMetadata = File.ReadAllBytes(dirUvfPath);
-                        currentDirMetadata = ((Api.DirectoryContentCryptor)cryptor.DirectoryContentCryptor()).DecryptDirectoryMetadata(encryptedMetadata);
+                        byte[] encryptedMetadata = File.ReadAllBytes(dirMetadataPath);
+                        var coreDecryptedMetadata = ((DirectoryContentCryptor)cryptor.DirectoryContentCryptor()).DecryptDirectoryMetadata(encryptedMetadata);
+                        currentDirMetadata = ToPublic(coreDecryptedMetadata);
                         currentPhysicalPath = encryptedSegmentPath;
                     }
                     catch (Exception)
@@ -164,8 +305,10 @@ namespace UvfLib.VaultHelpers
                 string normalizedPath = plaintextDirectoryPath.Trim('/');
                 
                 // Start from root directory
-                DirectoryMetadata currentDirMetadata = cryptor.DirectoryContentCryptor().RootDirectoryMetadata();
-                string currentPhysicalPath = Path.Combine(vaultBasePath, cryptor.DirectoryContentCryptor().DirPath(currentDirMetadata));
+                var coreCurrentDirMetadata = cryptor.DirectoryContentCryptor().RootDirectoryMetadata();
+                var currentDirMetadata = ToPublic(coreCurrentDirMetadata);
+                var coreMetadataForPath = ToCore(currentDirMetadata);
+                string currentPhysicalPath = Path.Combine(vaultBasePath, cryptor.DirectoryContentCryptor().DirPath(coreMetadataForPath));
 
                 // If requesting root directory
                 if (string.IsNullOrEmpty(normalizedPath))
@@ -188,9 +331,10 @@ namespace UvfLib.VaultHelpers
                         return null;
                     }
 
-                    // Check if dir.uvf exists in the encrypted directory
-                    string dirUvfPath = Path.Combine(encryptedSegmentPath, "dir.uvf");
-                    if (!File.Exists(dirUvfPath))
+                    // Check if directory metadata exists
+                    string metadataFilename = GetDirectoryMetadataFilename(cryptor, currentDirMetadata);
+                    string dirMetadataPath = Path.Combine(encryptedSegmentPath, metadataFilename);
+                    if (!File.Exists(dirMetadataPath))
                     {
                         return null;
                     }
@@ -198,8 +342,9 @@ namespace UvfLib.VaultHelpers
                     // Load and decrypt the metadata for the next level
                     try
                     {
-                        byte[] encryptedMetadata = File.ReadAllBytes(dirUvfPath);
-                        currentDirMetadata = ((Api.DirectoryContentCryptor)cryptor.DirectoryContentCryptor()).DecryptDirectoryMetadata(encryptedMetadata);
+                        byte[] encryptedMetadata = File.ReadAllBytes(dirMetadataPath);
+                        var coreDecryptedMetadata = ((DirectoryContentCryptor)cryptor.DirectoryContentCryptor()).DecryptDirectoryMetadata(encryptedMetadata);
+                        currentDirMetadata = ToPublic(coreDecryptedMetadata);
                         currentPhysicalPath = encryptedSegmentPath;
                     }
                     catch (Exception)

@@ -1,8 +1,8 @@
 using System;
 using System.IO;
 using System.Threading.Tasks;
-using UvfLib.Common; // Need this for ISeekableByteChannel
-using UvfLib.Api;    // Need this for IWritableByteChannel
+using UvfLib.Core.Common;
+using UvfLib.Core.Api;    // Need this for IWritableByteChannel
 
 namespace UvfLib.Tests.Common
 {

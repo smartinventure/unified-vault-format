@@ -3,15 +3,15 @@ using System.Collections.Generic;
 using System.Diagnostics.CodeAnalysis;
 using System.Security.Cryptography;
 using System.Text;
-using UvfLib.Api;
-using UvfLib.Common;
+using UvfLib.Core.Api;
+using UvfLib.Core.Common;
 
 namespace UvfLib.Tests.Common
 {
     /// <summary>
     /// Mock implementation of UVFMasterkey for testing purposes
     /// </summary>
-    public class MockUVFMasterkey : UvfLib.Api.UVFMasterkey, DestroyableMasterkey
+    public class MockUVFMasterkey : UVFMasterkey, DestroyableMasterkey
     {
         private readonly Dictionary<int, byte[]> _seedMap;
         private readonly byte[] _kdfSalt;
@@ -277,7 +277,7 @@ namespace UvfLib.Tests.Common
         /// </summary>
         /// <returns>A new copy of this master key</returns>
         [return: MaybeNull]
-        public UvfLib.Api.UVFMasterkey Copy()
+        public UVFMasterkey Copy()
         {
             if (_destroyed)
             {

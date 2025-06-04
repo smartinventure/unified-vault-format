@@ -19,4 +19,8 @@
     <Folder Include="VaultHelpers\" />
   </ItemGroup>
 
+  <ItemGroup>
+    <ProjectReference Include="..\UvfLib.Core\UvfLib.Core.csproj" />
+  </ItemGroup>
+
 </Project>

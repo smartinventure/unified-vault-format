@@ -1,13 +1,13 @@
 using Microsoft.VisualStudio.TestTools.UnitTesting;
-using UvfLib.Api;
-using UvfLib.Common;
 using System;
 using System.Buffers.Binary;
 using System.Collections.Generic;
 using System.Text;
-using UvfLib.V3;
 using System.Text.Json;
 using System.Security.Cryptography;
+using UvfLib.Core.V3;
+using UvfLib.Core.Common;
+using UvfLib.Core.Api;
 
 namespace UvfLib.Tests.Api
 {
@@ -29,16 +29,16 @@ namespace UvfLib.Tests.Api
         [DisplayName("Test Base64 Conversion")]
         public void TestBase64Conversion()
         {
-            // Test Base64Url.Decode (ensure it's accessible, might need to use Jose.Base64Url if UvfLib.Common.Base64Url is different)
-            byte[] decodedBytes = UvfLib.Common.Base64Url.Decode(KDF_SALT_B64);
+            // Test Base64Url.Decode (ensure it's accessible, might need to use Jose.Base64Url if UvfLib.Core.Common.Base64Url is different)
+            byte[] decodedBytes = Base64Url.Decode(KDF_SALT_B64);
             Assert.IsNotNull(decodedBytes);
             Assert.AreEqual(32, decodedBytes.Length);
 
             // Test other samples
-            UvfLib.Common.Base64Url.Decode(SEED_VALUE1_B64);
-            UvfLib.Common.Base64Url.Decode(SEED_VALUE2_B64);
-            UvfLib.Common.Base64Url.Decode(TEST_SEED_VALUE_B64);
-            UvfLib.Common.Base64Url.Decode(TEST_KDF_SALT_B64);
+            Base64Url.Decode(SEED_VALUE1_B64);
+            Base64Url.Decode(SEED_VALUE2_B64);
+            Base64Url.Decode(TEST_SEED_VALUE_B64);
+            Base64Url.Decode(TEST_KDF_SALT_B64);
         }
 
         [TestMethod]
@@ -100,7 +100,7 @@ namespace UvfLib.Tests.Api
             }
 
             // Fix URL-safe Base64 and decode
-            byte[] kdfSaltBytes = UvfLib.Common.Base64Url.Decode(kdfSaltB64);
+            byte[] kdfSaltBytes = Base64Url.Decode(kdfSaltB64);
             Assert.IsNotNull(kdfSaltBytes);
         }
 
@@ -139,10 +139,10 @@ namespace UvfLib.Tests.Api
             Assert.AreEqual(expectedInitialSeedId, masterkey.InitialSeed);
             Assert.AreEqual(expectedLatestSeedId, masterkey.LatestSeed);
 
-            byte[] expectedKdfSalt = UvfLib.Common.Base64Url.Decode("NIlr89R7FhochyP4yuXZmDqCnQ0dBB3UZ2D-6oiIjr8");
+            byte[] expectedKdfSalt = Base64Url.Decode("NIlr89R7FhochyP4yuXZmDqCnQ0dBB3UZ2D-6oiIjr8");
             CollectionAssert.AreEqual(expectedKdfSalt, masterkey.KdfSalt);
             
-            byte[] expectedSeed1Value = UvfLib.Common.Base64Url.Decode("ypeBEsobvcr6wjGzmiPcTaeG7_gUfE5yuYB3ha_uSLs");
+            byte[] expectedSeed1Value = Base64Url.Decode("ypeBEsobvcr6wjGzmiPcTaeG7_gUfE5yuYB3ha_uSLs");
             CollectionAssert.AreEqual(expectedSeed1Value, masterkey.Seeds[SeedIdConverter.ToInt("HDm38i")]); // Use SeedIdConverter
             
             // Test the GetRootDirId() derivation
@@ -161,9 +161,9 @@ namespace UvfLib.Tests.Api
         public void TestSubkey()
         {
             Dictionary<int, byte[]> seeds = new Dictionary<int, byte[]> {
-                { -1540072521, UvfLib.Common.Base64Url.Decode(TEST_SEED_VALUE_B64) }
+                { -1540072521, Base64Url.Decode(TEST_SEED_VALUE_B64) }
             };
-            byte[] kdfSalt = UvfLib.Common.Base64Url.Decode(TEST_KDF_SALT_B64);
+            byte[] kdfSalt = Base64Url.Decode(TEST_KDF_SALT_B64);
 
             using (var masterkeyImpl = new TestUVFMasterkey(seeds, kdfSalt, -1540072521, -1540072521))
             {
@@ -182,9 +182,9 @@ namespace UvfLib.Tests.Api
         public void TestRootDirId()
         {
             Dictionary<int, byte[]> seeds = new Dictionary<int, byte[]> {
-                { -1540072521, UvfLib.Common.Base64Url.Decode(TEST_SEED_VALUE_B64) }
+                { -1540072521, Base64Url.Decode(TEST_SEED_VALUE_B64) }
             };
-            byte[] kdfSalt = UvfLib.Common.Base64Url.Decode(TEST_KDF_SALT_B64);
+            byte[] kdfSalt = Base64Url.Decode(TEST_KDF_SALT_B64);
 
             using (var masterkeyImpl = new TestUVFMasterkey(seeds, kdfSalt, -1540072521, -1540072521))
             {

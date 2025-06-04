@@ -1,10 +1,12 @@
 ﻿using UvfLib;
-using UvfLib.Api;
-using UvfLib.V3;
 using UvfLib.VaultHelpers;
 using System.Diagnostics;
 using System.Linq;
 using System.Collections.Generic;
+using System.Threading;
+using System.IO;
+using System.Security.Cryptography;
+using System.Text;
 
 namespace UvfConsole
 {
@@ -21,7 +23,8 @@ namespace UvfConsole
     {
         // Configuration
         private const string SourceFolderPath = @"D:\temp\uvf\EncryptionTestSource";
-        private const string VaultFolderPath = @"D:\temp\uvf\EncryptionTestVault";
+        //private const string VaultFolderPath = @"D:\temp\uvf\EncryptionTestVault";
+        private const string VaultFolderPath = @"D:\cyptomatortest\tester\tester";
         private const string DecryptedFolderPath = @"D:\temp\uvf\EncryptionTestDecrypted";
         private const string Password = "your-super-secret-password";
         private const bool OutputTreeInfo = false;
@@ -34,6 +37,7 @@ namespace UvfConsole
         {
             public string RelativePath { get; }
             public string SourceHash { get; } // Null for directories
+            public long SourceSize { get; } // File size in bytes, 0 for directories
             public bool IsDirectory { get; }
             public bool ExistsInDecrypted { get; set; }
             public string DecryptedHash { get; set; } // Null for directories, or if not found/not a file
@@ -43,11 +47,12 @@ namespace UvfConsole
             public bool DecryptedHashError => DecryptedHash != null && DecryptedHash.StartsWith("ERROR");
 
 
-            public FileVerificationInfo(string relativePath, bool isDirectory, string sourceHash = null)
+            public FileVerificationInfo(string relativePath, bool isDirectory, string sourceHash = null, long sourceSize = 0)
             {
                 RelativePath = relativePath;
                 IsDirectory = isDirectory;
                 SourceHash = sourceHash;
+                SourceSize = sourceSize;
                 ExistsInDecrypted = false;
                 DecryptedHash = null;
                 TypeMismatch = false;
@@ -86,6 +91,9 @@ namespace UvfConsole
                 Console.WriteLine("Usage: UvfConsole <encrypt|decrypt|testrun> [--uvf|--cryptomator]");
                 Console.WriteLine("  --uvf        : Use Universal Vault Format (default)");
                 Console.WriteLine("  --cryptomator: Use Cryptomator V8 format for legacy compatibility");
+                Console.WriteLine("  encrypt      : Encrypt files from source to vault");
+                Console.WriteLine("  decrypt      : Decrypt files from vault to target");
+                Console.WriteLine("  testrun      : Full round-trip test (encrypt then decrypt with verification)");
                 return;
             }
 
@@ -147,16 +155,23 @@ namespace UvfConsole
             }
 
             Console.WriteLine($"Vault file not found. Creating new {vaultFormat} vault at: {vaultFilePath}");
-            byte[] vaultFileContent = vaultFormat switch
-            {
-                VaultFormat.UVF => Vault.CreateNewUvfVaultFileContent(Password),
-                VaultFormat.CryptomatorV8 => Vault.CreateNewCryptomatorV8VaultFileContent(Password),
-                _ => Vault.CreateNewUvfVaultFileContent(Password)
-            };
             
-            File.WriteAllBytes(vaultFilePath, vaultFileContent);
-            Console.WriteLine($"New {vaultFormat} vault file created.");
-            return vaultFileContent;
+            if (vaultFormat == VaultFormat.CryptomatorV8)
+            {
+                // For Cryptomator V8, create both masterkey.cryptomator and vault.cryptomator
+                string vaultDirectory = Path.GetDirectoryName(vaultFilePath) ?? throw new InvalidOperationException("Invalid vault file path");
+                Vault.CreateNewCryptomatorV8VaultComplete(vaultDirectory, Password);
+                Console.WriteLine($"New {vaultFormat} vault files created (masterkey.cryptomator and vault.cryptomator).");
+                return File.ReadAllBytes(vaultFilePath);
+            }
+            else
+            {
+                // For UVF format, create single file
+                byte[] vaultFileContent = Vault.CreateNewUvfVaultFileContent(Password);
+                File.WriteAllBytes(vaultFilePath, vaultFileContent);
+                Console.WriteLine($"New {vaultFormat} vault file created.");
+                return vaultFileContent;
+            }
         }
 
         private static byte[] HandleDecryptMode(string vaultFilePath, VaultFormat vaultFormat)
@@ -209,15 +224,27 @@ namespace UvfConsole
             {
                 if (File.Exists(vaultFilePath)) File.Delete(vaultFilePath); // Ensure fresh vault file for test
                 
-                byte[] vaultFileContentEnc = vaultFormat switch
+                byte[] vaultFileContentEnc;
+                if (vaultFormat == VaultFormat.CryptomatorV8)
                 {
-                    VaultFormat.UVF => Vault.CreateNewUvfVaultFileContent(Password),
-                    VaultFormat.CryptomatorV8 => Vault.CreateNewCryptomatorV8VaultFileContent(Password),
-                    _ => Vault.CreateNewUvfVaultFileContent(Password)
-                };
-                
-                File.WriteAllBytes(vaultFilePath, vaultFileContentEnc);
-                Console.WriteLine($"New {vaultFormat} vault file created for test run encryption.");
+                    // For Cryptomator V8, create both masterkey.cryptomator and vault.cryptomator
+                    string vaultDirectory = Path.GetDirectoryName(vaultFilePath) ?? throw new InvalidOperationException("Invalid vault file path");
+                    
+                    // Clean up any existing vault files
+                    if (File.Exists(Path.Combine(vaultDirectory, "vault.cryptomator")))
+                        File.Delete(Path.Combine(vaultDirectory, "vault.cryptomator"));
+                    
+                    Vault.CreateNewCryptomatorV8VaultComplete(vaultDirectory, Password);
+                    vaultFileContentEnc = File.ReadAllBytes(vaultFilePath);
+                    Console.WriteLine($"New {vaultFormat} vault files created for test run encryption (masterkey.cryptomator and vault.cryptomator).");
+                }
+                else
+                {
+                    // For UVF format, create single file
+                    vaultFileContentEnc = Vault.CreateNewUvfVaultFileContent(Password);
+                    File.WriteAllBytes(vaultFilePath, vaultFileContentEnc);
+                    Console.WriteLine($"New {vaultFormat} vault file created for test run encryption.");
+                }
 
                 _totalBytesProcessedOverall = 0;
                 _overallStopwatch.Restart();
@@ -251,18 +278,28 @@ namespace UvfConsole
                 using (Vault vault = LoadVault(vaultFileContentDec, Password, vaultFormat))
                 {
                     string rootDirPhysicalPathDec = Path.Combine(VaultFolderPath, vault.GetRootDirectoryPath());
-                    string rootDirUvfPathDec = Path.Combine(rootDirPhysicalPathDec, "dir.uvf");
+                    string rootDirUvfPathDec = Path.Combine(rootDirPhysicalPathDec, vault.GetDirectoryMetadataFilename());
 
-                    if (!File.Exists(rootDirUvfPathDec))
+                    if (!vault.IsCryptomatorV8() && !File.Exists(rootDirUvfPathDec))
                     {
-                        Console.Error.WriteLine($"ERROR in TestRun: Root dir.uvf not found at {rootDirUvfPathDec} after encryption phase. Decryption may fail or be incomplete.");
-                        // Attempt to decrypt anyway if possible, or handle based on vault structure
-                         Directory.CreateDirectory(DecryptedFolderPath); // Ensure target exists
+                        Console.Error.WriteLine($"ERROR in TestRun: Root {vault.GetDirectoryMetadataFilename()} not found at {rootDirUvfPathDec} after encryption phase. Decryption may fail or be incomplete.");
                     }
                     else
                     {
-                        byte[] rootDirBytesDec = File.ReadAllBytes(rootDirUvfPathDec);
-                        DirectoryMetadata rootMetadataDec = vault.DecryptDirectoryMetadata(rootDirBytesDec);
+                        // Handle root directory metadata properly for different vault formats
+                        DirectoryMetadata rootMetadataDec;
+                        if (vault.IsCryptomatorV8())
+                        {
+                            // For Cryptomator v8, use programmatically generated root metadata
+                            rootMetadataDec = vault.GetRootDirectoryMetadata();
+                        }
+                        else
+                        {
+                            // For UVF format, load from metadata file
+                            byte[] rootDirBytesDec = File.ReadAllBytes(rootDirUvfPathDec);
+                            rootMetadataDec = vault.DecryptDirectoryMetadata(rootDirBytesDec);
+                        }
+                        
                         _totalBytesProcessedOverall = DecryptDirectory(vault, rootMetadataDec, rootDirPhysicalPathDec, DecryptedFolderPath);
                     }
                 }
@@ -308,48 +345,23 @@ namespace UvfConsole
             {
                 Console.WriteLine("Vault loaded successfully.");
 
-                DirectoryMetadata rootMetadata;
-                string rootDirPhysicalPath = Path.Combine(VaultFolderPath, vault.GetRootDirectoryPath());
-                string rootDirUvfPath = Path.Combine(rootDirPhysicalPath, "dir.uvf");
-
                 if (mode == "encrypt")
                 {
-                    rootMetadata = HandleRootMetadataForEncryption(vault, rootDirUvfPath);
-                    if (rootMetadata == null) return;
+                    // Handle encryption mode
+                    DirectoryMetadata rootMetadata;
+                    string rootDirPhysicalPath = Path.Combine(VaultFolderPath, vault.GetRootDirectoryPath());
+                    string rootDirUvfPath = Path.Combine(rootDirPhysicalPath, vault.GetDirectoryMetadataFilename());
 
-                    Console.WriteLine($"Encrypting root directory. Source: {SourceFolderPath}, Vault Root Physical Path: {rootDirPhysicalPath}");
                     Directory.CreateDirectory(rootDirPhysicalPath);
 
-                    _overallStopwatch.Start();
-                    _totalBytesProcessedOverall = ProcessDirectory(vault, SourceFolderPath, rootMetadata, rootDirPhysicalPath);
-                    _overallStopwatch.Stop();
-
-                    Console.WriteLine("Encryption complete.");
-                    PrintSpeed("Encrypted", _totalBytesProcessedOverall, _overallStopwatch.Elapsed);
-
-                    if (OutputTreeInfo)
-                    {
-                        LogDirectoryTreeStructure(VaultFolderPath, "Vault Directory Structure (Post-Encryption):");
-                    }
+                    DirectoryMetadata rootMetadataEnc = HandleRootMetadataForEncryption(vault, rootDirUvfPath);
+                    _totalBytesProcessedOverall = ProcessDirectory(vault, SourceFolderPath, rootMetadataEnc, rootDirPhysicalPath);
                 }
                 else if (mode == "decrypt")
                 {
-                    rootMetadata = HandleRootMetadataForDecryption(vault, rootDirUvfPath);
-                    if (rootMetadata == null) return;
-
-                    Console.WriteLine($"Decrypting root directory. Vault Root Physical Path: {rootDirPhysicalPath}, Target: {DecryptedFolderPath}");
-
-                    _overallStopwatch.Start();
-                    _totalBytesProcessedOverall = DecryptDirectory(vault, rootMetadata, rootDirPhysicalPath, DecryptedFolderPath);
-                    _overallStopwatch.Stop();
-
-                    Console.WriteLine("Decryption complete.");
-                    PrintSpeed("Decrypted", _totalBytesProcessedOverall, _overallStopwatch.Elapsed);
-
-                    if (OutputTreeInfo)
-                    {
-                        LogDirectoryTreeStructure(DecryptedFolderPath, "Decrypted Directory Structure (Post-Decryption):");
-                    }
+                    // Handle decryption mode using the new approach
+                    Directory.CreateDirectory(DecryptedFolderPath);
+                    ProcessVault(vault, CancellationToken.None);
                 }
             }
         }
@@ -377,80 +389,42 @@ namespace UvfConsole
             return vault.GetRootDirectoryMetadata();
         }
 
-        private static DirectoryMetadata HandleRootMetadataForDecryption(Vault vault, string rootDirUvfPath)
+        private static long ProcessDirectory(Vault vault, string sourceDir, DirectoryMetadata currentDirMetadata, string currentDirPhysicalVaultPath, string metadataPath = null)
         {
-            if (!File.Exists(rootDirUvfPath))
-            {
-                Console.Error.WriteLine($"ERROR: Root dir.uvf not found at {rootDirUvfPath}. Cannot decrypt.");
-                Console.Error.WriteLine("FATAL: Cannot proceed with decryption without root metadata.");
-                return null;
-            }
-
-            try
-            {
-                Console.WriteLine($"Loading root dir.uvf for decryption from: {rootDirUvfPath}");
-                byte[] rootDirBytes = File.ReadAllBytes(rootDirUvfPath);
-                var metadata = vault.DecryptDirectoryMetadata(rootDirBytes);
-                Console.WriteLine("Successfully loaded and decrypted root metadata for decryption.");
-                return metadata;
-            }
-            catch (Exception ex)
-            {
-                Console.Error.WriteLine($"FATAL: Could not load or decrypt root dir.uvf for decryption ({ex.Message}). Cannot proceed.");
-                return null;
-            }
-        }
-
-        private static long CalculateExpectedEncryptedSize(long sourceFileSize)
-        {
-            // Calculate how many complete chunks we'll need
-            long completeChunks = sourceFileSize / Constants.PAYLOAD_SIZE;
+            // For Cryptomator v8, metadataPath might be different from currentDirPhysicalVaultPath
+            string dirMetadataPath = metadataPath ?? currentDirPhysicalVaultPath;
             
-            // Calculate the size of the final partial chunk (if any)
-            long remainingBytes = sourceFileSize % Constants.PAYLOAD_SIZE;
-            
-            // Each chunk (including the final partial one if it exists) needs GCM_NONCE_SIZE + GCM_TAG_SIZE overhead
-            long totalChunks = remainingBytes > 0 ? completeChunks + 1 : completeChunks;
-            long totalOverhead = totalChunks * (Constants.GCM_NONCE_SIZE + Constants.GCM_TAG_SIZE);
-            
-            // Add the file header size (from FileHeaderImpl)
-            // Magic bytes (4) + Seed ID (4) + Nonce (12) + Content Key (32) + Tag (16) = 68 bytes
-            long headerSize = 68;
-
-            // Total size = file header + source file size + total chunk overhead
-            long expectedSize = headerSize + sourceFileSize + totalOverhead;
-
-            Console.WriteLine($"\nDebug - Expected Size Calculation:");
-            Console.WriteLine($"  Source size: {sourceFileSize:N0} bytes");
-            Console.WriteLine($"  Complete chunks: {completeChunks:N0}");
-            Console.WriteLine($"  Remaining bytes: {remainingBytes:N0}");
-            Console.WriteLine($"  Total chunks: {totalChunks:N0}");
-            Console.WriteLine($"  Per-chunk overhead: {Constants.GCM_NONCE_SIZE + Constants.GCM_TAG_SIZE} bytes");
-            Console.WriteLine($"  Total chunk overhead: {totalOverhead:N0} bytes");
-            Console.WriteLine($"  File header size: {headerSize} bytes");
-            Console.WriteLine($"  Expected encrypted size: {expectedSize:N0} bytes\n");
-
-            return expectedSize;
-        }
-
-        private static long ProcessDirectory(Vault vault, string sourceDir, DirectoryMetadata currentDirMetadata, string currentDirPhysicalVaultPath)
-        {
             Console.WriteLine($"Processing directory: {sourceDir} -> {currentDirPhysicalVaultPath}");
+            if (metadataPath != null && metadataPath != currentDirPhysicalVaultPath)
+            {
+                Console.WriteLine($"  Metadata will be saved to: {metadataPath}");
+            }
             long bytesProcessedInThisCall = 0;
 
-            // Save the current directory's metadata first
-            byte[] encryptedMetadata = vault.EncryptDirectoryMetadata(currentDirMetadata);
-            string dirUvfPath = Path.Combine(currentDirPhysicalVaultPath, "dir.uvf");
-            File.WriteAllBytes(dirUvfPath, encryptedMetadata);
+            // Save the current directory's metadata (except for Cryptomator v8 root directory)
+            bool isRootDirectory = currentDirMetadata.Equals(vault.GetRootDirectoryMetadata());
+            bool shouldSaveMetadata = !(vault.IsCryptomatorV8() && isRootDirectory);
+            
+            if (shouldSaveMetadata)
+            {
+                byte[] encryptedMetadata = vault.EncryptDirectoryMetadata(currentDirMetadata);
+                string dirMetadataFilePath = Path.Combine(dirMetadataPath, vault.GetDirectoryMetadataFilename());
+                File.WriteAllBytes(dirMetadataFilePath, encryptedMetadata);
+                Console.WriteLine($"  Metadata saved to: {dirMetadataFilePath}");
+            }
+            else
+            {
+                Console.WriteLine($"  Skipping metadata save for Cryptomator v8 root directory");
+            }
 
             // Process all files in the current directory
             foreach (string sourceFilePath in Directory.GetFiles(sourceDir))
             {
                 string plainName = Path.GetFileName(sourceFilePath);
                 long sourceFileSize = new FileInfo(sourceFilePath).Length;
-                long expectedEncryptedSize = CalculateExpectedEncryptedSize(sourceFileSize);
+                long expectedEncryptedSize = Vault.CalculateExpectedEncryptedSize(sourceFileSize);
 
-                Console.WriteLine($"  Processing file: {plainName} ({sourceFileSize} bytes, expected encrypted size: {expectedEncryptedSize} bytes)");
+                Console.WriteLine($"  Processing file: {plainName} ({sourceFileSize:N0} bytes, expected encrypted: {expectedEncryptedSize:N0} bytes)");
 
                 // Get encrypted name and create physical path for the encrypted file
                 string encryptedName = vault.EncryptFilename(plainName, currentDirMetadata);
@@ -478,11 +452,6 @@ namespace UvfConsole
                 {
                     try
                     {
-                        long calculatedEncryptedSize = Vault.CalculateExpectedEncryptedSize(sourceFileSize);
-                        Console.WriteLine($"\nSize Analysis for {plainName}:");
-                        Console.WriteLine($"  Source size: {sourceFileSize:N0} bytes");
-                        Console.WriteLine($"  Expected encrypted size: {calculatedEncryptedSize:N0} bytes");
-
                         using (FileStream sourceStream = File.OpenRead(sourceFilePath))
                         using (FileStream targetStream = File.Create(targetEncryptedFilePath))
                         using (Stream encryptingStream = vault.GetEncryptingStream(targetStream))
@@ -493,9 +462,9 @@ namespace UvfConsole
                         
                         // Verify the actual encrypted size matches expected
                         long actualEncryptedSize = new FileInfo(targetEncryptedFilePath).Length;
-                        if (actualEncryptedSize != calculatedEncryptedSize)
+                        if (actualEncryptedSize != expectedEncryptedSize)
                         {
-                            Console.WriteLine($"  WARNING: Actual encrypted size ({actualEncryptedSize:N0}) differs from expected ({calculatedEncryptedSize:N0})");
+                            Console.WriteLine($"  WARNING: Actual encrypted size ({actualEncryptedSize:N0}) differs from expected ({expectedEncryptedSize:N0})");
                         }
                         else
                         {
@@ -521,18 +490,18 @@ namespace UvfConsole
                 
                 // Create the physical path for the encrypted subdirectory
                 string subDirPhysicalVaultPath = Path.Combine(currentDirPhysicalVaultPath, encryptedSubDirName);
-                string subDirUvfPath = Path.Combine(subDirPhysicalVaultPath, "dir.uvf");
+                string subDirMetadataPath = Path.Combine(subDirPhysicalVaultPath, vault.GetDirectoryMetadataFilename());
 
                 bool processSubDir = true;
                 DirectoryMetadata existingSubDirMetadata = null;
 
                 // Check if subdirectory already exists with valid metadata
-                if (Directory.Exists(subDirPhysicalVaultPath) && File.Exists(subDirUvfPath))
+                if (Directory.Exists(subDirPhysicalVaultPath) && File.Exists(subDirMetadataPath))
                 {
                     try
                     {
                         Console.WriteLine($"    Subdirectory already exists, checking metadata...");
-                        byte[] existingMetadataBytes = File.ReadAllBytes(subDirUvfPath);
+                        byte[] existingMetadataBytes = File.ReadAllBytes(subDirMetadataPath);
                         existingSubDirMetadata = vault.DecryptDirectoryMetadata(existingMetadataBytes);
                         
                         // If we can successfully decrypt the metadata, we can reuse this directory
@@ -554,8 +523,35 @@ namespace UvfConsole
                     Directory.CreateDirectory(subDirPhysicalVaultPath);
                 }
 
-                // Recursively process the subdirectory
-                bytesProcessedInThisCall += ProcessDirectory(vault, sourceSubDirPath, subDirMetadata, subDirPhysicalVaultPath);
+                // For Cryptomator v8, determine the actual content path where files should be stored
+                string actualContentPath;
+                if (vault.IsCryptomatorV8())
+                {
+                    // Calculate the path where the actual directory content should be stored
+                    actualContentPath = Path.Combine(VaultFolderPath, vault.GetDirectoryPath(subDirMetadata));
+                    Console.WriteLine($"    Cryptomator v8: Content will be stored in: {actualContentPath}");
+                    Console.WriteLine($"    Directory ID from metadata: {subDirMetadata.DirId}");
+                    
+                    // During encryption, create the content directory
+                    Directory.CreateDirectory(actualContentPath);
+                }
+                else
+                {
+                    // For UVF format, content is in the same directory as the metadata
+                    actualContentPath = subDirPhysicalVaultPath;
+                }
+
+                // Recursively process the subdirectory using the correct content path
+                if (vault.IsCryptomatorV8())
+                {
+                    // For Cryptomator v8, pass both content path and metadata path separately
+                    bytesProcessedInThisCall += ProcessDirectory(vault, sourceSubDirPath, subDirMetadata, actualContentPath, subDirPhysicalVaultPath);
+                }
+                else
+                {
+                    // For UVF format, content and metadata are in the same location
+                    bytesProcessedInThisCall += ProcessDirectory(vault, sourceSubDirPath, subDirMetadata, actualContentPath);
+                }
             }
 
             return bytesProcessedInThisCall;
@@ -563,23 +559,71 @@ namespace UvfConsole
 
         private static long DecryptDirectory(Vault vault, DirectoryMetadata currentDirectoryMetadata, string currentDirPhysicalVaultPath, string targetDecryptedPath)
         {
-            Console.WriteLine($"  DEBUG: DecryptDirectory START - CurrentDirPhysicalPath: {currentDirPhysicalVaultPath}, TargetDecryptedPath: {targetDecryptedPath}, CurrentDirMetadata (DirId: {currentDirectoryMetadata.DirId}, SeedId: {currentDirectoryMetadata.SeedId})");
+            //Console.WriteLine($"  DEBUG: DecryptDirectory START - CurrentDirPhysicalPath: {currentDirPhysicalVaultPath}, TargetDecryptedPath: {targetDecryptedPath}, CurrentDirMetadata (DirId: {currentDirectoryMetadata.DirId}, SeedId: {currentDirectoryMetadata.SeedId})");
             Console.WriteLine($"Decrypting directory from: {currentDirPhysicalVaultPath} -> to: {targetDecryptedPath} (DirId: {currentDirectoryMetadata.DirId})");
+            
+            // Add detailed logging to understand what's happening
+            if (!Directory.Exists(currentDirPhysicalVaultPath))
+            {
+                Console.WriteLine($"❌ ERROR: Directory does not exist: {currentDirPhysicalVaultPath}");
+                return 0;
+            }
+            
+            var allFiles = Directory.GetFiles(currentDirPhysicalVaultPath);
+            var allDirs = Directory.GetDirectories(currentDirPhysicalVaultPath);
+            Console.WriteLine($"  Found {allFiles.Length} files and {allDirs.Length} subdirectories in {currentDirPhysicalVaultPath}");
+            
+            if (allFiles.Length > 0)
+            {
+                Console.WriteLine($"  Files found:");
+                foreach (var file in allFiles)
+                {
+                    Console.WriteLine($"    - {Path.GetFileName(file)}");
+                }
+            }
+            
+            if (allDirs.Length > 0)
+            {
+                Console.WriteLine($"  Subdirectories found:");
+                foreach (var dir in allDirs)
+                {
+                    Console.WriteLine($"    - {Path.GetFileName(dir)}");
+                }
+            }
             
             Directory.CreateDirectory(targetDecryptedPath);
 
             long bytesProcessedInThisCall = 0;
+            string metadataFilename = vault.GetDirectoryMetadataFilename();
+            string rootMetadataFilename = vault.IsCryptomatorV8() ? "dirid.c9r" : "dir.uvf";
+            Console.WriteLine($"  Looking for metadata filename: {metadataFilename}");
 
             // Process all encrypted files in the current directory
             foreach (string encryptedFilePath in Directory.GetFiles(currentDirPhysicalVaultPath))
             {
                 string encryptedName = Path.GetFileName(encryptedFilePath);
-                if (encryptedName == "dir.uvf") continue; // Skip metadata file
+                Console.WriteLine($"  Processing file: {encryptedName}");
+                
+                // Skip metadata files (both current directory and root directory metadata)
+                if (encryptedName == metadataFilename || encryptedName == rootMetadataFilename) 
+                {
+                    Console.WriteLine($"    Skipping metadata file: {encryptedName}");
+                    continue; // Skip metadata file
+                }
+
+                // For Cryptomator v8, only process files with .c9r extension
+                if (vault.IsCryptomatorV8() && !encryptedName.EndsWith(".c9r"))
+                {
+                    Console.WriteLine($"    Skipping non-encrypted file: {encryptedName}");
+                    continue;
+                }
 
                 try
                 {
+                    Console.WriteLine($"    Attempting to decrypt filename: {encryptedName}");
                     string decryptedName = vault.DecryptFilename(encryptedName, currentDirectoryMetadata);
                     string targetDecryptedFilePath = Path.Combine(targetDecryptedPath, decryptedName);
+                    Console.WriteLine($"    Decrypted filename: {encryptedName} -> {decryptedName}");
 
                     long encryptedFileSize = new FileInfo(encryptedFilePath).Length;
                     long expectedDecryptedSize = Vault.CalculateExpectedDecryptedSize(encryptedFileSize);
@@ -608,6 +652,7 @@ namespace UvfConsole
 
                     if (decryptThisFile)
                     {
+                        Console.WriteLine($"    Starting decryption of {encryptedName}...");
                         using (FileStream sourceStream = File.OpenRead(encryptedFilePath))
                         using (Stream decryptingStream = vault.GetDecryptingStream(sourceStream))
                         using (FileStream targetStream = File.Create(targetDecryptedFilePath))
@@ -627,11 +672,12 @@ namespace UvfConsole
                         }
 
                         bytesProcessedInThisCall += actualDecryptedSize;
+                        Console.WriteLine($"    ✅ Successfully decrypted {decryptedName}");
                     }
                 }
                 catch (Exception ex)
                 {
-                    Console.Error.WriteLine($"    ERROR processing item '{encryptedName}': {ex.Message}");
+                    Console.Error.WriteLine($"    ❌ ERROR processing item '{encryptedName}': {ex.Message}");
                 }
             }
 
@@ -639,24 +685,58 @@ namespace UvfConsole
             foreach (string encryptedSubDirPath in Directory.GetDirectories(currentDirPhysicalVaultPath))
             {
                 string encryptedSubDirName = Path.GetFileName(encryptedSubDirPath);
+                Console.WriteLine($"  Processing subdirectory: {encryptedSubDirName}");
+
+                // For Cryptomator v8, only process directories with .c9r extension
+                if (vault.IsCryptomatorV8() && !encryptedSubDirName.EndsWith(".c9r"))
+                {
+                    Console.WriteLine($"    Skipping non-encrypted directory: {encryptedSubDirName}");
+                    continue;
+                }
 
                 try
                 {
+                    Console.WriteLine($"    Attempting to decrypt subdirectory name: {encryptedSubDirName}");
                     string decryptedSubDirName = vault.DecryptFilename(encryptedSubDirName, currentDirectoryMetadata);
                     string targetDecryptedSubDirPath = Path.Combine(targetDecryptedPath, decryptedSubDirName);
+                    Console.WriteLine($"    Decrypted subdirectory name: {encryptedSubDirName} -> {decryptedSubDirName}");
 
                     Console.WriteLine($"  Processing encrypted subdirectory: {encryptedSubDirName} -> {decryptedSubDirName}");
 
                     // Load and decrypt the subdirectory's metadata
-                    string subDirUvfPath = Path.Combine(encryptedSubDirPath, "dir.uvf");
-                    if (!File.Exists(subDirUvfPath))
+                    // Use the specific metadata filename for this subdirectory context
+                    string expectedSubDirMetadataFilename = vault.IsCryptomatorV8() ? "dir.c9r" : "dir.uvf";
+                    string subDirMetadataPath = Path.Combine(encryptedSubDirPath, expectedSubDirMetadataFilename);
+                    if (!File.Exists(subDirMetadataPath))
                     {
-                        Console.Error.WriteLine($"    ERROR: Missing dir.uvf in subdirectory: {encryptedSubDirPath}");
+                        Console.Error.WriteLine($"    ERROR: Missing {expectedSubDirMetadataFilename} in subdirectory: {encryptedSubDirPath}");
                         continue;
                     }
 
-                    byte[] encryptedMetadata = File.ReadAllBytes(subDirUvfPath);
+                    Console.WriteLine($"    Loading metadata from: {subDirMetadataPath}");
+                    byte[] encryptedMetadata = File.ReadAllBytes(subDirMetadataPath);
                     DirectoryMetadata subDirMetadata = vault.DecryptDirectoryMetadata(encryptedMetadata);
+
+                    // For Cryptomator v8, determine the actual content path where files should be stored
+                    string actualContentPath;
+                    if (vault.IsCryptomatorV8())
+                    {
+                        // Calculate the path where the actual directory content should be stored
+                        actualContentPath = Path.Combine(VaultFolderPath, vault.GetDirectoryPath(subDirMetadata));
+                        Console.WriteLine($"    Cryptomator v8: Actual content path: {actualContentPath}");
+                        Console.WriteLine($"    Directory ID from metadata: {subDirMetadata.DirId}");
+                        
+                        if (!Directory.Exists(actualContentPath))
+                        {
+                            Console.Error.WriteLine($"    ERROR: Actual content directory not found: {actualContentPath}");
+                            continue;
+                        }
+                    }
+                    else
+                    {
+                        // For UVF format, content is in the same directory as the metadata
+                        actualContentPath = encryptedSubDirPath;
+                    }
 
                     // Check if subdirectory is already decrypted with correct structure
                     bool decryptSubDir = true;
@@ -676,15 +756,17 @@ namespace UvfConsole
                         Directory.CreateDirectory(targetDecryptedSubDirPath);
                     }
 
-                    // Recursively decrypt the subdirectory
-                    bytesProcessedInThisCall += DecryptDirectory(vault, subDirMetadata, encryptedSubDirPath, targetDecryptedSubDirPath);
+                    // Recursively decrypt the subdirectory using the actual content path
+                    Console.WriteLine($"    Recursively processing subdirectory from: {actualContentPath} -> {targetDecryptedSubDirPath}");
+                    bytesProcessedInThisCall += DecryptDirectory(vault, subDirMetadata, actualContentPath, targetDecryptedSubDirPath);
                 }
                 catch (Exception ex)
                 {
-                    Console.Error.WriteLine($"    ERROR processing encrypted subdirectory '{encryptedSubDirName}': {ex.Message}");
+                    Console.Error.WriteLine($"    ❌ ERROR processing encrypted subdirectory '{encryptedSubDirName}': {ex.Message}");
                 }
             }
 
+            Console.WriteLine($"  Finished processing directory. Total bytes: {bytesProcessedInThisCall:N0}");
             return bytesProcessedInThisCall;
         }
 
@@ -790,16 +872,25 @@ namespace UvfConsole
         {
             if (string.IsNullOrEmpty(basePath)) return fullPath;
 
-            // Normalize base path to ensure it ends with a directory separator
-            if (!basePath.EndsWith(Path.DirectorySeparatorChar.ToString()))
+            // Normalize paths - remove trailing separators and ensure consistent case
+            string normalizedBasePath = Path.GetFullPath(basePath).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+            string normalizedFullPath = Path.GetFullPath(fullPath);
+
+            // If the full path equals the base path exactly, this is the root item (return empty string)
+            if (normalizedFullPath.Equals(normalizedBasePath, StringComparison.OrdinalIgnoreCase))
             {
-                basePath += Path.DirectorySeparatorChar;
+                return string.Empty;
             }
 
-            if (fullPath.StartsWith(basePath, StringComparison.OrdinalIgnoreCase))
+            // Add separator to base path for proper prefix matching
+            string basePathWithSeparator = normalizedBasePath + Path.DirectorySeparatorChar;
+
+            if (normalizedFullPath.StartsWith(basePathWithSeparator, StringComparison.OrdinalIgnoreCase))
             {
-                return fullPath.Substring(basePath.Length);
+                return normalizedFullPath.Substring(basePathWithSeparator.Length);
             }
+            
+            // If no match, return the full path as-is (shouldn't happen in normal cases)
             return fullPath; 
         }
 
@@ -808,11 +899,10 @@ namespace UvfConsole
             // Process current item (could be the initial rootBasePath itself or a subdirectory)
             if (Directory.Exists(currentItemPath))
             {
-                // Add this directory to items if it's not the root itself being processed with an empty relative path
                 string dirRelativePath = GetRelativePath(currentItemPath, rootBasePath);
                 if (!string.IsNullOrEmpty(dirRelativePath) && !items.ContainsKey(dirRelativePath))
                 {
-                    items.Add(dirRelativePath, new FileVerificationInfo(dirRelativePath, true));
+                    items.Add(dirRelativePath, new FileVerificationInfo(dirRelativePath, true, null, 0));
                 }
 
                 // Process files in current directory
@@ -820,12 +910,13 @@ namespace UvfConsole
                 {
                     string fileRelativePath = GetRelativePath(filePath, rootBasePath);
                     string hash = null;
+                    long fileSize = 0;
                     try
                     {
-                        using (FileStream fs = File.OpenRead(filePath))
-                        {
-                            hash = FastHash.GetHash(fs);
-                        }
+                        var fileInfo = new FileInfo(filePath);
+                        fileSize = fileInfo.Length;
+                        // Use the same consistent hash calculation method
+                        hash = CalculateFileHashConsistently(filePath);
                     }
                     catch (Exception ex)
                     {
@@ -834,7 +925,7 @@ namespace UvfConsole
                     }
                     if (!items.ContainsKey(fileRelativePath)) // Should not happen if logic is correct, but safeguard
                     {
-                         items.Add(fileRelativePath, new FileVerificationInfo(fileRelativePath, false, hash));
+                         items.Add(fileRelativePath, new FileVerificationInfo(fileRelativePath, false, hash, fileSize));
                     }
                 }
 
@@ -842,6 +933,22 @@ namespace UvfConsole
                 foreach (string subDirPath in Directory.GetDirectories(currentItemPath))
                 {
                     CollectAndHashSourceItems(subDirPath, rootBasePath, items);
+                }
+            }
+            else if (File.Exists(currentItemPath))
+            {
+                string fileRelativePath = GetRelativePath(currentItemPath, rootBasePath);
+                try
+                {
+                    var fileInfo = new FileInfo(currentItemPath);
+                    long fileSize = fileInfo.Length;
+                    string hash = CalculateFileHashConsistently(currentItemPath);
+                    items.Add(fileRelativePath, new FileVerificationInfo(fileRelativePath, false, hash, fileSize));
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"ERROR hashing source file {currentItemPath}: {ex.Message}");
+                    items.Add(fileRelativePath, new FileVerificationInfo(fileRelativePath, false, $"ERROR_HASHING: {ex.Message}", 0));
                 }
             }
             // If currentItemPath is a file (should not happen with initial call), it's an error in calling logic.
@@ -870,7 +977,7 @@ namespace UvfConsole
                     }
                     else
                     {
-                        unexpectedItems.Add($"Unexpected directory: {dirRelativePath}");
+                        unexpectedItems.Add($"Unexpected directory: {currentItemPath}");
                     }
                 }
 
@@ -879,12 +986,15 @@ namespace UvfConsole
                 {
                     string fileRelativePath = GetRelativePath(filePath, rootDecryptedPath);
                     string hash = null;
+                    
+                    // Get file info for size comparison
+                    var decryptedFileInfo = new FileInfo(filePath);
+                    long fileSize = decryptedFileInfo.Length;
+                    
                     try
                     {
-                        using (FileStream fs = File.OpenRead(filePath))
-                        {
-                            hash = FastHash.GetHash(fs);
-                        }
+                        // Use the same file reading method as used for source files
+                        hash = CalculateFileHashConsistently(filePath);
                     }
                     catch (Exception ex)
                     {
@@ -894,10 +1004,47 @@ namespace UvfConsole
 
                     if (sourceItems.TryGetValue(fileRelativePath, out var fileInfo))
                     {
-                        if (!fileInfo.IsDirectory)
+                        if (!fileInfo.IsDirectory) // Source was file, decrypted is also file
                         {
                             fileInfo.ExistsInDecrypted = true;
                             fileInfo.DecryptedHash = hash;
+                            
+                            // Display hash comparison prominently
+                            Console.WriteLine($"Hash Analysis for {Path.GetFileName(filePath)}:");
+                            Console.WriteLine($"  Source hash:    {fileInfo.SourceHash}");
+                            Console.WriteLine($"  Decrypted hash: {hash}");
+                            Console.WriteLine($"  Hash match: {fileInfo.HashesMatch}");
+                            
+                            if (!fileInfo.HashesMatch && !fileInfo.SourceHashError && !fileInfo.DecryptedHashError)
+                            {
+                                Console.WriteLine($"❌ Hash mismatch detected for {fileRelativePath}!");
+                                
+                                if (File.Exists(filePath))
+                                {
+                                    // Additional detailed analysis for hash mismatches
+                                    Console.WriteLine($"   File sizes: Source={fileInfo.SourceSize:N0}, Decrypted={fileSize:N0}");
+                                    
+                                    if (fileInfo.SourceSize == fileSize)
+                                    {
+                                        Console.WriteLine($"   Sizes match but hashes differ - detailed analysis:");
+                                        
+                                        // Get the source file path for comparison  
+                                        string sourceFilePath = Path.Combine(Path.GetDirectoryName(rootDecryptedPath.TrimEnd('\\', '/')) ?? "", "EncryptionTestSource", fileRelativePath);
+                                        if (File.Exists(sourceFilePath))
+                                        {
+                                            CompareFileSegments(sourceFilePath, filePath);
+                                        }
+                                    }
+                                }
+                                else
+                                {
+                                    Console.WriteLine($"Hash mismatch: {fileRelativePath}");
+                                }
+                            }
+                            else if (fileInfo.HashesMatch)
+                            {
+                                Console.WriteLine($"✅ {Path.GetFileName(filePath)} verified successfully");
+                            }
                         }
                         else // Source was dir, decrypted is file
                         {
@@ -908,7 +1055,7 @@ namespace UvfConsole
                     }
                     else
                     {
-                        unexpectedItems.Add($"Unexpected file: {fileRelativePath} (Hash: {hash})");
+                        unexpectedItems.Add($"Unexpected file: {filePath} (Hash: {hash})");
                     }
                 }
 
@@ -917,6 +1064,81 @@ namespace UvfConsole
                 {
                     VerifyDecryptedItems(subDirPath, rootDecryptedPath, sourceItems, unexpectedItems);
                 }
+            }
+        }
+
+        /// <summary>
+        /// Calculates file hash using a consistent method for both source and decrypted files
+        /// </summary>
+        private static string CalculateFileHashConsistently(string filePath)
+        {
+            // Force any pending file operations to complete by waiting for exclusive access
+            using (var fs = new FileStream(filePath, FileMode.Open, FileAccess.Read, FileShare.None))
+            {
+                // Immediately close and reopen with shared access for actual reading
+            }
+            
+            // Now read the file for hashing with the same method used elsewhere
+            using (var fs = new FileStream(filePath, FileMode.Open, FileAccess.Read, FileShare.Read))
+            {
+                return FastHash.GetHash(fs);
+            }
+        }
+
+        /// <summary>
+        /// Compares the first and last segments of two files to help diagnose corruption
+        /// </summary>
+        private static void CompareFileSegments(string sourceFilePath, string decryptedFilePath)
+        {
+            const int segmentSize = 1024; // Compare first and last 1KB
+            
+            try
+            {
+                using (var sourceFs = new FileStream(sourceFilePath, FileMode.Open, FileAccess.Read, FileShare.Read))
+                using (var decryptedFs = new FileStream(decryptedFilePath, FileMode.Open, FileAccess.Read, FileShare.Read))
+                {
+                    if (sourceFs.Length != decryptedFs.Length)
+                    {
+                        Console.WriteLine($"   ❌ File sizes differ: Source={sourceFs.Length:N0}, Decrypted={decryptedFs.Length:N0}");
+                        return;
+                    }
+                    
+                    // Compare first segment
+                    byte[] sourceStart = new byte[segmentSize];
+                    byte[] decryptedStart = new byte[segmentSize];
+                    
+                    int sourceRead = sourceFs.Read(sourceStart, 0, segmentSize);
+                    int decryptedRead = decryptedFs.Read(decryptedStart, 0, segmentSize);
+                    
+                    bool startMatches = sourceRead == decryptedRead && sourceStart.Take(sourceRead).SequenceEqual(decryptedStart.Take(decryptedRead));
+                    Console.WriteLine($"   First {segmentSize} bytes match: {startMatches}");
+                    
+                    // Compare last segment (if file is large enough)
+                    if (sourceFs.Length > segmentSize)
+                    {
+                        sourceFs.Seek(-segmentSize, SeekOrigin.End);
+                        decryptedFs.Seek(-segmentSize, SeekOrigin.End);
+                        
+                        byte[] sourceEnd = new byte[segmentSize];
+                        byte[] decryptedEnd = new byte[segmentSize];
+                        
+                        sourceRead = sourceFs.Read(sourceEnd, 0, segmentSize);
+                        decryptedRead = decryptedFs.Read(decryptedEnd, 0, segmentSize);
+                        
+                        bool endMatches = sourceRead == decryptedRead && sourceEnd.Take(sourceRead).SequenceEqual(decryptedEnd.Take(decryptedRead));
+                        Console.WriteLine($"   Last {segmentSize} bytes match: {endMatches}");
+                        
+                        // If segments match but hashes don't, it might be a middle corruption
+                        if (startMatches && endMatches)
+                        {
+                            Console.WriteLine($"   🤔 Start and end match, possible middle corruption or hash calculation issue");
+                        }
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"   ❌ Error comparing file segments: {ex.Message}");
             }
         }
 
@@ -938,7 +1160,6 @@ namespace UvfConsole
             {
                  Console.WriteLine($"WARNING: Decrypted path {decryptedBasePath} does not exist, but decrypted items were somehow processed. This is unexpected.");
             }
-
 
             foreach (var entry in sourceItems.OrderBy(kvp => kvp.Key))
             {
@@ -978,7 +1199,8 @@ namespace UvfConsole
                         else if (!info.HashesMatch && !info.SourceHashError) // Only check hash if no errors in hashing
                         {
                             Console.WriteLine($"HASH MISMATCH: [{info.RelativePath}]");
-                            // Console.WriteLine($"  Source Hash: {info.SourceHash}, Decrypted Hash: {info.DecryptedHash}");
+                            Console.WriteLine($"  Source Hash: {info.SourceHash}");
+                            Console.WriteLine($"  Decrypted Hash: {info.DecryptedHash}");
                             allGood = false;
                             hashMismatchCount++;
                         }
@@ -1015,5 +1237,57 @@ namespace UvfConsole
             Console.WriteLine($"Decrypted Path: {decryptedBasePath}");
             Console.WriteLine("--- End of Test Run Summary ---");
         }
+
+        private static void ProcessVault(Vault vault, CancellationToken cancellationToken)
+        {
+            Console.WriteLine("Using programmatically generated root metadata for Cryptomator v8 decryption");
+
+            if (vault.IsCryptomatorV8())
+            {
+                // For Cryptomator v8, we need to find the actual root directory
+                ProcessCryptomatorV8Vault(vault, cancellationToken);
+            }
+            else
+            {
+                // For UVF vaults, use the standard approach
+                ProcessStandardVault(vault, cancellationToken);
+            }
+        }
+
+        private static void ProcessCryptomatorV8Vault(Vault vault, CancellationToken cancellationToken)
+        {
+            Console.WriteLine("\n--- Cryptomator v8 Direct Root Access ---");
+
+            // Calculate root directory path directly - this is deterministic and always correct
+            var rootMetadata = vault.GetRootDirectoryMetadata();
+            var rootPath = vault.GetDirectoryPath(rootMetadata);
+            var fullRootPath = Path.Combine(VaultFolderPath, rootPath);
+            
+            Console.WriteLine($"Calculated root path: {rootPath}");
+            Console.WriteLine($"Full root path: {fullRootPath}");
+            
+            // Verify the calculated root directory exists (sanity check)
+            if (!Directory.Exists(fullRootPath))
+            {
+                throw new InvalidOperationException($"Calculated root directory not found at: {fullRootPath}");
+            }
+            
+            Console.WriteLine($"✅ Root directory exists and is ready for decryption");
+            
+            // Start decryption directly from the calculated root
+            Console.WriteLine($"Decrypting from calculated root: {fullRootPath} -> {DecryptedFolderPath}");
+            DecryptDirectory(vault, rootMetadata, fullRootPath, DecryptedFolderPath);
+        }
+
+        private static void ProcessStandardVault(Vault vault, CancellationToken cancellationToken)
+        {
+            // Get the root directory metadata and path
+            var rootMetadata = vault.GetRootDirectoryMetadata();
+            var rootDirectoryPath = Path.Combine(VaultFolderPath, vault.GetDirectoryPath(rootMetadata));
+
+            Console.WriteLine($"Decrypting from calculated root: {rootDirectoryPath} -> {DecryptedFolderPath}");
+            DecryptDirectory(vault, rootMetadata, rootDirectoryPath, DecryptedFolderPath);
+        }
+
     }
 } 
