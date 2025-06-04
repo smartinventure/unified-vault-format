@@ -23,8 +23,8 @@ namespace UvfConsole
     {
         // Configuration
         private const string SourceFolderPath = @"D:\temp\uvf\EncryptionTestSource";
-        //private const string VaultFolderPath = @"D:\temp\uvf\EncryptionTestVault";
-        private const string VaultFolderPath = @"D:\cyptomatortest\tester\tester";
+        private const string VaultFolderPath = @"D:\temp\uvf\EncryptionTestVault";
+        //private const string VaultFolderPath = @"D:\cyptomatortest\tester\tester";
         private const string DecryptedFolderPath = @"D:\temp\uvf\EncryptionTestDecrypted";
         private const string Password = "your-super-secret-password";
         private const bool OutputTreeInfo = false;
@@ -523,7 +523,7 @@ namespace UvfConsole
                     Directory.CreateDirectory(subDirPhysicalVaultPath);
                 }
 
-                // For Cryptomator v8, determine the actual content path where files should be stored
+                // For both UVF and Cryptomator v8, determine the actual content path where files should be stored
                 string actualContentPath;
                 if (vault.IsCryptomatorV8())
                 {
@@ -537,21 +537,19 @@ namespace UvfConsole
                 }
                 else
                 {
-                    // For UVF format, content is in the same directory as the metadata
-                    actualContentPath = subDirPhysicalVaultPath;
+                    // For UVF format, also use separate content directory calculated from subdirectory's dirId
+                    actualContentPath = Path.Combine(VaultFolderPath, vault.GetDirectoryPath(subDirMetadata));
+                    Console.WriteLine($"    UVF: Content will be stored in: {actualContentPath}");
+                    Console.WriteLine($"    Directory ID from metadata: {subDirMetadata.DirId}");
+                    
+                    // During encryption, create the content directory
+                    Directory.CreateDirectory(actualContentPath);
                 }
 
                 // Recursively process the subdirectory using the correct content path
-                if (vault.IsCryptomatorV8())
-                {
-                    // For Cryptomator v8, pass both content path and metadata path separately
-                    bytesProcessedInThisCall += ProcessDirectory(vault, sourceSubDirPath, subDirMetadata, actualContentPath, subDirPhysicalVaultPath);
-                }
-                else
-                {
-                    // For UVF format, content and metadata are in the same location
-                    bytesProcessedInThisCall += ProcessDirectory(vault, sourceSubDirPath, subDirMetadata, actualContentPath);
-                }
+                // For UVF format, subdirectory metadata containers should ONLY contain dir.uvf, never files
+                // All files go to the separate content directory calculated from subdirectory's dirId
+                bytesProcessedInThisCall += ProcessDirectory(vault, sourceSubDirPath, subDirMetadata, actualContentPath, subDirPhysicalVaultPath);
             }
 
             return bytesProcessedInThisCall;
@@ -734,8 +732,16 @@ namespace UvfConsole
                     }
                     else
                     {
-                        // For UVF format, content is in the same directory as the metadata
-                        actualContentPath = encryptedSubDirPath;
+                        // For UVF format, also use separate content directory calculated from subdirectory's dirId
+                        actualContentPath = Path.Combine(VaultFolderPath, vault.GetDirectoryPath(subDirMetadata));
+                        Console.WriteLine($"    UVF: Actual content path: {actualContentPath}");
+                        Console.WriteLine($"    Directory ID from metadata: {subDirMetadata.DirId}");
+                        
+                        if (!Directory.Exists(actualContentPath))
+                        {
+                            Console.Error.WriteLine($"    ERROR: Actual content directory not found: {actualContentPath}");
+                            continue;
+                        }
                     }
 
                     // Check if subdirectory is already decrypted with correct structure
