@@ -5,9 +5,9 @@ using System.Collections.Generic;
 using System.Text;
 using System.Text.Json;
 using System.Security.Cryptography;
-using UvfLib._old.v3;
-using UvfLib._old.common;
-using UvfLib._old.api;
+using UvfLib.Core.V3;
+using UvfLib.Core.Common;
+using UvfLib.Core.Api;
 
 namespace UvfLib.Tests.Api
 {
@@ -29,7 +29,7 @@ namespace UvfLib.Tests.Api
         [DisplayName("Test Base64 Conversion")]
         public void TestBase64Conversion()
         {
-            // Test Base64Url.Decode (ensure it's accessible, might need to use Jose.Base64Url if UvfLib.Common.Base64Url is different)
+            // Test Base64Url.Decode (ensure it's accessible, might need to use Jose.Base64Url if UvfLib.Core.Common.Base64Url is different)
             byte[] decodedBytes = Base64Url.Decode(KDF_SALT_B64);
             Assert.IsNotNull(decodedBytes);
             Assert.AreEqual(32, decodedBytes.Length);

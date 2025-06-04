@@ -1,7 +1,7 @@
 using Microsoft.VisualStudio.TestTools.UnitTesting;
-using UvfLib.Common;
+using UvfLib.Core.Common;
 using UvfLib.Tests.Common;
-using UvfLib.V3;
+using UvfLib.Core.V3;
 using System;
 using System.Buffers;
 using System.Collections.Generic;
@@ -11,9 +11,9 @@ using System.Text;
 using Moq;
 using System.Diagnostics;
 using System.Linq;
-using V3Constants = UvfLib._old.v3.Constants;
-using UvfLib._old.v3;
-using UvfLib._old.api;
+using V3Constants = UvfLib.Core.V3.Constants;
+using UvfLib.Core.V3;
+using UvfLib.Core.Api;
 
 namespace UvfLib.Tests.V3
 {

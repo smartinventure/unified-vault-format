@@ -1,5 +1,5 @@
 using Microsoft.VisualStudio.TestTools.UnitTesting;
-using UvfLib.Common;
+using UvfLib.Core.Common;
 using Moq;
 using System;
 using System.Security;

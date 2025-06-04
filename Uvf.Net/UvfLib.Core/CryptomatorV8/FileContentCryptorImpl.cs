@@ -87,7 +87,7 @@ namespace UvfLib.Core.CryptomatorV8
             FileHeaderImpl headerImpl = FileHeaderImpl.Cast(header);
             var contentKey = headerImpl.GetPayload().GetContentKey();
 
-            // Generate random nonce
+            // Generate random nonce (like actual working implementation)
             byte[] nonce = new byte[Constants.GCM_NONCE_SIZE];
             _random.GetBytes(nonce);
 
@@ -101,7 +101,7 @@ namespace UvfLib.Core.CryptomatorV8
 
             try
             {
-                // Encrypt using AES-GCM
+                // Encrypt using AES-GCM with AAD
                 byte[] ciphertext = new byte[cleartextChunk.Length];
                 byte[] tag = new byte[Constants.GCM_TAG_SIZE];
 

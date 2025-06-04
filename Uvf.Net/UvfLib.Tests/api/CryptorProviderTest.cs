@@ -1,5 +1,5 @@
 using Microsoft.VisualStudio.TestTools.UnitTesting;
-using UvfLib.Api;
+using UvfLib.Core.Api;
 using System;
 
 namespace UvfLib.Tests.Api

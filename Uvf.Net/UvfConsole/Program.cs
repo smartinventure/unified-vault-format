@@ -23,8 +23,8 @@ namespace UvfConsole
     {
         // Configuration
         private const string SourceFolderPath = @"D:\temp\uvf\EncryptionTestSource";
-        private const string VaultFolderPath = @"D:\temp\uvf\EncryptionTestVault";
-        //private const string VaultFolderPath = @"D:\cyptomatortest\tester\tester";
+        //private const string VaultFolderPath = @"D:\temp\uvf\EncryptionTestVault";
+        private const string VaultFolderPath = @"D:\cyptomatortest\tester\tester";
         private const string DecryptedFolderPath = @"D:\temp\uvf\EncryptionTestDecrypted";
         private const string Password = "your-super-secret-password";
         private const bool OutputTreeInfo = false;
@@ -389,9 +389,16 @@ namespace UvfConsole
             return vault.GetRootDirectoryMetadata();
         }
 
-        private static long ProcessDirectory(Vault vault, string sourceDir, DirectoryMetadata currentDirMetadata, string currentDirPhysicalVaultPath)
+        private static long ProcessDirectory(Vault vault, string sourceDir, DirectoryMetadata currentDirMetadata, string currentDirPhysicalVaultPath, string metadataPath = null)
         {
+            // For Cryptomator v8, metadataPath might be different from currentDirPhysicalVaultPath
+            string dirMetadataPath = metadataPath ?? currentDirPhysicalVaultPath;
+            
             Console.WriteLine($"Processing directory: {sourceDir} -> {currentDirPhysicalVaultPath}");
+            if (metadataPath != null && metadataPath != currentDirPhysicalVaultPath)
+            {
+                Console.WriteLine($"  Metadata will be saved to: {metadataPath}");
+            }
             long bytesProcessedInThisCall = 0;
 
             // Save the current directory's metadata (except for Cryptomator v8 root directory)
@@ -401,8 +408,9 @@ namespace UvfConsole
             if (shouldSaveMetadata)
             {
                 byte[] encryptedMetadata = vault.EncryptDirectoryMetadata(currentDirMetadata);
-                string dirMetadataPath = Path.Combine(currentDirPhysicalVaultPath, vault.GetDirectoryMetadataFilename());
-                File.WriteAllBytes(dirMetadataPath, encryptedMetadata);
+                string dirMetadataFilePath = Path.Combine(dirMetadataPath, vault.GetDirectoryMetadataFilename());
+                File.WriteAllBytes(dirMetadataFilePath, encryptedMetadata);
+                Console.WriteLine($"  Metadata saved to: {dirMetadataFilePath}");
             }
             else
             {
@@ -515,8 +523,35 @@ namespace UvfConsole
                     Directory.CreateDirectory(subDirPhysicalVaultPath);
                 }
 
-                // Recursively process the subdirectory
-                bytesProcessedInThisCall += ProcessDirectory(vault, sourceSubDirPath, subDirMetadata, subDirPhysicalVaultPath);
+                // For Cryptomator v8, determine the actual content path where files should be stored
+                string actualContentPath;
+                if (vault.IsCryptomatorV8())
+                {
+                    // Calculate the path where the actual directory content should be stored
+                    actualContentPath = Path.Combine(VaultFolderPath, vault.GetDirectoryPath(subDirMetadata));
+                    Console.WriteLine($"    Cryptomator v8: Content will be stored in: {actualContentPath}");
+                    Console.WriteLine($"    Directory ID from metadata: {subDirMetadata.DirId}");
+                    
+                    // During encryption, create the content directory
+                    Directory.CreateDirectory(actualContentPath);
+                }
+                else
+                {
+                    // For UVF format, content is in the same directory as the metadata
+                    actualContentPath = subDirPhysicalVaultPath;
+                }
+
+                // Recursively process the subdirectory using the correct content path
+                if (vault.IsCryptomatorV8())
+                {
+                    // For Cryptomator v8, pass both content path and metadata path separately
+                    bytesProcessedInThisCall += ProcessDirectory(vault, sourceSubDirPath, subDirMetadata, actualContentPath, subDirPhysicalVaultPath);
+                }
+                else
+                {
+                    // For UVF format, content and metadata are in the same location
+                    bytesProcessedInThisCall += ProcessDirectory(vault, sourceSubDirPath, subDirMetadata, actualContentPath);
+                }
             }
 
             return bytesProcessedInThisCall;
@@ -574,6 +609,13 @@ namespace UvfConsole
                 {
                     Console.WriteLine($"    Skipping metadata file: {encryptedName}");
                     continue; // Skip metadata file
+                }
+
+                // For Cryptomator v8, only process files with .c9r extension
+                if (vault.IsCryptomatorV8() && !encryptedName.EndsWith(".c9r"))
+                {
+                    Console.WriteLine($"    Skipping non-encrypted file: {encryptedName}");
+                    continue;
                 }
 
                 try
@@ -645,6 +687,13 @@ namespace UvfConsole
                 string encryptedSubDirName = Path.GetFileName(encryptedSubDirPath);
                 Console.WriteLine($"  Processing subdirectory: {encryptedSubDirName}");
 
+                // For Cryptomator v8, only process directories with .c9r extension
+                if (vault.IsCryptomatorV8() && !encryptedSubDirName.EndsWith(".c9r"))
+                {
+                    Console.WriteLine($"    Skipping non-encrypted directory: {encryptedSubDirName}");
+                    continue;
+                }
+
                 try
                 {
                     Console.WriteLine($"    Attempting to decrypt subdirectory name: {encryptedSubDirName}");
@@ -668,11 +717,11 @@ namespace UvfConsole
                     byte[] encryptedMetadata = File.ReadAllBytes(subDirMetadataPath);
                     DirectoryMetadata subDirMetadata = vault.DecryptDirectoryMetadata(encryptedMetadata);
 
-                    // For Cryptomator v8, the actual content is in a different directory calculated from the directory ID
+                    // For Cryptomator v8, determine the actual content path where files should be stored
                     string actualContentPath;
                     if (vault.IsCryptomatorV8())
                     {
-                        // Calculate the path where the actual directory content is stored
+                        // Calculate the path where the actual directory content should be stored
                         actualContentPath = Path.Combine(VaultFolderPath, vault.GetDirectoryPath(subDirMetadata));
                         Console.WriteLine($"    Cryptomator v8: Actual content path: {actualContentPath}");
                         Console.WriteLine($"    Directory ID from metadata: {subDirMetadata.DirId}");

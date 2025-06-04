@@ -1,16 +1,16 @@
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 using UvfLib.Tests.Common;
-using UvfLib.V3;
-using V3Constants = UvfLib._old.v3.Constants;
+using UvfLib.Core.V3;
+using V3Constants = UvfLib.Core.V3.Constants;
 using System;
 using System.Buffers;
 using System.Collections.Generic;
 using System.Security.Cryptography;
 using System.Text;
 using Moq;
-using UvfLib._old.v3;
-using UvfLib._old.common;
-using UvfLib._old.api;
+using UvfLib.Core.V3;
+using UvfLib.Core.Common;
+using UvfLib.Core.Api;
 
 namespace UvfLib.Tests.V3
 {

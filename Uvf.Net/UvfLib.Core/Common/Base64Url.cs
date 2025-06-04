@@ -21,7 +21,8 @@ namespace UvfLib.Core.Common
 
             return Convert.ToBase64String(data)
                 .Replace('+', '-')
-                .Replace('/', '_');
+                .Replace('/', '_')
+                .TrimEnd('='); // Remove padding to match FileNameCryptorImpl behavior
         }
 
         /// <summary>

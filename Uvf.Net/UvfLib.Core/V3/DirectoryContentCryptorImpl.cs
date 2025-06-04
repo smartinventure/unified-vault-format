@@ -14,7 +14,7 @@ namespace UvfLib.Core.V3
     /// Handles encryption and decryption of directory metadata (dir.uvf files)
     /// and provides access to directory path generation and filename cryptors.
     /// </summary>
-    internal sealed class DirectoryContentCryptorImpl : DirectoryContentCryptor
+    public sealed class DirectoryContentCryptorImpl : DirectoryContentCryptor
     {
         private readonly RevolvingMasterkey _masterkey;
         private readonly RandomNumberGenerator _random;

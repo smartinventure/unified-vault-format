@@ -12,7 +12,7 @@
 namespace UvfLib.Core.CryptomatorV8
 {
     /// <summary>
-    /// Constants for Cryptomator v2/v8 cryptography operations.
+    /// Constants for Cryptomator v2 vault format.
     /// </summary>
     public static class Constants
     {

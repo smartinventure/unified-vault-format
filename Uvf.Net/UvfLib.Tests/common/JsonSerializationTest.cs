@@ -4,7 +4,7 @@ using System.IO;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
-using UvfLib._old.common;
+using UvfLib.Core.Common;
 
 namespace UvfLib.Tests.Common
 {

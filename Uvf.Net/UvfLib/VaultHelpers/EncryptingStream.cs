@@ -191,23 +191,25 @@ namespace UvfLib.VaultHelpers
             }
             else if (_cryptor.FileContentCryptor() is Core.CryptomatorV8.FileContentCryptorImpl v8Cryptor)
             {
-                // CryptomatorV8 implementation - use same approach as V3
+                // CryptomatorV8 implementation - use proper random nonce and AAD according to specification
                 int expectedEncryptedLength = Core.CryptomatorV8.Constants.GCM_NONCE_SIZE + cleartextChunk.Length + Core.CryptomatorV8.Constants.GCM_TAG_SIZE;
                 _ciphertextChunkBuffer.Slice(0, expectedEncryptedLength).Span.Clear();
                 
-                // Create nonce: 8 bytes chunk number (big endian) + 4 random bytes
+                // Generate completely random nonce (as per Cryptomator specification)
                 byte[] nonce = new byte[Core.CryptomatorV8.Constants.GCM_NONCE_SIZE];
-                BinaryPrimitives.WriteInt64BigEndian(nonce.AsSpan(0, 8), _currentChunkNumber);
-                _random.GetBytes(nonce.AsSpan(8, 4));
+                _random.GetBytes(nonce);
                 
                 // Copy nonce to the beginning of ciphertext buffer
                 nonce.CopyTo(_ciphertextChunkBuffer.Span);
                 
-                // Encrypt using AES-GCM directly (same approach as V3)
+                // Construct AAD: bigEndian(chunkNumber) . headerNonce (as per specification)
+                BinaryPrimitives.WriteInt64BigEndian(_aadBuffer.AsSpan(0, 8), _currentChunkNumber);
+                
+                // Encrypt using AES-GCM with proper AAD
                 byte[] ciphertext = new byte[cleartextChunk.Length];
                 byte[] tag = new byte[Core.CryptomatorV8.Constants.GCM_TAG_SIZE];
                 
-                _fileContentAesGcm.Encrypt(nonce, cleartextChunk.Span, ciphertext, tag);
+                _fileContentAesGcm.Encrypt(nonce, cleartextChunk.Span, ciphertext, tag, _aadBuffer);
                 
                 // Copy ciphertext and tag to the buffer
                 ciphertext.CopyTo(_ciphertextChunkBuffer.Span.Slice(Core.CryptomatorV8.Constants.GCM_NONCE_SIZE));

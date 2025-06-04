@@ -71,8 +71,8 @@ namespace UvfLib.Core.CryptomatorV8
 
             try
             {
-                // Create payload with reserved=0 and the content key
-                var payload = new FileHeaderImpl.Payload(0, contentKey);
+                // Create payload with reserved=0xFFFFFFFFFFFFFFFF (as per Cryptomator specification)
+                var payload = new FileHeaderImpl.Payload(unchecked((long)0xFFFFFFFFFFFFFFFF), contentKey);
                 return new FileHeaderImpl(nonce, payload);
             }
             finally

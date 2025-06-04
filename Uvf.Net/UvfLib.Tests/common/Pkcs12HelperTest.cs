@@ -2,7 +2,7 @@ using Microsoft.VisualStudio.TestTools.UnitTesting;
 using System;
 using System.IO;
 using System.Security.Cryptography;
-using UvfLib._old.common;
+using UvfLib.Core.Common;
 
 namespace UvfLib.Tests.Common
 {

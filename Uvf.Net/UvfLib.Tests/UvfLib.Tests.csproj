@@ -19,14 +19,15 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\UvfLib\UvfLib.csproj" />
-  </ItemGroup>
-
-  <ItemGroup>
     <PackageReference Include="Moq" Version="4.20.70" />
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.8.0" />
     <PackageReference Include="MSTest.TestAdapter" Version="3.1.1" />
     <PackageReference Include="MSTest.TestFramework" Version="3.1.1" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\UvfLib.Core\UvfLib.Core.csproj" />
+    <ProjectReference Include="..\UvfLib\UvfLib.csproj" />
   </ItemGroup>
 
 </Project>

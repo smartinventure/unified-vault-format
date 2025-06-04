@@ -3,7 +3,7 @@ using System;
 using System.Security.Cryptography;
 using System.Linq;
 using Moq;
-using UvfLib._old.common;
+using UvfLib.Core.Common;
 
 namespace UvfLib.Tests.Common
 {

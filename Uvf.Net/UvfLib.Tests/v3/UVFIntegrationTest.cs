@@ -6,9 +6,9 @@ using System.Text;
 using System.Threading.Tasks;
 using UvfLib.Tests.Common;
 using System.Linq;
-using UvfLib._old.v3;
-using UvfLib._old.common;
-using UvfLib._old.api;
+using UvfLib.Core.V3;
+using UvfLib.Core.Common;
+using UvfLib.Core.Api;
 
 namespace UvfLib.Tests.V3
 {
@@ -93,7 +93,7 @@ namespace UvfLib.Tests.V3
             // --- Decryption Part ---
             // Cast rootDirMetadata to DirectoryMetadataImpl to access GetDirIdBytes for AAD
             DirectoryMetadataImpl rootDirMetadataImpl = DirectoryMetadataImpl.Cast(rootDirMetadata);
-            DirectoryMetadata decryptedResult = cryptor.DirectoryContentCryptor().DecryptDirectoryMetadata(encryptedResult, rootDirMetadataImpl.GetDirIdBytes());
+            Core.Api.DirectoryMetadata decryptedResult = cryptor.DirectoryContentCryptor().DecryptDirectoryMetadata(encryptedResult, rootDirMetadataImpl.GetDirIdBytes());
 
             Assert.IsInstanceOfType(decryptedResult, typeof(DirectoryMetadataImpl));
             DirectoryMetadataImpl metadata = (DirectoryMetadataImpl)decryptedResult;

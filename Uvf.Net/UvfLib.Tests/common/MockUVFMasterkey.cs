@@ -3,8 +3,8 @@ using System.Collections.Generic;
 using System.Diagnostics.CodeAnalysis;
 using System.Security.Cryptography;
 using System.Text;
-using UvfLib._old.api;
-using UvfLib._old.common;
+using UvfLib.Core.Api;
+using UvfLib.Core.Common;
 
 namespace UvfLib.Tests.Common
 {

@@ -8,7 +8,7 @@ namespace UvfLib.Core.Common
     /// <summary>
     /// Helper class for working with PKCS#12 files.
     /// </summary>
-    internal static class Pkcs12Helper
+    public static class Pkcs12Helper
     {
         private const string X509_ISSUER = "CN=Cryptomator";
         private const string X509_SUBJECT = "CN=Self Signed Cert";

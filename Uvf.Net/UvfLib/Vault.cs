@@ -460,7 +460,7 @@ namespace UvfLib
             var dirCryptor = _cryptor.DirectoryContentCryptor();
             if (dirCryptor == null) throw new InvalidOperationException("Directory cryptor not available.");
 
-            DirectoryMetadata rootMetadata = dirCryptor.RootDirectoryMetadata(); // This now returns metadata with empty children list
+            UvfLib.Core.Api.DirectoryMetadata rootMetadata = dirCryptor.RootDirectoryMetadata(); // Use Core type internally
             UvfLib.Core.Api.IDirectoryContentCryptor.Encrypting nameEncryptor = dirCryptor.FileNameEncryptor(rootMetadata);
             return nameEncryptor.Encrypt(plaintextFilename);
         }
@@ -482,7 +482,7 @@ namespace UvfLib
             var dirCryptor = _cryptor.DirectoryContentCryptor();
             if (dirCryptor == null) throw new InvalidOperationException("Directory cryptor not available.");
 
-            DirectoryMetadata rootMetadata = dirCryptor.RootDirectoryMetadata();
+            UvfLib.Core.Api.DirectoryMetadata rootMetadata = dirCryptor.RootDirectoryMetadata(); // Use Core type internally
             UvfLib.Core.Api.IDirectoryContentCryptor.Decrypting nameDecryptor = dirCryptor.FileNameDecryptor(rootMetadata);
             return nameDecryptor.Decrypt(encryptedFilename);
         }
@@ -498,7 +498,7 @@ namespace UvfLib
             var dirCryptor = _cryptor.DirectoryContentCryptor();
             if (dirCryptor == null) throw new InvalidOperationException("Directory cryptor not available.");
 
-            DirectoryMetadata rootMetadata = dirCryptor.RootDirectoryMetadata();
+            UvfLib.Core.Api.DirectoryMetadata rootMetadata = dirCryptor.RootDirectoryMetadata(); // Use Core type internally
             return dirCryptor.DirPath(rootMetadata);
         }
 
@@ -512,7 +512,8 @@ namespace UvfLib
             if (_disposed) throw new ObjectDisposedException(nameof(Vault));
             var dirCryptor = _cryptor.DirectoryContentCryptor();
             if (dirCryptor == null) throw new InvalidOperationException("Directory cryptor not available.");
-            return dirCryptor.RootDirectoryMetadata();
+            var coreMetadata = dirCryptor.RootDirectoryMetadata();
+            return ToPublic(coreMetadata);
         }
 
         /// <summary>
@@ -528,8 +529,7 @@ namespace UvfLib
         public Stream GetEncryptingStream(Stream outputStream, bool leaveOpen = false)
         {
             if (_disposed) throw new ObjectDisposedException(nameof(Vault));
-            // return VaultStreamHelper.GetEncryptingStreamInternal(_cryptor, outputStream, leaveOpen);
-            throw new NotImplementedException("Stream helpers need to be updated for Core API compatibility");
+            return new VaultHelpers.EncryptingStream(_cryptor, outputStream, leaveOpen);
         }
 
         /// <summary>
@@ -547,8 +547,7 @@ namespace UvfLib
         public Stream GetDecryptingStream(Stream inputStream, bool leaveOpen = false)
         {
             if (_disposed) throw new ObjectDisposedException(nameof(Vault));
-            // return VaultStreamHelper.GetDecryptingStreamInternal(_cryptor, inputStream, leaveOpen);
-            throw new NotImplementedException("Stream helpers need to be updated for Core API compatibility");
+            return new VaultHelpers.DecryptingStream(_cryptor, inputStream, leaveOpen);
         }
 
         // --- Directory Metadata Operations ---
@@ -564,7 +563,8 @@ namespace UvfLib
             if (_disposed) throw new ObjectDisposedException(nameof(Vault));
             var dirCryptor = _cryptor.DirectoryContentCryptor();
             if (dirCryptor == null) throw new InvalidOperationException("Directory cryptor not available.");
-            return dirCryptor.NewDirectoryMetadata(); // This now returns metadata with empty children list
+            var coreMetadata = dirCryptor.NewDirectoryMetadata();
+            return ToPublic(coreMetadata);
         }
 
         /// <summary>
@@ -581,8 +581,8 @@ namespace UvfLib
             if (_disposed) throw new ObjectDisposedException(nameof(Vault));
             var dirCryptor = _cryptor.DirectoryContentCryptor();
             if (dirCryptor == null) throw new InvalidOperationException("Directory cryptor not available.");
-            // This will now use the V3.DirectoryContentCryptorImpl which serializes children to JSON
-            return dirCryptor.EncryptDirectoryMetadata(metadata);
+            var coreMetadata = ToCore(metadata);
+            return dirCryptor.EncryptDirectoryMetadata(coreMetadata);
         }
 
         /// <summary>
@@ -595,7 +595,8 @@ namespace UvfLib
         {
             if (_disposed) throw new ObjectDisposedException(nameof(Vault));
             var dirCryptor = _cryptor.DirectoryContentCryptor();
-            return ((UvfLib.Core.Api.DirectoryContentCryptor)dirCryptor).DecryptDirectoryMetadata(encryptedMetadataBytes);
+            var coreMetadata = ((UvfLib.Core.Api.DirectoryContentCryptor)dirCryptor).DecryptDirectoryMetadata(encryptedMetadataBytes);
+            return ToPublic(coreMetadata);
         }
 
         /// <summary>
@@ -625,8 +626,9 @@ namespace UvfLib
         public string EncryptFilename(string plaintextFilename, DirectoryMetadata directoryMetadata)
         {
             if (_disposed) throw new ObjectDisposedException(nameof(Vault));
-            // return VaultDirectoryHelper.EncryptFilenameInternal(_cryptor, directoryMetadata, plaintextFilename);
-            throw new NotImplementedException("Directory helpers need to be updated for Core API compatibility");
+            var coreMetadata = ToCore(directoryMetadata);
+            var publicMetadata = ToPublic(coreMetadata); // Convert back to public for helper
+            return VaultDirectoryHelper.EncryptFilenameInternal(_cryptor, publicMetadata, plaintextFilename);
         }
 
         /// <summary>
@@ -643,8 +645,9 @@ namespace UvfLib
         public string DecryptFilename(string encryptedFilename, DirectoryMetadata directoryMetadata)
         {
             if (_disposed) throw new ObjectDisposedException(nameof(Vault));
-            // return VaultDirectoryHelper.DecryptFilenameInternal(_cryptor, directoryMetadata, encryptedFilename);
-            throw new NotImplementedException("Directory helpers need to be updated for Core API compatibility");
+            var coreMetadata = ToCore(directoryMetadata);
+            var publicMetadata = ToPublic(coreMetadata); // Convert back to public for helper
+            return VaultDirectoryHelper.DecryptFilenameInternal(_cryptor, publicMetadata, encryptedFilename);
         }
 
         /// <summary>
@@ -657,8 +660,9 @@ namespace UvfLib
         public string GetDirectoryPath(DirectoryMetadata directoryMetadata)
         {
             if (_disposed) throw new ObjectDisposedException(nameof(Vault));
-            // return VaultDirectoryHelper.GetDirectoryPathInternal(_cryptor, directoryMetadata);
-            throw new NotImplementedException("Directory helpers need to be updated for Core API compatibility");
+            var coreMetadata = ToCore(directoryMetadata);
+            var publicMetadata = ToPublic(coreMetadata); // Convert back to public for helper
+            return VaultDirectoryHelper.GetDirectoryPathInternal(_cryptor, publicMetadata);
         }
 
         /// <summary>
@@ -975,8 +979,7 @@ namespace UvfLib
         public string GetDirectoryMetadataFilename(DirectoryMetadata directoryMetadata = null)
         {
             if (_disposed) throw new ObjectDisposedException(nameof(Vault));
-            // return VaultDirectoryHelper.GetDirectoryMetadataFilename(_cryptor, directoryMetadata);
-            throw new NotImplementedException("Directory helpers need to be updated for Core API compatibility");
+            return VaultDirectoryHelper.GetDirectoryMetadataFilename(_cryptor, directoryMetadata);
         }
 
         /// <summary>
@@ -1003,6 +1006,27 @@ namespace UvfLib
             }
 
             throw new InvalidOperationException("Seed IDs are only available for UVF vaults.");
+        }
+
+        /// <summary>
+        /// Converts Core DirectoryMetadata to public DirectoryMetadata.
+        /// </summary>
+        internal static DirectoryMetadata ToPublic(UvfLib.Core.Api.DirectoryMetadata coreMetadata)
+        {
+            if (coreMetadata == null) throw new ArgumentNullException(nameof(coreMetadata));
+            return new DirectoryMetadata(coreMetadata);
+        }
+
+        /// <summary>
+        /// Converts public DirectoryMetadata to Core DirectoryMetadata.
+        /// This creates a new Core DirectoryMetadata instance with the same properties.
+        /// </summary>
+        internal UvfLib.Core.Api.DirectoryMetadata ToCore(DirectoryMetadata publicMetadata)
+        {
+            if (publicMetadata == null) throw new ArgumentNullException(nameof(publicMetadata));
+            
+            // Use the wrapped Core object directly to preserve type compatibility
+            return publicMetadata.GetCoreMetadata();
         }
     }
 }

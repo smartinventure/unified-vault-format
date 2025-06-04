@@ -8,7 +8,7 @@ namespace UvfLib.Core.V3
     /// Implementation of the DirectoryMetadata interface for v3 format.
     /// This represents the metadata stored in a dir.uvf file, which contains only the directory ID.
     /// </summary>
-    internal sealed class DirectoryMetadataImpl : DirectoryMetadata
+    public sealed class DirectoryMetadataImpl : DirectoryMetadata
     {
         private readonly int _seedId;
         private readonly byte[] _dirIdBytes; // Store as raw bytes internally
@@ -37,7 +37,7 @@ namespace UvfLib.Core.V3
         /// Gets the raw bytes of the directory ID.
         /// </summary>
         /// <returns>A clone of the internal DirId byte array.</returns>
-        internal byte[] GetDirIdBytes()
+        public byte[] GetDirIdBytes()
         {
             return (byte[])_dirIdBytes.Clone(); // Return a clone for safety
         }

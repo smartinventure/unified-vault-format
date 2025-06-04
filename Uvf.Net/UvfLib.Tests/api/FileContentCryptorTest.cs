@@ -1,6 +1,6 @@
 using Microsoft.VisualStudio.TestTools.UnitTesting;
-using UvfLib.Api;
-using UvfLib.V3;
+using UvfLib.Core.Api;
+using UvfLib.Core.V3;
 using Moq;
 using System;
 

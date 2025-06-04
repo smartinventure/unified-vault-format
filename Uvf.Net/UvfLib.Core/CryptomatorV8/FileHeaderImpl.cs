@@ -17,7 +17,7 @@ namespace UvfLib.Core.CryptomatorV8
 {
     /// <summary>
     /// File header implementation for Cryptomator v2.
-    /// Contains a nonce and encrypted payload with content key.
+    /// Contains encrypted content key and nonce for file content encryption.
     /// </summary>
     public class FileHeaderImpl : FileHeader, IDisposable
     {
@@ -67,16 +67,22 @@ namespace UvfLib.Core.CryptomatorV8
         }
 
         /// <summary>
-        /// Gets the nonce bytes.
+        /// Gets the header nonce.
         /// </summary>
-        /// <returns>The nonce</returns>
-        public byte[] GetNonce() => _nonce;
+        /// <returns>The nonce bytes</returns>
+        public byte[] GetNonce()
+        {
+            return _nonce;
+        }
 
         /// <summary>
-        /// Gets the payload.
+        /// Gets the header payload.
         /// </summary>
-        /// <returns>The payload</returns>
-        public Payload GetPayload() => _payload;
+        /// <returns>The payload containing the content key</returns>
+        public Payload GetPayload()
+        {
+            return _payload;
+        }
 
         /// <summary>
         /// Gets the reserved field value.
@@ -113,7 +119,7 @@ namespace UvfLib.Core.CryptomatorV8
         }
 
         /// <summary>
-        /// Payload class containing the reserved field and content key.
+        /// Header payload containing reserved bytes and content key.
         /// </summary>
         public class Payload : IDisposable
         {
@@ -200,10 +206,13 @@ namespace UvfLib.Core.CryptomatorV8
             public void SetReserved(long reserved) => _reserved = reserved;
 
             /// <summary>
-            /// Gets the content key.
+            /// Gets the content key for file encryption.
             /// </summary>
             /// <returns>The content key</returns>
-            public DestroyableSecretKey GetContentKey() => _contentKey;
+            public DestroyableSecretKey GetContentKey()
+            {
+                return _contentKey;
+            }
 
             /// <summary>
             /// Checks if this payload has been destroyed.

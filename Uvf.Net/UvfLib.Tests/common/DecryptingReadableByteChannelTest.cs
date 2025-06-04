@@ -1,10 +1,10 @@
 using Microsoft.VisualStudio.TestTools.UnitTesting;
-using UvfLib.Common;
+using UvfLib.Core.Common;
 using Moq;
 using System;
 using System.IO;
 using System.Text;
-using UvfLib._old.api;
+using UvfLib.Core.Api;
 
 namespace UvfLib.Tests.Common
 {

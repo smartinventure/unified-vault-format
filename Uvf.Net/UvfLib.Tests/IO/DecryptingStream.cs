@@ -1,7 +1,7 @@
 using System;
 using System.IO;
 using System.Security.Cryptography;
-using UvfLib._old.common;
+using UvfLib.Core.Common;
 
 namespace UvfLib.IO
 {

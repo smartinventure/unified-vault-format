@@ -7,7 +7,7 @@ namespace UvfLib.Core.V3
     /// <summary>
     /// Implementation of the CryptoFactory interface for v3 format.
     /// </summary>
-    internal sealed class CryptoFactoryImpl : CryptoFactory
+    public sealed class CryptoFactoryImpl : CryptoFactory
     {
         private readonly RevolvingMasterkey _revolvingMasterkey;
         private readonly RandomNumberGenerator _random;

@@ -2,9 +2,9 @@ using System;
 using System.Linq;
 using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
-using UvfLib.Common;
+using UvfLib.Core.Common;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
-using UvfLib._old.common;
+using UvfLib.Core.Common;
 
 namespace UvfLib.Tests.Common
 {

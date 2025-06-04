@@ -1,12 +1,12 @@
 using Microsoft.VisualStudio.TestTools.UnitTesting;
-using UvfLib.Common;
+using UvfLib.Core.Common;
 using System;
 using System.Security.Cryptography;
 using System.Collections.Generic;
 using System.Diagnostics;
 using UvfLib.Tests.Common;
-using UvfLib._old.v3;
-using UvfLib._old.api;
+using UvfLib.Core.V3;
+using UvfLib.Core.Api;
 
 namespace UvfLib.Tests.V3
 {
@@ -70,7 +70,7 @@ namespace UvfLib.Tests.V3
         [DisplayName("Encrypt WELCOME.rtf in root dir")]
         public void TestEncryptReadme()
         {
-            DirectoryMetadata rootDirMetadata = dirCryptor.RootDirectoryMetadata();
+            Core.Api.DirectoryMetadata rootDirMetadata = dirCryptor.RootDirectoryMetadata();
             IDirectoryContentCryptor.Encrypting enc = dirCryptor.FileNameEncryptor(rootDirMetadata);
 
             string ciphertext = enc.Encrypt("WELCOME.rtf");
@@ -82,7 +82,7 @@ namespace UvfLib.Tests.V3
         [DisplayName("Decrypt WELCOME.rtf in root dir")]
         public void TestDecryptReadme()
         {
-            DirectoryMetadata rootDirMetadata = dirCryptor.RootDirectoryMetadata();
+            Core.Api.DirectoryMetadata rootDirMetadata = dirCryptor.RootDirectoryMetadata();
             IDirectoryContentCryptor.Decrypting dec = dirCryptor.FileNameDecryptor(rootDirMetadata);
 
             string plaintext = dec.Decrypt("Dx1binBPsg_KNby6KFD_2k3vZHPgo39rg4ks.uvf");
@@ -94,7 +94,7 @@ namespace UvfLib.Tests.V3
         [DisplayName("Get root dir path")]
         public void TestRootDirPath()
         {
-            DirectoryMetadata rootDirMetadata = dirCryptor.RootDirectoryMetadata();
+            Core.Api.DirectoryMetadata rootDirMetadata = dirCryptor.RootDirectoryMetadata();
 
             string path = dirCryptor.DirPath(rootDirMetadata);
 
@@ -137,10 +137,10 @@ namespace UvfLib.Tests.V3
             }
 
             [DataTestMethod]
-            [DataRow("file1.txt", "p9FyZmPc9-PUI7AOihp84cwIIWdJKCKKsg==.uvf")]
-            [DataRow("file2.txt", "BLgwXhv87jMAVC0oJci7P-pMOQDRrPdlrw==.uvf")]
-            [DataRow("file3.txt", "dM0BEmaKPMofsgLNXfDEiHSyzi_Z2EoRIA==.uvf")]
-            [DataRow("file4.txt", "ZHJZegnbA2YRz5IB19O6Qwg0Qls_VLeuYg==.uvf")]
+            [DataRow("file1.txt", "p9FyZmPc9-PUI7AOihp84cwIIWdJKCKKsg.uvf")]
+            [DataRow("file2.txt", "BLgwXhv87jMAVC0oJci7P-pMOQDRrPdlrw.uvf")]
+            [DataRow("file3.txt", "dM0BEmaKPMofsgLNXfDEiHSyzi_Z2EoRIA.uvf")]
+            [DataRow("file4.txt", "ZHJZegnbA2YRz5IB19O6Qwg0Qls_VLeuYg.uvf")]
             [DisplayName("Encrypt multiple file names")]
             public void TestBulkEncryption(string plaintext, string expectedCiphertext)
             {
@@ -150,10 +150,10 @@ namespace UvfLib.Tests.V3
             }
 
             [DataTestMethod]
-            [DataRow("file1.txt", "p9FyZmPc9-PUI7AOihp84cwIIWdJKCKKsg==.uvf")]
-            [DataRow("file2.txt", "BLgwXhv87jMAVC0oJci7P-pMOQDRrPdlrw==.uvf")]
-            [DataRow("file3.txt", "dM0BEmaKPMofsgLNXfDEiHSyzi_Z2EoRIA==.uvf")]
-            [DataRow("file4.txt", "ZHJZegnbA2YRz5IB19O6Qwg0Qls_VLeuYg==.uvf")]
+            [DataRow("file1.txt", "p9FyZmPc9-PUI7AOihp84cwIIWdJKCKKsg.uvf")]
+            [DataRow("file2.txt", "BLgwXhv87jMAVC0oJci7P-pMOQDRrPdlrw.uvf")]
+            [DataRow("file3.txt", "dM0BEmaKPMofsgLNXfDEiHSyzi_Z2EoRIA.uvf")]
+            [DataRow("file4.txt", "ZHJZegnbA2YRz5IB19O6Qwg0Qls_VLeuYg.uvf")]
             [DisplayName("Decrypt multiple file names")]
             public void TestBulkDecryption(string expectedPlaintext, string ciphertext)
             {

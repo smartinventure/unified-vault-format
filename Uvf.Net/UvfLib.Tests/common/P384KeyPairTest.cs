@@ -3,7 +3,7 @@ using System;
 using System.IO;
 using System.Security.Cryptography;
 using System.Text;
-using UvfLib._old.common; // Added for Base64 decoding
+using UvfLib.Core.Common; // Added for Base64 decoding
 
 namespace UvfLib.Tests.Common
 {

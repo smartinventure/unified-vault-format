@@ -7,7 +7,7 @@ namespace UvfLib.Core.V3
     /// <summary>
     /// Implementation of the Cryptor interface for v3 format.
     /// </summary>
-    internal sealed class CryptorImpl : ICryptor
+    public sealed class CryptorImpl : ICryptor
     {
         private readonly RevolvingMasterkey _masterkey;
         private readonly FileContentCryptorImpl _fileContentCryptor;
@@ -19,7 +19,7 @@ namespace UvfLib.Core.V3
         /// </summary>
         /// <param name="masterkey">The masterkey</param>
         /// <param name="random">The random number generator</param>
-        internal CryptorImpl(RevolvingMasterkey masterkey, RandomNumberGenerator random)
+        public CryptorImpl(RevolvingMasterkey masterkey, RandomNumberGenerator random)
         {
             _masterkey = masterkey ?? throw new ArgumentNullException(nameof(masterkey));
             _random = random ?? throw new ArgumentNullException(nameof(random));

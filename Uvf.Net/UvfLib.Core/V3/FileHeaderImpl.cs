@@ -110,7 +110,7 @@ public sealed class FileHeaderImpl : FileHeader
     /// <returns>The cast file header</returns>
     /// <exception cref="ArgumentNullException">If the header is null</exception>
     /// <exception cref="InvalidCastException">If the header is not a FileHeaderImpl</exception>
-    internal static FileHeaderImpl Cast(FileHeader header)
+    public static FileHeaderImpl Cast(FileHeader header)
     {
         if (header == null)
         {
