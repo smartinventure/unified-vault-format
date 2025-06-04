@@ -10,9 +10,14 @@
 // Copyright (c) Smart In Venture GmbH 2025 of the C# Porting
 
 
-using UvfLib.Api;
 using System.Security.Cryptography;
 using System.Buffers.Binary;
+using UvfLib.Core.V3;
+using UvfLib.Core.Api;
+using UvfLib.Core.CryptomatorV8;
+
+
+
 #if DEBUG
 using System.Diagnostics; // For Stopwatch
 #endif
@@ -42,7 +47,7 @@ namespace UvfLib.VaultHelpers
         private readonly PerformanceMetrics _metrics;
 #endif
 
-        private const int CLEARTEXT_CHUNK_SIZE = V3.Constants.PAYLOAD_SIZE; // Reverted to use constant
+        private const int CLEARTEXT_CHUNK_SIZE = UvfLib.Core.V3.Constants.PAYLOAD_SIZE; // Reverted to use constant
         private readonly Memory<byte> _ciphertextChunkBuffer; // Reusable buffer for encrypted output
 
         public EncryptingStream(Cryptor cryptor, Stream outputStream, bool leaveOpen)
@@ -69,19 +74,19 @@ namespace UvfLib.VaultHelpers
             _fileHeader = _cryptor.FileHeaderCryptor().Create();
 
             // Handle both V3 and CryptomatorV8 header types
-            if (_fileHeader is V3.FileHeaderImpl v3Header)
+            if (_fileHeader is UvfLib.Core.V3.FileHeaderImpl v3Header)
             {
                 // V3 implementation
                 var fileContentKeyBytes = v3Header.GetContentKey().GetEncoded();
                 _fileContentAesGcm = new AesGcm(fileContentKeyBytes);
-                _perChunkNonce = new byte[V3.Constants.GCM_NONCE_SIZE];
+                _perChunkNonce = new byte[UvfLib.Core.V3.Constants.GCM_NONCE_SIZE];
                 
                 // Initialize AAD buffer for V3: 8 bytes for chunk number + header nonce length
                 ReadOnlySpan<byte> headerNonce = v3Header.GetNonce();
                 _aadBuffer = new byte[8 + headerNonce.Length];
                 headerNonce.CopyTo(_aadBuffer.AsSpan(8));
             }
-            else if (_fileHeader is CryptomatorV8.FileHeaderImpl v8Header)
+            else if (_fileHeader is Core.CryptomatorV8.FileHeaderImpl v8Header)
             {
                 // CryptomatorV8 implementation - copy key bytes to prevent destruction issues
                 var payload = v8Header.GetPayload();
@@ -98,7 +103,7 @@ namespace UvfLib.VaultHelpers
                 Buffer.BlockCopy(originalBytes, 0, fileContentKeyBytes, 0, originalBytes.Length);
                 
                 _fileContentAesGcm = new AesGcm(fileContentKeyBytes);
-                _perChunkNonce = new byte[CryptomatorV8.Constants.GCM_NONCE_SIZE];
+                _perChunkNonce = new byte[Core.CryptomatorV8.Constants.GCM_NONCE_SIZE];
                 
                 // Initialize AAD buffer for V8: 8 bytes for chunk number + header nonce length  
                 ReadOnlySpan<byte> headerNonce = v8Header.GetNonce();
@@ -158,10 +163,10 @@ namespace UvfLib.VaultHelpers
             BinaryPrimitives.WriteInt64BigEndian(_aadBuffer.AsSpan(0, 8), _currentChunkNumber);
 
             // Handle both V3 and CryptomatorV8 implementations
-            if (_cryptor.FileContentCryptor() is V3.FileContentCryptorImpl v3Cryptor)
+            if (_cryptor.FileContentCryptor() is UvfLib.Core.V3.FileContentCryptorImpl v3Cryptor)
             {
                 // V3 implementation
-                int expectedEncryptedLength = V3.Constants.GCM_NONCE_SIZE + cleartextChunk.Length + V3.Constants.GCM_TAG_SIZE;
+                int expectedEncryptedLength = UvfLib.Core.V3.Constants.GCM_NONCE_SIZE + cleartextChunk.Length + UvfLib.Core.V3.Constants.GCM_TAG_SIZE;
                 _ciphertextChunkBuffer.Slice(0, expectedEncryptedLength).Span.Clear();
                 
                 v3Cryptor.EncryptChunk(
@@ -175,7 +180,7 @@ namespace UvfLib.VaultHelpers
                 
                 _currentChunkNumber++; 
                 
-                int actualEncryptedLength = V3.Constants.GCM_NONCE_SIZE + cleartextChunk.Length + V3.Constants.GCM_TAG_SIZE;
+                int actualEncryptedLength = UvfLib.Core.V3.Constants.GCM_NONCE_SIZE + cleartextChunk.Length + UvfLib.Core.V3.Constants.GCM_TAG_SIZE;
                 
                 if (actualEncryptedLength != expectedEncryptedLength)
                 {
@@ -184,14 +189,14 @@ namespace UvfLib.VaultHelpers
                 
                 _outputStream.Write(_ciphertextChunkBuffer.Slice(0, actualEncryptedLength).Span);
             }
-            else if (_cryptor.FileContentCryptor() is CryptomatorV8.FileContentCryptorImpl v8Cryptor)
+            else if (_cryptor.FileContentCryptor() is Core.CryptomatorV8.FileContentCryptorImpl v8Cryptor)
             {
                 // CryptomatorV8 implementation - use same approach as V3
-                int expectedEncryptedLength = CryptomatorV8.Constants.GCM_NONCE_SIZE + cleartextChunk.Length + CryptomatorV8.Constants.GCM_TAG_SIZE;
+                int expectedEncryptedLength = Core.CryptomatorV8.Constants.GCM_NONCE_SIZE + cleartextChunk.Length + Core.CryptomatorV8.Constants.GCM_TAG_SIZE;
                 _ciphertextChunkBuffer.Slice(0, expectedEncryptedLength).Span.Clear();
                 
                 // Create nonce: 8 bytes chunk number (big endian) + 4 random bytes
-                byte[] nonce = new byte[CryptomatorV8.Constants.GCM_NONCE_SIZE];
+                byte[] nonce = new byte[Core.CryptomatorV8.Constants.GCM_NONCE_SIZE];
                 BinaryPrimitives.WriteInt64BigEndian(nonce.AsSpan(0, 8), _currentChunkNumber);
                 _random.GetBytes(nonce.AsSpan(8, 4));
                 
@@ -200,13 +205,13 @@ namespace UvfLib.VaultHelpers
                 
                 // Encrypt using AES-GCM directly (same approach as V3)
                 byte[] ciphertext = new byte[cleartextChunk.Length];
-                byte[] tag = new byte[CryptomatorV8.Constants.GCM_TAG_SIZE];
+                byte[] tag = new byte[Core.CryptomatorV8.Constants.GCM_TAG_SIZE];
                 
                 _fileContentAesGcm.Encrypt(nonce, cleartextChunk.Span, ciphertext, tag);
                 
                 // Copy ciphertext and tag to the buffer
-                ciphertext.CopyTo(_ciphertextChunkBuffer.Span.Slice(CryptomatorV8.Constants.GCM_NONCE_SIZE));
-                tag.CopyTo(_ciphertextChunkBuffer.Span.Slice(CryptomatorV8.Constants.GCM_NONCE_SIZE + cleartextChunk.Length));
+                ciphertext.CopyTo(_ciphertextChunkBuffer.Span.Slice(Core.CryptomatorV8.Constants.GCM_NONCE_SIZE));
+                tag.CopyTo(_ciphertextChunkBuffer.Span.Slice(Core.CryptomatorV8.Constants.GCM_NONCE_SIZE + cleartextChunk.Length));
                 
                 _currentChunkNumber++;
                 

@@ -1,8 +1,8 @@
-using UvfLib.Api;
-using UvfLib.Common;
 using System;
 using System.IO;
 using System.Threading.Tasks;
+using UvfLib._old.common;
+using UvfLib._old.api;
 
 namespace UvfLib.Tests.Common
 {

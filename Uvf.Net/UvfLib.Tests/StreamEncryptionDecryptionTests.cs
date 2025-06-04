@@ -1,10 +1,10 @@
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 using System.Security.Cryptography;
-using UvfLib.Api;
 using UvfLib.VaultHelpers;
 using UvfLib.V3;
 using System.IO;
 using System.Collections.Generic;
+using UvfLib._old.api;
 
 namespace UvfLib.Tests
 {

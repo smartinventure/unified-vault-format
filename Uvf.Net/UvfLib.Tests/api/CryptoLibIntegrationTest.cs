@@ -1,5 +1,4 @@
 using Microsoft.VisualStudio.TestTools.UnitTesting;
-using UvfLib.Api;
 using UvfLib.Common;
 using UvfLib.Tests.Common;
 using UvfLib.Tests.Streams;
@@ -11,6 +10,7 @@ using System.IO;
 using System.Security.Cryptography;
 using System.Text;
 using System.Diagnostics;
+using UvfLib._old.api;
 
 namespace UvfLib.Tests.Api
 {

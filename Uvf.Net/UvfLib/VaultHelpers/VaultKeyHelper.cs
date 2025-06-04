@@ -13,11 +13,13 @@
 using System;
 using System.Security.Cryptography;
 using System.Text;
+using UvfLib.Core.Common;
+using UvfLib.Core.Jwe;
+
+
 // using System.Text.Json; // No longer directly needed here for payload construction
-using UvfLib.Api; // For UVFMasterkey for type hinting if needed
-using UvfLib.Common; // For CryptographicOperations and MasterkeyFileAccess
-using UvfLib.Jwe; // For JweVaultManager and UvfMasterkeyPayload
-using UvfLib.V3; // For UVFMasterkeyImpl
+using UvfLib.Core.Api; // For UVFMasterkey for type hinting if needed
+using UvfLib.Core.V3; // For UVFMasterkeyImpl
 
 namespace UvfLib.VaultHelpers
 {

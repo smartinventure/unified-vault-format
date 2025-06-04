@@ -1,12 +1,11 @@
 using Microsoft.VisualStudio.TestTools.UnitTesting;
-using UvfLib.Api;
-using UvfLib.Common;
 using UvfLib.Tests.Common.TestUtilities;
 using Moq;
 using System;
 using System.IO;
 using System.Security.Cryptography;
 using System.Text;
+using UvfLib._old.common;
 
 namespace UvfLib.Tests.Common
 {
@@ -178,7 +177,7 @@ namespace UvfLib.Tests.Common
             [DisplayName("Test Unlock With Incorrect Password")]
             public void TestUnlockWithIncorrectPassword()
             {
-                Assert.ThrowsException<UvfLib.Api.InvalidCredentialException>(() =>
+                Assert.ThrowsException<_old.api.InvalidCredentialException>(() =>
                 {
                     _masterkeyFileAccess.Unlock(_keyFile, "qwe");
                 });
@@ -190,7 +189,7 @@ namespace UvfLib.Tests.Common
             {
                 MasterkeyFileAccess masterkeyFileAccessWithPepper = new MasterkeyFileAccess(new byte[1], REAL_RANDOM);
 
-                Assert.ThrowsException<UvfLib.Api.InvalidCredentialException>(() =>
+                Assert.ThrowsException<_old.api.InvalidCredentialException>(() =>
                 {
                     masterkeyFileAccessWithPepper.Unlock(_keyFile, "asd");
                 });

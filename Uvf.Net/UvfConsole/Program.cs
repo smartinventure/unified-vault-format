@@ -1,6 +1,4 @@
 ﻿using UvfLib;
-using UvfLib.Api;
-using UvfLib.V3;
 using UvfLib.VaultHelpers;
 using System.Diagnostics;
 using System.Linq;

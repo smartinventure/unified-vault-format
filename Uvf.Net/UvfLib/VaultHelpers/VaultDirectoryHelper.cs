@@ -10,9 +10,9 @@
 // Copyright (c) Smart In Venture GmbH 2025 of the C# Porting
 
 
-using UvfLib.Api;
 using System;
 using System.IO;
+using UvfLib.Core.Api;
 
 namespace UvfLib.VaultHelpers
 {
@@ -236,7 +236,7 @@ namespace UvfLib.VaultHelpers
                     try
                     {
                         byte[] encryptedMetadata = File.ReadAllBytes(dirMetadataPath);
-                        currentDirMetadata = ((Api.DirectoryContentCryptor)cryptor.DirectoryContentCryptor()).DecryptDirectoryMetadata(encryptedMetadata);
+                        currentDirMetadata = ((DirectoryContentCryptor)cryptor.DirectoryContentCryptor()).DecryptDirectoryMetadata(encryptedMetadata);
                         currentPhysicalPath = encryptedSegmentPath;
                     }
                     catch (Exception)
@@ -311,7 +311,7 @@ namespace UvfLib.VaultHelpers
                     try
                     {
                         byte[] encryptedMetadata = File.ReadAllBytes(dirMetadataPath);
-                        currentDirMetadata = ((Api.DirectoryContentCryptor)cryptor.DirectoryContentCryptor()).DecryptDirectoryMetadata(encryptedMetadata);
+                        currentDirMetadata = ((DirectoryContentCryptor)cryptor.DirectoryContentCryptor()).DecryptDirectoryMetadata(encryptedMetadata);
                         currentPhysicalPath = encryptedSegmentPath;
                     }
                     catch (Exception)

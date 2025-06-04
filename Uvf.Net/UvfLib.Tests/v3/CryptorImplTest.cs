@@ -1,9 +1,10 @@
 using Microsoft.VisualStudio.TestTools.UnitTesting;
-using UvfLib.Api;
 using UvfLib.Tests.Common;
 using UvfLib.V3;
 using System.Security.Cryptography;
 using Moq;
+using UvfLib._old.v3;
+using UvfLib._old.api;
 
 namespace UvfLib.Tests.V3
 {

@@ -1,10 +1,10 @@
 using Microsoft.VisualStudio.TestTools.UnitTesting;
-using UvfLib.Common;
 using UvfLib.Api; // Use the Api namespace for interfaces if needed
 using System;
 using System.Security.Cryptography;
 using Moq; // Add Moq for mocking CSPRNG if needed for Generate test
-using System.Linq; // Add Linq for checking zeroed array
+using System.Linq;
+using UvfLib._old.common; // Add Linq for checking zeroed array
 
 namespace UvfLib.Tests.Common
 {
@@ -12,9 +12,9 @@ namespace UvfLib.Tests.Common
     public class MasterkeyTest
     {
         // Qualify Masterkey to UvfLib.Common.Masterkey to resolve ambiguity
-        private const int SubkeyLength = UvfLib.Common.Masterkey.SubkeyLength;
+        private const int SubkeyLength = _old.common.Masterkey.SubkeyLength;
         // Qualify Masterkey to UvfLib.Common.Masterkey to resolve ambiguity
-        private const int KeyLength = UvfLib.Common.Masterkey.KeyLength;
+        private const int KeyLength = _old.common.Masterkey.KeyLength;
 
         // Helper to create a deterministic mock RNG for testing Generate
         private static RandomNumberGenerator CreateMockRng(byte[] outputBytes)
@@ -38,7 +38,7 @@ namespace UvfLib.Tests.Common
             var mockRng = CreateMockRng(expectedKeyMaterial);
 
             // Qualify Masterkey type
-            using (var masterkey = UvfLib.Common.Masterkey.Generate(mockRng))
+            using (var masterkey = _old.common.Masterkey.Generate(mockRng))
             {
                 Assert.IsNotNull(masterkey);
                 Assert.IsFalse(masterkey.IsDestroyed());
@@ -60,7 +60,7 @@ namespace UvfLib.Tests.Common
             using (var encKey = new DestroyableSecretKey(encKeyBytes, "AES")) // Use correct C# class
             using (var macKey = new DestroyableSecretKey(macKeyBytes, "HmacSHA256")) // Use correct C# class
             // Qualify Masterkey type
-            using (var masterkey = UvfLib.Common.Masterkey.From(encKey, macKey)) // Use static From method
+            using (var masterkey = _old.common.Masterkey.From(encKey, macKey)) // Use static From method
             {
                 Assert.IsNotNull(masterkey);
                 Assert.IsFalse(masterkey.IsDestroyed());
@@ -93,7 +93,7 @@ namespace UvfLib.Tests.Common
             using (var encK = new DestroyableSecretKey(expectedEncKey, "AES"))
             using (var macK = new DestroyableSecretKey(rawKey.Skip(SubkeyLength).ToArray(), "HMAC"))
             // Qualify Masterkey type
-            using (var masterkey = UvfLib.Common.Masterkey.From(encK, macK))
+            using (var masterkey = _old.common.Masterkey.From(encK, macK))
             using (var derivedEncKey = masterkey.GetEncKey())
             {
                 Assert.IsNotNull(derivedEncKey);
@@ -115,7 +115,7 @@ namespace UvfLib.Tests.Common
             using (var encK = new DestroyableSecretKey(rawKey.Take(SubkeyLength).ToArray(), "AES"))
             using (var macK = new DestroyableSecretKey(expectedMacKey, "HmacSHA256"))
             // Qualify Masterkey type
-            using (var masterkey = UvfLib.Common.Masterkey.From(encK, macK))
+            using (var masterkey = _old.common.Masterkey.From(encK, macK))
             using (var derivedMacKey = masterkey.GetMacKey())
             {
                 Assert.IsNotNull(derivedMacKey);
@@ -131,7 +131,7 @@ namespace UvfLib.Tests.Common
         public void TestDestroy()
         {
             // Qualify Masterkey type
-            UvfLib.Common.Masterkey masterkey = UvfLib.Common.Masterkey.Generate(); // Don't dispose immediately
+            _old.common.Masterkey masterkey = _old.common.Masterkey.Generate(); // Don't dispose immediately
             byte[] rawKeyCopy = masterkey.GetRaw(); // Get copy before destroy
 
             masterkey.Destroy();

@@ -1,6 +1,6 @@
 using Microsoft.VisualStudio.TestTools.UnitTesting;
-using UvfLib.Common;
 using System;
+using UvfLib._old.common;
 
 namespace UvfLib.Tests.Common
 {

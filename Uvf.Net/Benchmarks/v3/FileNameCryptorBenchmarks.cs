@@ -1,10 +1,10 @@
 using BenchmarkDotNet.Attributes;
 using UvfLib.Api;
-using UvfLib.Common;
-using UvfLib.V3;
 using System;
 using System.Security.Cryptography;
 using System.Text;
+using UvfLib._old.v3;
+using UvfLib._old.common;
 
 namespace UvfLib.Benchmarks.v3
 {

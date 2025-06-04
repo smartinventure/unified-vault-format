@@ -1,12 +1,12 @@
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 using UvfLib.Common;
-using UvfLib.Api;
-using UvfLib.V3;
 using System;
 using System.Security.Cryptography;
 using System.Collections.Generic;
 using System.Diagnostics;
 using UvfLib.Tests.Common;
+using UvfLib._old.v3;
+using UvfLib._old.api;
 
 namespace UvfLib.Tests.V3
 {

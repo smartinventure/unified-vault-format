@@ -1,7 +1,4 @@
 using Microsoft.VisualStudio.TestTools.UnitTesting;
-using UvfLib.Common;
-using UvfLib.Api;
-using UvfLib.V3;
 using System;
 using System.IO;
 using System.Security.Cryptography;
@@ -9,6 +6,9 @@ using System.Text;
 using System.Threading.Tasks;
 using UvfLib.Tests.Common;
 using System.Linq;
+using UvfLib._old.v3;
+using UvfLib._old.common;
+using UvfLib._old.api;
 
 namespace UvfLib.Tests.V3
 {
@@ -87,7 +87,7 @@ namespace UvfLib.Tests.V3
             // Check seed 
             byte[] seedBytes = new byte[4];
             Array.Copy(encryptedResult, 4, seedBytes, 0, 4);
-            byte[] expectedSeed = BitConverter.GetBytes(UvfLib.Common.SeedIdConverter.ToInt("HDm38i")).Reverse().Take(4).ToArray();
+            byte[] expectedSeed = BitConverter.GetBytes(SeedIdConverter.ToInt("HDm38i")).Reverse().Take(4).ToArray();
             CollectionAssert.AreEqual(expectedSeed, seedBytes, "Expected seed to be the one from GetFirstRevision (HDm38i) (Encryption)");
 
             // --- Decryption Part ---
@@ -118,7 +118,7 @@ namespace UvfLib.Tests.V3
             byte[] seedBytes = new byte[4];
             Array.Copy(result, 4, seedBytes, 0, 4);
             // Expected seed should be the latest one, derived via SeedIdConverter
-            int latestSeedId = UvfLib.Common.SeedIdConverter.ToInt("QBsJFo"); // "QBsJFo" is latest by timestamp
+            int latestSeedId = SeedIdConverter.ToInt("QBsJFo"); // "QBsJFo" is latest by timestamp
             byte[] expectedSeed = BitConverter.GetBytes(latestSeedId).Reverse().Take(4).ToArray(); // Big Endian bytes of the latest seed ID
             CollectionAssert.AreEqual(expectedSeed, seedBytes, "Expected seed to be latest seed (QBsJFo)");
         }

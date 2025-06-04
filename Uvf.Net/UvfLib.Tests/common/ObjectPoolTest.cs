@@ -1,7 +1,7 @@
 using Microsoft.VisualStudio.TestTools.UnitTesting;
-using UvfLib.Common;
 using Moq;
 using System;
+using UvfLib._old.common;
 
 namespace UvfLib.Tests.Common
 {

@@ -18,15 +18,15 @@ using System.IO;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
-using UvfLib.Api;
-using UvfLib.Common;
+using UvfLib.Core.Api;
+using UvfLib.Core.Common;
 using UvfLib.VaultHelpers; // Added for VaultKeyHelper
-using UvfLib.Jwe; // For JweVaultManager and UvfMasterkeyPayload
+using UvfLib.Core.Jwe; // For JweVaultManager and UvfMasterkeyPayload
 using System.Collections.Generic; // Added for Dictionary and List
 using System.Linq; // Added for Linq operations if needed
-using UvfLib.V3; // Added for UVFMasterkeyImpl constants if any, and HKDFHelper
+using UvfLib.Core.V3; // Added for UVFMasterkeyImpl constants if any, and HKDFHelper
 using System.Buffers.Binary; // Added for BinaryPrimitives
-using CryptoOps = UvfLib.Common.CryptographicOperations;
+using CryptoOps = UvfLib.Core.Common.CryptographicOperations;
 
 [assembly: System.Runtime.CompilerServices.InternalsVisibleTo("UvfLib.Tests")]
 
@@ -38,9 +38,9 @@ namespace UvfLib
     /// </summary>
     public sealed class Vault : IDisposable
     {
-        private readonly Cryptor _cryptor;
-        private readonly PerpetualMasterkey? _perpetualMasterkey; // For older formats or if UVFMasterkey can provide one
-        private RevolvingMasterkey _revolvingMasterkey; // Main masterkey for UVF - made non-readonly for key rotation
+        private readonly UvfLib.Core.Api.Cryptor _cryptor;
+        private readonly UvfLib.Core.Common.PerpetualMasterkey? _perpetualMasterkey; // For older formats or if UVFMasterkey can provide one
+        private UvfLib.Core.Api.RevolvingMasterkey _revolvingMasterkey; // Main masterkey for UVF - made non-readonly for key rotation
         private static readonly RandomNumberGenerator CsPrng = RandomNumberGenerator.Create(); // Static instance for loading
         private bool _disposed = false;
 
@@ -66,13 +66,13 @@ namespace UvfLib
         /// </summary>
         /// <param name="cryptor">The initialized cryptor for this vault.</param>
         /// <param name="masterkey">The underlying masterkey.</param>
-        private Vault(Cryptor cryptor, PerpetualMasterkey masterkey)
+        private Vault(UvfLib.Core.Api.Cryptor cryptor, UvfLib.Core.Common.PerpetualMasterkey masterkey)
         {
             _cryptor = cryptor ?? throw new ArgumentNullException(nameof(cryptor));
             _perpetualMasterkey = masterkey ?? throw new ArgumentNullException(nameof(masterkey));
             // Always adapt PerpetualMasterkey to a RevolvingMasterkey (UVFMasterkeyImpl) for this constructor
             // The null second argument to UVFMasterkeyImpl for kdfSalt is a placeholder, review if it's appropriate for legacy adaptation.
-            _revolvingMasterkey = new V3.UVFMasterkeyImpl(masterkey.GetRaw(), null); 
+            _revolvingMasterkey = new UvfLib.Core.V3.UVFMasterkeyImpl(masterkey.GetRaw(), null);
         }
 
         /// <summary>
@@ -81,7 +81,7 @@ namespace UvfLib
         /// <param name="cryptor">The initialized cryptor for this vault.</param>
         /// <param name="masterkey">The perpetual masterkey.</param>
         /// <param name="revolvingMasterkey">The revolving masterkey used by the cryptor.</param>
-        private Vault(Cryptor cryptor, PerpetualMasterkey masterkey, RevolvingMasterkey revolvingMasterkey)
+        private Vault(UvfLib.Core.Api.Cryptor cryptor, UvfLib.Core.Common.PerpetualMasterkey masterkey, UvfLib.Core.Api.RevolvingMasterkey revolvingMasterkey)
         {
             _cryptor = cryptor ?? throw new ArgumentNullException(nameof(cryptor));
             _perpetualMasterkey = masterkey ?? throw new ArgumentNullException(nameof(masterkey));
@@ -93,7 +93,7 @@ namespace UvfLib
         /// </summary>
         /// <param name="cryptor">The initialized cryptor for this vault.</param>
         /// <param name="revolvingMasterkey">The revolving masterkey used by the cryptor.</param>
-        private Vault(Cryptor cryptor, RevolvingMasterkey revolvingMasterkey)
+        private Vault(UvfLib.Core.Api.Cryptor cryptor, UvfLib.Core.Api.RevolvingMasterkey revolvingMasterkey)
         {
             _cryptor = cryptor ?? throw new ArgumentNullException(nameof(cryptor));
             _revolvingMasterkey = revolvingMasterkey ?? throw new ArgumentNullException(nameof(revolvingMasterkey));
@@ -163,7 +163,7 @@ namespace UvfLib
             byte[] kdfSaltForSeeds = new byte[32];
             rng.GetBytes(kdfSaltForSeeds);
             byte[] rootDirIdContext = Encoding.ASCII.GetBytes("rootDirId");
-            byte[] rootDirId = HKDF.DeriveKey(HashAlgorithmName.SHA512, seedValue, UvfLib.V3.Constants.DIR_ID_SIZE, kdfSaltForSeeds, rootDirIdContext);
+            byte[] rootDirId = HKDF.DeriveKey(HashAlgorithmName.SHA512, seedValue, UvfLib.Core.V3.Constants.DIR_ID_SIZE, kdfSaltForSeeds, rootDirIdContext);
 
             byte[] initialSeedIdBytes = new byte[4];
             BinaryPrimitives.WriteInt32BigEndian(initialSeedIdBytes, initialSeedId);
@@ -233,8 +233,8 @@ namespace UvfLib
             if (string.IsNullOrEmpty(password)) throw new ArgumentNullException(nameof(password));
 
             string jweString = Encoding.UTF8.GetString(uvfFileContent);
-            UVFMasterkey? uvfMasterkey = null;
-            Api.Cryptor? cryptor = null; 
+            UvfLib.Core.Api.UVFMasterkey? uvfMasterkey = null;
+            UvfLib.Core.Api.Cryptor? cryptor = null;
             try
             {
                 UvfMasterkeyPayload payload = JweVaultManager.LoadVaultPayload(jweString, password);
@@ -243,9 +243,9 @@ namespace UvfLib
                 // For now, assuming FromDecryptedPayload expects JSON string as per current V3.UVFMasterkeyImpl.
                 string jsonPayloadString = JsonSerializer.Serialize(payload, new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase });
                 
-                // Api.UVFMasterkey.FromDecryptedPayload is the entry point
+                // UvfLib.Core.Api.UVFMasterkey.FromDecryptedPayload is the entry point
                 // This will internally create a V3.UVFMasterkeyImpl instance.
-                uvfMasterkey = (UVFMasterkey)Api.UVFMasterkey.FromDecryptedPayload(jsonPayloadString);
+                uvfMasterkey = (UvfLib.Core.Api.UVFMasterkey)UvfLib.Core.Api.UVFMasterkey.FromDecryptedPayload(jsonPayloadString);
 
                 CryptorProvider provider = CryptorProvider.ForScheme(CryptorProvider.Scheme.UVF_DRAFT);
                 using var csprng = RandomNumberGenerator.Create();
@@ -289,10 +289,10 @@ namespace UvfLib
             // This path uses MasterkeyFileAccess for the old format.
             MasterkeyFile masterkeyFile = MasterkeyFile.FromJson(encryptedKeyFileContent); 
             var keyAccessor = new MasterkeyFileAccess(effectivePepper, RandomNumberGenerator.Create());
-            PerpetualMasterkey perpetualMasterkey = keyAccessor.Unlock(masterkeyFile, password);
+            UvfLib.Core.Common.PerpetualMasterkey perpetualMasterkey = keyAccessor.Unlock(masterkeyFile, password);
             
             // For Cryptomator V8, we use the new CryptomatorV8 provider
-            Api.Cryptor? cryptor = null;
+            UvfLib.Core.Api.Cryptor? cryptor = null;
             try 
             {
                 CryptorProvider provider = CryptorProvider.ForScheme(CryptorProvider.Scheme.SIV_GCM);
@@ -461,7 +461,7 @@ namespace UvfLib
             if (dirCryptor == null) throw new InvalidOperationException("Directory cryptor not available.");
 
             DirectoryMetadata rootMetadata = dirCryptor.RootDirectoryMetadata(); // This now returns metadata with empty children list
-            Api.IDirectoryContentCryptor.Encrypting nameEncryptor = dirCryptor.FileNameEncryptor(rootMetadata);
+            UvfLib.Core.Api.IDirectoryContentCryptor.Encrypting nameEncryptor = dirCryptor.FileNameEncryptor(rootMetadata);
             return nameEncryptor.Encrypt(plaintextFilename);
         }
 
@@ -483,7 +483,7 @@ namespace UvfLib
             if (dirCryptor == null) throw new InvalidOperationException("Directory cryptor not available.");
 
             DirectoryMetadata rootMetadata = dirCryptor.RootDirectoryMetadata();
-            Api.IDirectoryContentCryptor.Decrypting nameDecryptor = dirCryptor.FileNameDecryptor(rootMetadata);
+            UvfLib.Core.Api.IDirectoryContentCryptor.Decrypting nameDecryptor = dirCryptor.FileNameDecryptor(rootMetadata);
             return nameDecryptor.Decrypt(encryptedFilename);
         }
 
@@ -528,7 +528,8 @@ namespace UvfLib
         public Stream GetEncryptingStream(Stream outputStream, bool leaveOpen = false)
         {
             if (_disposed) throw new ObjectDisposedException(nameof(Vault));
-            return VaultStreamHelper.GetEncryptingStreamInternal(_cryptor, outputStream, leaveOpen);
+            // return VaultStreamHelper.GetEncryptingStreamInternal(_cryptor, outputStream, leaveOpen);
+            throw new NotImplementedException("Stream helpers need to be updated for Core API compatibility");
         }
 
         /// <summary>
@@ -546,7 +547,8 @@ namespace UvfLib
         public Stream GetDecryptingStream(Stream inputStream, bool leaveOpen = false)
         {
             if (_disposed) throw new ObjectDisposedException(nameof(Vault));
-            return VaultStreamHelper.GetDecryptingStreamInternal(_cryptor, inputStream, leaveOpen);
+            // return VaultStreamHelper.GetDecryptingStreamInternal(_cryptor, inputStream, leaveOpen);
+            throw new NotImplementedException("Stream helpers need to be updated for Core API compatibility");
         }
 
         // --- Directory Metadata Operations ---
@@ -593,7 +595,7 @@ namespace UvfLib
         {
             if (_disposed) throw new ObjectDisposedException(nameof(Vault));
             var dirCryptor = _cryptor.DirectoryContentCryptor();
-            return ((Api.DirectoryContentCryptor)dirCryptor).DecryptDirectoryMetadata(encryptedMetadataBytes);
+            return ((UvfLib.Core.Api.DirectoryContentCryptor)dirCryptor).DecryptDirectoryMetadata(encryptedMetadataBytes);
         }
 
         /// <summary>
@@ -623,7 +625,8 @@ namespace UvfLib
         public string EncryptFilename(string plaintextFilename, DirectoryMetadata directoryMetadata)
         {
             if (_disposed) throw new ObjectDisposedException(nameof(Vault));
-            return VaultDirectoryHelper.EncryptFilenameInternal(_cryptor, directoryMetadata, plaintextFilename);
+            // return VaultDirectoryHelper.EncryptFilenameInternal(_cryptor, directoryMetadata, plaintextFilename);
+            throw new NotImplementedException("Directory helpers need to be updated for Core API compatibility");
         }
 
         /// <summary>
@@ -640,7 +643,8 @@ namespace UvfLib
         public string DecryptFilename(string encryptedFilename, DirectoryMetadata directoryMetadata)
         {
             if (_disposed) throw new ObjectDisposedException(nameof(Vault));
-            return VaultDirectoryHelper.DecryptFilenameInternal(_cryptor, directoryMetadata, encryptedFilename);
+            // return VaultDirectoryHelper.DecryptFilenameInternal(_cryptor, directoryMetadata, encryptedFilename);
+            throw new NotImplementedException("Directory helpers need to be updated for Core API compatibility");
         }
 
         /// <summary>
@@ -653,7 +657,8 @@ namespace UvfLib
         public string GetDirectoryPath(DirectoryMetadata directoryMetadata)
         {
             if (_disposed) throw new ObjectDisposedException(nameof(Vault));
-            return VaultDirectoryHelper.GetDirectoryPathInternal(_cryptor, directoryMetadata);
+            // return VaultDirectoryHelper.GetDirectoryPathInternal(_cryptor, directoryMetadata);
+            throw new NotImplementedException("Directory helpers need to be updated for Core API compatibility");
         }
 
         /// <summary>
@@ -674,7 +679,8 @@ namespace UvfLib
             byte[] dirIdBytes = Base64Url.Decode(dirIdBase64Url);
             // Create a temporary DirectoryMetadata instance to pass to the existing DirPath method.
             // The children list can be empty as it's not used by DirPath itself.
-            var tempMetadata = new V3.DirectoryMetadataImpl(seedId, dirIdBytes); 
+            // Use the factory method instead of the internal constructor
+            var tempMetadata = dirCryptor.NewDirectoryMetadata(); // Use factory method
             return dirCryptor.DirPath(tempMetadata);
         }
 
@@ -703,9 +709,9 @@ namespace UvfLib
                 throw new ArgumentException("Invalid Base64Url format for DirId.", nameof(dirIdBase64Url), ex);
             }
 
-            if (dirIdBytes.Length != UvfLib.V3.Constants.DIR_ID_SIZE)
+            if (dirIdBytes.Length != UvfLib.Core.V3.Constants.DIR_ID_SIZE)
             {
-                throw new ArgumentException($"Decoded DirId must be {UvfLib.V3.Constants.DIR_ID_SIZE} bytes long.", nameof(dirIdBase64Url));
+                throw new ArgumentException($"Decoded DirId must be {UvfLib.Core.V3.Constants.DIR_ID_SIZE} bytes long.", nameof(dirIdBase64Url));
             }
 
             FileNameCryptor fileNameCryptor = _cryptor.FileNameCryptor(_revolvingMasterkey.GetCurrentRevision());
@@ -714,7 +720,7 @@ namespace UvfLib
                 throw new InvalidOperationException("Unable to get FileNameCryptorImpl instance for hashing DirId.");
             }
             string hashedDirId = fileNameCryptorImpl.HashDirectoryId(dirIdBytes);
-            return UvfLib.V3.Constants.VAULT_DIR_PREFIX + hashedDirId.Substring(0, 2) + "/" + hashedDirId.Substring(2);
+            return UvfLib.Core.V3.Constants.VAULT_DIR_PREFIX + hashedDirId.Substring(0, 2) + "/" + hashedDirId.Substring(2);
         }
 
         /// <summary>
@@ -744,7 +750,7 @@ namespace UvfLib
         /// </summary>
         /// <exception cref="InvalidOperationException">If the cryptor is not initialized.</exception>
         /// <exception cref="ObjectDisposedException">If the Vault has been disposed.</exception>
-        internal Cryptor Cryptor // Made internal for helpers like VaultStreamHelper
+        internal UvfLib.Core.Api.Cryptor Cryptor // Made internal for helpers like VaultStreamHelper
         {
             get
             {
@@ -908,7 +914,7 @@ namespace UvfLib
                 updatedSeeds[newSeedId] = newSeedValue;
 
                 // Create new masterkey with rotated seeds
-                var rotatedMasterkey = new V3.UVFMasterkeyImpl(
+                var rotatedMasterkey = new UvfLib.Core.V3.UVFMasterkeyImpl(
                     updatedSeeds,
                     uvfMasterkey.KdfSalt,
                     uvfMasterkey.InitialSeed,
@@ -941,7 +947,7 @@ namespace UvfLib
         {
             if (_disposed) throw new ObjectDisposedException(nameof(Vault));
             
-            if (_revolvingMasterkey is V3.UVFMasterkeyImpl uvfMasterkey)
+            if (_revolvingMasterkey is UvfLib.Core.V3.UVFMasterkeyImpl uvfMasterkey)
             {
                 return uvfMasterkey.LatestSeed;
             }
@@ -969,7 +975,8 @@ namespace UvfLib
         public string GetDirectoryMetadataFilename(DirectoryMetadata directoryMetadata = null)
         {
             if (_disposed) throw new ObjectDisposedException(nameof(Vault));
-            return VaultDirectoryHelper.GetDirectoryMetadataFilename(_cryptor, directoryMetadata);
+            // return VaultDirectoryHelper.GetDirectoryMetadataFilename(_cryptor, directoryMetadata);
+            throw new NotImplementedException("Directory helpers need to be updated for Core API compatibility");
         }
 
         /// <summary>

@@ -1,0 +1,320 @@
+
+Excellent strategic thinking! You're absolutely right to separate the open-source cryptographic core from the proprietary user-friendly API. This approach builds trust while protecting your commercial value. Let me suggest a clean directory structure that supports both goals.
+
+## 🏗️ **Recommended Directory Structure**
+
+### **Option 1: Monorepo with Clear Separation** ⭐⭐⭐ **RECOMMENDED**
+
+```
+Uvf.Net/
+├── UvfLib.Core/                    # 🔓 OPEN SOURCE
+│   ├── Api/                        # Core interfaces (existing)
+│   ├── Common/                     # Crypto utilities (existing)  
+│   ├── V3/                         # UVF implementation (existing)
+│   ├── CryptomatorV8/              # Cryptomator V8 implementation
+│   └── UvfLib.Core.csproj         # Standalone package
+│
+├── UvfLib.FileSystem/             # 🔒 PROPRIETARY
+│   ├── Abstractions/              # FUSE-like interfaces
+│   │   ├── IVaultFileSystem.cs
+│   │   ├── VaultEntry.cs
+│   │   ├── VaultConfiguration.cs
+│   │   └── VaultInfo.cs
+│   ├── Implementation/            # Core filesystem logic
+│   │   ├── VaultFileSystemBase.cs
+│   │   ├── UvfVaultAdapter.cs
+│   │   ├── CryptomatorVaultAdapter.cs
+│   │   └── VaultSecurityManager.cs
+│   ├── Builder/                   # Fluent configuration
+│   │   ├── VaultFileSystemBuilder.cs
+│   │   ├── VaultConfigurationBuilder.cs
+│   │   └── BuilderExtensions.cs
+│   ├── Caching/                   # Performance layer
+│   │   ├── IVaultCache.cs
+│   │   ├── MemoryVaultCache.cs
+│   │   └── CacheConfiguration.cs
+│   ├── Legacy/                    # Backward compatibility
+│   │   └── Vault.cs              # Your existing facade
+│   └── UvfLib.FileSystem.csproj  # References Core
+│
+├── UvfLib.Native/                 # 🔒 PROPRIETARY
+│   ├── Interop/                   # C interface
+│   │   ├── VaultNativeInterface.cs
+│   │   ├── ErrorCodes.cs
+│   │   └── MarshalHelper.cs
+│   ├── Bindings/                  # Language bindings
+│   │   ├── Python/
+│   │   │   ├── vault_python.py
+│   │   │   └── setup.py
+│   │   ├── Php/
+│   │   │   └── vault_php.php
+│   │   ├── NodeJs/
+│   │   │   ├── vault.js
+│   │   │   └── package.json
+│   │   └── Go/
+│   │       └── vault.go
+│   └── UvfLib.Native.csproj      # AOT build
+│
+├── Examples/                      # 🔓 OPEN SOURCE (Basic examples)
+│   ├── BasicEncryption/
+│   ├── VaultCreation/
+│   └── FormatComparison/
+│
+├── Benchmarks/                    # 🔓 OPEN SOURCE
+│   └── PerformanceTests/
+│
+└── Tests/
+    ├── UvfLib.Core.Tests/         # 🔓 OPEN SOURCE
+    ├── UvfLib.FileSystem.Tests/   # 🔒 PROPRIETARY
+    └── UvfLib.Integration.Tests/  # 🔒 PROPRIETARY
+```
+
+### **Option 2: Separate Repositories** ⭐⭐
+
+```
+uvf-core/                          # 🔓 Public GitHub repo
+├── src/UvfLib.Core/
+├── tests/UvfLib.Core.Tests/
+├── examples/
+├── LICENSE (MIT/Apache)
+└── README.md
+
+uvf-filesystem/                    # 🔒 Private repo
+├── src/UvfLib.FileSystem/
+├── src/UvfLib.Native/
+├── tests/
+└── LICENSE (Commercial)
+```
+
+## 📦 **Package Structure Strategy**
+
+### **NuGet Packages**
+
+```xml
+<!-- Open Source Core -->
+<PackageId>UvfLib.Core</PackageId>
+<Description>Open-source cryptographic core for UVF and Cryptomator vaults</Description>
+<PackageLicenseExpression>MIT</PackageLicenseExpression>
+
+<!-- Proprietary FileSystem API -->
+<PackageId>UvfLib.FileSystem</PackageId>
+<Description>High-level file system API for vault operations</Description>
+<PackageLicenseExpression>Commercial</PackageLicenseExpression>
+<Dependencies>
+  <PackageReference Include="UvfLib.Core" Version="1.0.0" />
+</Dependencies>
+
+<!-- Native Interface -->
+<PackageId>UvfLib.Native</PackageId>
+<Description>Cross-language bindings for vault operations</Description>
+<PackageLicenseExpression>Commercial</PackageLicenseExpression>
+```
+
+## 🎯 **Implementation Plan**
+
+### **Phase 1: Core Separation (1-2 weeks)**
+
+1. **Extract UvfLib.Core**:
+```csharp
+// UvfLib.Core/UvfLib.Core.csproj
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>netstandard2.0</TargetFramework>
+    <PackageId>UvfLib.Core</PackageId>
+    <Description>Open-source cryptographic core</Description>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <RepositoryUrl>https://github.com/yourcompany/uvf-core</RepositoryUrl>
+  </PropertyGroup>
+</Project>
+```
+
+2. **Create FileSystem Layer**:
+```csharp
+// UvfLib.FileSystem/Abstractions/IVaultFileSystem.cs
+namespace UvfLib.FileSystem.Abstractions
+{
+    public interface IVaultFileSystem : IDisposable
+    {
+        // Interface we designed earlier
+        Task<VaultInfo> GetVaultInfoAsync();
+        Task<Stream> OpenReadAsync(string filePath);
+        // ... etc
+    }
+}
+```
+
+### **Phase 2: FUSE-like Implementation (2-3 weeks)**
+
+```csharp
+// UvfLib.FileSystem/Implementation/VaultFileSystemBase.cs
+namespace UvfLib.FileSystem.Implementation
+{
+    internal abstract class VaultFileSystemBase : IVaultFileSystem
+    {
+        protected readonly UvfLib.Core.Vault _coreVault;
+        protected readonly VaultConfiguration _configuration;
+        protected readonly IVaultCache _cache;
+        
+        protected VaultFileSystemBase(
+            UvfLib.Core.Vault coreVault, 
+            VaultConfiguration configuration)
+        {
+            _coreVault = coreVault;
+            _configuration = configuration;
+            _cache = CreateCache(configuration.CacheOptions);
+        }
+        
+        public abstract Task<Stream> OpenReadAsync(string filePath);
+        public abstract Task<VaultEntry[]> ListDirectoryAsync(string path);
+        // ... implement common functionality
+    }
+}
+
+// UvfLib.FileSystem/Implementation/UvfVaultAdapter.cs
+namespace UvfLib.FileSystem.Implementation
+{
+    internal class UvfVaultAdapter : VaultFileSystemBase
+    {
+        public UvfVaultAdapter(UvfLib.Core.Vault coreVault, VaultConfiguration config) 
+            : base(coreVault, config) { }
+            
+        public override async Task<Stream> OpenReadAsync(string filePath)
+        {
+            // UVF-specific optimizations
+            // Delegate to _coreVault for actual crypto operations
+        }
+        
+        // UVF-specific implementations
+    }
+}
+```
+
+### **Phase 3: Builder Pattern (1 week)**
+
+```csharp
+// UvfLib.FileSystem/Builder/VaultFileSystemBuilder.cs
+namespace UvfLib.FileSystem.Builder
+{
+    public class VaultFileSystemBuilder
+    {
+        private VaultConfiguration _config = new();
+        
+        public VaultFileSystemBuilder WithPassword(string password)
+        {
+            _config.Password = password;
+            return this;
+        }
+        
+        public VaultFileSystemBuilder WithFormat(VaultFormat format)
+        {
+            _config.Format = format;
+            return this;
+        }
+        
+        public async Task<IVaultFileSystem> InitializeAsync()
+        {
+            // Validate configuration
+            ValidateConfiguration();
+            
+            // Create core vault using UvfLib.Core
+            var coreVault = await CreateCoreVaultAsync();
+            
+            // Return appropriate adapter
+            return _config.Format switch
+            {
+                VaultFormat.UVF => new UvfVaultAdapter(coreVault, _config),
+                VaultFormat.CryptomatorV8 => new CryptomatorVaultAdapter(coreVault, _config),
+                _ => throw new NotSupportedException()
+            };
+        }
+        
+        private async Task<UvfLib.Core.Vault> CreateCoreVaultAsync()
+        {
+            // Use the open-source core to create vault
+            return _config.Format switch
+            {
+                VaultFormat.UVF => UvfLib.Core.Vault.LoadUvfVault(/* ... */),
+                VaultFormat.CryptomatorV8 => UvfLib.Core.Vault.LoadCryptomatorV8Vault(/* ... */),
+                _ => throw new NotSupportedException()
+            };
+        }
+    }
+}
+```
+
+## 🔒 **Open Source Strategy**
+
+### **What Goes Open Source (UvfLib.Core)**:
+✅ **Core cryptographic implementations**
+✅ **Format specifications (UVF, Cryptomator V8)**
+✅ **Low-level APIs and interfaces**
+✅ **Basic examples and benchmarks**
+✅ **Unit tests for core functionality**
+
+### **What Stays Proprietary (UvfLib.FileSystem + Native)**:
+🔒 **High-level FUSE-like API**
+🔒 **Builder pattern and configuration**
+🔒 **Caching and performance optimizations**
+🔒 **Cross-language bindings**
+🔒 **Advanced features (key rotation, etc.)**
+🔒 **Commercial examples and integrations**
+
+## 📄 **Licensing Strategy**
+
+```
+UvfLib.Core (Open Source)
+├── License: MIT or Apache 2.0
+├── Contributors: Community + Your Company
+├── Governance: Your company maintains
+└── Goal: Build trust, get contributions
+
+UvfLib.FileSystem (Commercial)
+├── License: Proprietary/Commercial
+├── Pricing: Per-developer or per-deployment
+├── Support: Commercial support included
+└── Goal: Revenue generation
+```
+
+## 🚀 **Migration Path**
+
+### **Current Code → New Structure**
+
+1. **Move existing folders**:
+   ```bash
+   api/ → UvfLib.Core/Api/
+   common/ → UvfLib.Core/Common/
+   v3/ → UvfLib.Core/V3/
+   cryptomatorV8/ → UvfLib.Core/CryptomatorV8/
+   ```
+
+2. **Refactor Vault.cs**:
+   ```csharp
+   // UvfLib.FileSystem/Legacy/Vault.cs
+   [Obsolete("Use VaultFileSystem.Builder() instead")]
+   public class Vault : IDisposable
+   {
+       private readonly IVaultFileSystem _fileSystem;
+       
+       // Maintain backward compatibility
+       // Delegate to new filesystem API internally
+   }
+   ```
+
+3. **Update namespaces**:
+   ```csharp
+   // Old
+   using UvfLib.Api;
+   
+   // New  
+   using UvfLib.Core.Api;           // Open source
+   using UvfLib.FileSystem;         // Proprietary
+   ```
+
+This structure gives you:
+- ✅ **Clear separation** between open and proprietary code
+- ✅ **Backward compatibility** through legacy Vault.cs
+- ✅ **Community trust** through open-source core
+- ✅ **Commercial value** through high-level APIs
+- ✅ **Future flexibility** for additional products
+
+Would you like me to start implementing this structure, beginning with the UvfLib.Core extraction?

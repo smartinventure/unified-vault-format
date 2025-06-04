@@ -1,8 +1,8 @@
 using System;
 using System.IO;
-using UvfLib.Api;
+using UvfLib._old.api;
+using UvfLib._old.v3;
 using UvfLib.Common;
-using UvfLib.V3;
 
 namespace UvfLib.Tests.Streams
 {

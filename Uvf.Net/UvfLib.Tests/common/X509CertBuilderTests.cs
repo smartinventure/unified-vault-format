@@ -4,6 +4,7 @@ using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
 using UvfLib.Common;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
+using UvfLib._old.common;
 
 namespace UvfLib.Tests.Common
 {
