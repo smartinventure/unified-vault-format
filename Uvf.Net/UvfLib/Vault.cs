@@ -787,6 +787,39 @@ namespace UvfLib
         }
 
         /// <summary>
+        /// Gets the vault-specific physical path for a CryptomatorV8 directory based on its UUID string.
+        /// This method handles CryptomatorV8's UUID-based DirIds properly.
+        /// </summary>
+        /// <param name="uuidString">The UUID string (e.g., "936d5dd3-a3ee-40c4-9a0f-e9cd0da8a912")</param>
+        /// <returns>The relative physical path within the vault (e.g., "d/XX/YYYYYYYY")</returns>
+        /// <exception cref="ArgumentNullException">If uuidString is null.</exception>
+        /// <exception cref="ArgumentException">If uuidString is empty.</exception>
+        /// <exception cref="InvalidOperationException">If this is not a CryptomatorV8 vault.</exception>
+        public string GetCryptomatorV8DirectoryPathByUuid(string uuidString)
+        {
+            if (_disposed) throw new ObjectDisposedException(nameof(Vault));
+            if (string.IsNullOrEmpty(uuidString))
+            {
+                throw new ArgumentException("UUID string cannot be null or empty.", nameof(uuidString));
+            }
+
+            if (!IsCryptomatorV8())
+            {
+                throw new InvalidOperationException("This method is only available for CryptomatorV8 vaults.");
+            }
+
+            var dirCryptor = _cryptor.DirectoryContentCryptor();
+            if (dirCryptor == null) throw new InvalidOperationException("Directory cryptor not available.");
+
+            // Convert UUID string to bytes (CryptomatorV8 format)
+            byte[] dirIdBytes = System.Text.Encoding.ASCII.GetBytes(uuidString);
+            
+            // Create CryptomatorV8 DirectoryMetadata and calculate path
+            var coreMetadata = new UvfLib.Core.CryptomatorV8.DirectoryMetadataImpl(dirIdBytes);
+            return dirCryptor.DirPath(coreMetadata);
+        }
+
+        /// <summary>
         /// Calculates the expected size of an encrypted file based on its original size.
         /// </summary>
         /// <param name="sourceFileSize">The size of the source file in bytes</param>
@@ -1086,6 +1119,41 @@ namespace UvfLib
             
             // Use the wrapped Core object directly to preserve type compatibility
             return publicMetadata.GetCoreMetadata();
+        }
+
+        /// <summary>
+        /// Creates DirectoryMetadata from a UUID string for CryptomatorV8 compatibility.
+        /// This method is specifically for handling subdirectory contexts during decryption.
+        /// </summary>
+        /// <param name="uuidString">The UUID string (e.g., "7689b7c0-ba0d-4be7-96db-210d35b2fb2c")</param>
+        /// <returns>DirectoryMetadata with the correct DirId for authentication</returns>
+        /// <exception cref="ArgumentNullException">If uuidString is null</exception>
+        /// <exception cref="ArgumentException">If uuidString is empty</exception>
+        /// <exception cref="InvalidOperationException">If this is not a CryptomatorV8 vault</exception>
+        public DirectoryMetadata CreateCryptomatorV8DirectoryMetadataFromUuid(string uuidString)
+        {
+            if (_disposed) throw new ObjectDisposedException(nameof(Vault));
+            if (string.IsNullOrEmpty(uuidString))
+            {
+                throw new ArgumentException("UUID string cannot be null or empty.", nameof(uuidString));
+            }
+
+            if (!IsCryptomatorV8())
+            {
+                throw new InvalidOperationException("This method is only available for CryptomatorV8 vaults.");
+            }
+
+            var dirCryptor = _cryptor.DirectoryContentCryptor();
+            if (dirCryptor == null) throw new InvalidOperationException("Directory cryptor not available.");
+
+            // Convert UUID string to bytes (CryptomatorV8 format)
+            byte[] dirIdBytes = System.Text.Encoding.ASCII.GetBytes(uuidString);
+            
+            // Create CryptomatorV8 DirectoryMetadata using Core implementation
+            var coreMetadata = new UvfLib.Core.CryptomatorV8.DirectoryMetadataImpl(dirIdBytes);
+            
+            // Wrap in public DirectoryMetadata
+            return ToPublic(coreMetadata);
         }
     }
 }

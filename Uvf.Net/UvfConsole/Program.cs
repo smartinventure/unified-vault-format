@@ -89,7 +89,7 @@ namespace UvfConsole
         {
             if (args.Length == 0)
             {
-                Console.WriteLine("Usage: UvfConsole <encrypt|decrypt|testrun|analyze-jwt|test-our-jwt|test-signature|test-mackey|test-jwt-compare|test-own-validation|test-mac-derivation|test-concatenated-key|decrypt-real-dirid> [--uvf|--cryptomator]");
+                Console.WriteLine("Usage: UvfConsole <encrypt|decrypt|testrun|analyze-jwt|test-our-jwt|test-signature|test-mackey|test-jwt-compare|test-own-validation|test-mac-derivation|test-concatenated-key|decrypt-real-dirid|test-our-dirid> [--uvf|--cryptomator]");
                 Console.WriteLine("  --uvf        : Use Universal Vault Format (default)");
                 Console.WriteLine("  --cryptomator: Use Cryptomator V8 format for legacy compatibility");
                 Console.WriteLine("  encrypt      : Encrypt files from source to vault");
@@ -104,6 +104,7 @@ namespace UvfConsole
                 Console.WriteLine("  test-mac-derivation: Test MAC key derivation comparison");
                 Console.WriteLine("  test-concatenated-key: Test concatenated key validation");
                 Console.WriteLine("  decrypt-real-dirid: Decrypt real Cryptomator dirid.c9r file");
+                Console.WriteLine("  test-our-dirid: Test our own dirid.c9r file");
                 return;
             }
 
@@ -163,6 +164,12 @@ namespace UvfConsole
             if (mode == "decrypt-real-dirid")
             {
                 DecryptRealDiridFile();
+                return;
+            }
+            
+            if (mode == "test-our-dirid")
+            {
+                TestOurDiridFile();
                 return;
             }
             
@@ -503,12 +510,23 @@ namespace UvfConsole
                     }
                     else
                     {
-                        actualDirIdToEncrypt = currentDirMetadata.DirId;
-                        if (string.IsNullOrEmpty(actualDirIdToEncrypt))
+                        // For CryptomatorV8 subdirectories: dirid.c9r should contain raw UUID string (36 bytes)
+                        // Not the Base64-encoded version (which would be ~48 bytes)
+                        // This ensures 132-byte encrypted file instead of 144 bytes
+                        if (string.IsNullOrEmpty(currentDirMetadata.DirId))
                         {
-                            // This is generally unexpected for a non-root Cryptomator directory if DirIds are always generated UUIDs.
                             Console.WriteLine($"  Warning: DirId for Cryptomator non-root directory {sourceDir} is null or empty. Using empty string for its dirid.c9r content.");
                             actualDirIdToEncrypt = ""; 
+                        }
+                        else
+                        {
+                            // Decode Base64 DirId to get raw UUID string
+                            byte[] decodedDirIdBytes = Convert.FromBase64String(currentDirMetadata.DirId);
+                            actualDirIdToEncrypt = System.Text.Encoding.ASCII.GetString(decodedDirIdBytes);
+                            Console.WriteLine($"  ENCRYPTION DEBUG: Converting Base64 DirId to raw UUID for dirid.c9r");
+                            Console.WriteLine($"    Original DirId (Base64): {currentDirMetadata.DirId}");
+                            Console.WriteLine($"    Raw UUID for dirid.c9r: {actualDirIdToEncrypt}");
+                            Console.WriteLine($"    Length: {actualDirIdToEncrypt.Length} characters");
                         }
                     }
                     
@@ -620,21 +638,33 @@ namespace UvfConsole
                         Console.WriteLine($"    Encrypted directory created successfully");
                     }
                     
-                    // Create dir.c9r file in the reference directory pointing to the content directory
-                    // This tells Cryptomator where to find the actual subdirectory content
-                    string dirC9rFilePath = Path.Combine(subDirPhysicalVaultPath, "dir.c9r");
-                    if (!File.Exists(dirC9rFilePath))
-                    {
-                        Console.WriteLine($"    Creating dir.c9r file pointing to content directory");
-                        using (FileStream dirC9rStream = File.Create(dirC9rFilePath))
-                        using (Stream encryptingStream = vault.GetEncryptingStream(dirC9rStream))
-                        {
-                            // Write the subdirectory's DirId, which points to where the content is stored
-                            byte[] dirIdBytes = System.Text.Encoding.ASCII.GetBytes(subDirMetadata.DirId);
-                            encryptingStream.Write(dirIdBytes, 0, dirIdBytes.Length);
-                        }
-                        Console.WriteLine($"    dir.c9r file created successfully");
-                    }
+                    // Creating dir.c9r file pointing to content directory
+                    // CRITICAL: dir.c9r must be PLAINTEXT (not encrypted) according to Cryptomator devs
+                    // Convert Base64 DirId back to raw UUID string for plaintext storage
+                    byte[] decodedDirIdBytes = Convert.FromBase64String(subDirMetadata.DirId);
+                    string rawUuidString = System.Text.Encoding.ASCII.GetString(decodedDirIdBytes);
+                    
+                    string dirFilePath = Path.Combine(subDirPhysicalVaultPath, "dir.c9r");
+                    File.WriteAllText(dirFilePath, rawUuidString); // Write as plaintext, 36 bytes
+                    Console.WriteLine($"    ENCRYPTION DEBUG: Writing to dir.c9r");
+                    Console.WriteLine($"      Original DirId (Base64): {subDirMetadata.DirId}");
+                    Console.WriteLine($"      Raw UUID String: '{rawUuidString}'");
+                    Console.WriteLine($"      dir.c9r file path: {dirFilePath}");
+                    Console.WriteLine($"      dir.c9r content: '{rawUuidString}' ({rawUuidString.Length} bytes)");
+                    
+                    // Show UUID → Directory path mapping during encryption
+                    string expectedContentPath = vault.GetCryptomatorV8DirectoryPathByUuid(rawUuidString);
+                    string actualContentPathUsed = vault.GetCryptomatorV8DirectoryPathByUuid(System.Text.Encoding.ASCII.GetString(Convert.FromBase64String(subDirMetadata.DirId)));
+                    Console.WriteLine($"    ENCRYPTION: UUID → DIRECTORY PATH MAPPING:");
+                    Console.WriteLine($"      UUID in dir.c9r: '{rawUuidString}'");
+                    Console.WriteLine($"      Calculated content path: '{expectedContentPath}'");
+                    Console.WriteLine($"      Actual content path used: '{actualContentPathUsed}'");
+                    Console.WriteLine($"      Paths match: {expectedContentPath == actualContentPathUsed}");
+                    
+                    // Verify immediately by reading back
+                    string readBackContent = File.ReadAllText(dirFilePath);
+                    Console.WriteLine($"      Verification - Read back from dir.c9r: '{readBackContent}'");
+                    Console.WriteLine($"      UUID Match: {rawUuidString == readBackContent}");
                 }
                 else
                 {
@@ -679,6 +709,7 @@ namespace UvfConsole
                     actualContentPath = Path.Combine(VaultFolderPath, vault.GetDirectoryPath(subDirMetadata));
                     Console.WriteLine($"    Cryptomator v8: Content will be stored in: {actualContentPath}");
                     Console.WriteLine($"    Directory ID from metadata: {subDirMetadata.DirId}");
+                    Console.WriteLine($"    DEBUG: Content path calculated from DirId: {subDirMetadata.DirId}");
                     
                     // During encryption, create the content directory
                     Directory.CreateDirectory(actualContentPath);
@@ -860,37 +891,71 @@ namespace UvfConsole
                     }
 
                     Console.WriteLine($"    Loading metadata from: {subDirMetadataPath}");
-                    byte[] encryptedMetadata = File.ReadAllBytes(subDirMetadataPath);
-                    DirectoryMetadata subDirMetadata = vault.DecryptDirectoryMetadata(encryptedMetadata);
-
-                    // For Cryptomator v8, determine the actual content path where files should be stored
-                    string actualContentPath;
-                    if (vault.IsCryptomatorV8())
+                    
+                    // CRITICAL: For Cryptomator V8, dir.c9r is PLAINTEXT (not encrypted)
+                    // Read it directly as plaintext to get the raw UUID string
+                    string subDirId = File.ReadAllText(subDirMetadataPath).Trim();
+                    
+                    Console.WriteLine($"    DECRYPTION DEBUG: Reading from dir.c9r");
+                    Console.WriteLine($"      dir.c9r file path: {subDirMetadataPath}");
+                    Console.WriteLine($"      Raw content from dir.c9r: '{subDirId}'");
+                    Console.WriteLine($"      Length: {subDirId.Length} characters");
+                    
+                    // Convert to Base64 to show what DirectoryMetadata will have
+                    byte[] uuidBytesForMetadata = System.Text.Encoding.ASCII.GetBytes(subDirId);
+                    string expectedBase64DirId = Convert.ToBase64String(uuidBytesForMetadata);
+                    Console.WriteLine($"      Will convert to Base64 for DirectoryMetadata: {expectedBase64DirId}");
+                    
+                    // For CryptomatorV8, calculate the content directory path using the proper UvfLib method
+                    string actualContentPath = Path.Combine(VaultFolderPath, vault.GetCryptomatorV8DirectoryPathByUuid(subDirId));
+                    
+                    Console.WriteLine($"    DECRYPTION DEBUG: Content directory calculation");
+                    Console.WriteLine($"      Content directory path: {actualContentPath}");
+                    Console.WriteLine($"      Directory exists: {Directory.Exists(actualContentPath)}");
+                    
+                    // Final UUID consistency check
+                    Console.WriteLine($"    FINAL UUID CONSISTENCY CHECK:");
+                    Console.WriteLine($"      UUID from dir.c9r: '{subDirId}'");
+                    Console.WriteLine($"      Length: {subDirId.Length}");
+                    Console.WriteLine($"      Expected format: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX (36 chars)");
+                    Console.WriteLine($"      Format looks correct: {subDirId.Length == 36 && subDirId.Contains("-")}");
+                    
+                    // Show the relationship between UUID and directory path
+                    string dirPathCalculation = vault.GetCryptomatorV8DirectoryPathByUuid(subDirId);
+                    Console.WriteLine($"    UUID → DIRECTORY PATH MAPPING:");
+                    Console.WriteLine($"      Input UUID: '{subDirId}'");
+                    Console.WriteLine($"      Calculated path: '{dirPathCalculation}'");
+                    Console.WriteLine($"      Full path: {actualContentPath}");
+                    Console.WriteLine($"      Path format: d/XX/YYYYYYYYYYYYYYYYYYYYYYYYYYYY");
+                    
+                    // Extract the components to verify structure
+                    if (dirPathCalculation.StartsWith("d/") && dirPathCalculation.Length > 3)
                     {
-                        // Calculate the path where the actual directory content should be stored
-                        actualContentPath = Path.Combine(VaultFolderPath, vault.GetDirectoryPath(subDirMetadata));
-                        Console.WriteLine($"    Cryptomator v8: Actual content path: {actualContentPath}");
-                        Console.WriteLine($"    Directory ID from metadata: {subDirMetadata.DirId}");
-                        
-                        if (!Directory.Exists(actualContentPath))
+                        string pathPart = dirPathCalculation.Substring(2); // Remove "d/"
+                        if (pathPart.Length >= 3 && pathPart[2] == '/')
                         {
-                            Console.Error.WriteLine($"    ERROR: Actual content directory not found: {actualContentPath}");
-                            continue;
+                            string prefix = pathPart.Substring(0, 2);
+                            string suffix = pathPart.Substring(3);
+                            Console.WriteLine($"      Path breakdown: d/{prefix}/{suffix}");
+                            Console.WriteLine($"      Prefix length: {prefix.Length} (should be 2)");
+                            Console.WriteLine($"      Suffix length: {suffix.Length} (should be 30)");
+                            Console.WriteLine($"      Structure valid: {prefix.Length == 2 && suffix.Length == 30}");
                         }
                     }
-                    else
+                    
+                    if (!Directory.Exists(actualContentPath))
                     {
-                        // For UVF format, also use separate content directory calculated from subdirectory's dirId
-                        actualContentPath = Path.Combine(VaultFolderPath, vault.GetDirectoryPath(subDirMetadata));
-                        Console.WriteLine($"    UVF: Actual content path: {actualContentPath}");
-                        Console.WriteLine($"    Directory ID from metadata: {subDirMetadata.DirId}");
-                        
-                        if (!Directory.Exists(actualContentPath))
-                        {
-                            Console.Error.WriteLine($"    ERROR: Actual content directory not found: {actualContentPath}");
-                            continue;
-                        }
+                        Console.Error.WriteLine($"    ERROR: Content directory not found: {actualContentPath}");
+                        continue;
                     }
+                    
+                    // For CryptomatorV8, create DirectoryMetadata with the correct UUID for authentication
+                    // Use the new public method to create proper DirectoryMetadata from UUID string
+                    DirectoryMetadata subDirMetadata = vault.CreateCryptomatorV8DirectoryMetadataFromUuid(subDirId);
+                    Console.WriteLine($"    DECRYPTION DEBUG: Created DirectoryMetadata");
+                    Console.WriteLine($"      Input UUID string: '{subDirId}'");
+                    Console.WriteLine($"      Resulting DirId (Base64): {subDirMetadata.DirId}");
+                    Console.WriteLine($"      Expected vs Actual Base64: {expectedBase64DirId == subDirMetadata.DirId}");
 
                     // Check if subdirectory is already decrypted with correct structure
                     bool decryptSubDir = true;
@@ -2413,6 +2478,102 @@ namespace UvfConsole
             {
                 Console.WriteLine("❌ Our vault files not found for comparison");
             }
+        }
+
+                private static void TestOurDiridFile()
+        {
+            Console.WriteLine("===== Testing Our Own dirid.c9r Files =====");
+            
+            string ourMasterkeyPath = @"D:\temp\uvf\EncryptionTestVault\masterkey.cryptomator";
+            string ourPassword = "your-super-secret-password";
+            
+            if (!File.Exists(ourMasterkeyPath))
+            {
+                Console.WriteLine($"❌ Our masterkey file not found: {ourMasterkeyPath}");
+                return;
+            }
+            
+            // Find all dirid.c9r files in our vault
+            string[] ourDiridFiles = Directory.GetFiles(@"D:\temp\uvf\EncryptionTestVault", "dirid.c9r", SearchOption.AllDirectories);
+            
+            if (ourDiridFiles.Length == 0)
+            {
+                Console.WriteLine("❌ No dirid.c9r files found in our vault");
+                return;
+            }
+            
+            try
+            {
+                byte[] ourMasterkeyBytes = File.ReadAllBytes(ourMasterkeyPath);
+                using (var ourVault = Vault.LoadCryptomatorV8Vault(ourMasterkeyBytes, ourPassword))
+                {
+                    Console.WriteLine("✅ Our vault loaded successfully");
+                    
+                    foreach (string diridPath in ourDiridFiles)
+                    {
+                        Console.WriteLine($"\n📋 Testing dirid.c9r: {diridPath}");
+                        
+                        var fileInfo = new FileInfo(diridPath);
+                        Console.WriteLine($"📏 File size: {fileInfo.Length} bytes");
+                        
+                        byte[] encryptedBytes = File.ReadAllBytes(diridPath);
+                        using (var encryptedStream = new MemoryStream(encryptedBytes))
+                        using (var decryptingStream = ourVault.GetDecryptingStream(encryptedStream))
+                        using (var decryptedStream = new MemoryStream())
+                        {
+                            decryptingStream.CopyTo(decryptedStream);
+                            byte[] decryptedContent = decryptedStream.ToArray();
+                            
+                            Console.WriteLine($"🔓 Decrypted content length: {decryptedContent.Length} bytes");
+                            
+                            if (decryptedContent.Length == 0)
+                            {
+                                Console.WriteLine("🔍 Decrypted content is EMPTY (0 bytes) - this is expected for root directory");
+                            }
+                            else
+                            {
+                                Console.WriteLine($"🔍 Decrypted content (hex): {Convert.ToHexString(decryptedContent)}");
+                                
+                                try
+                                {
+                                    string contentAsAscii = System.Text.Encoding.ASCII.GetString(decryptedContent);
+                                    Console.WriteLine($"🔍 Decrypted content (ASCII): '{contentAsAscii}'");
+                                    
+                                    // If it looks like a UUID, calculate what path it should point to
+                                    if (contentAsAscii.Length == 36 && contentAsAscii.Contains('-'))
+                                    {
+                                        Console.WriteLine($"🔍 Looks like UUID: {contentAsAscii}");
+                                        try
+                                        {
+                                            string expectedPath = ourVault.GetCryptomatorV8DirectoryPathByUuid(contentAsAscii);
+                                            Console.WriteLine($"🔍 Expected content path: {expectedPath}");
+                                            
+                                            string fullExpectedPath = Path.Combine(@"D:\temp\uvf\EncryptionTestVault", expectedPath);
+                                            bool pathExists = Directory.Exists(fullExpectedPath);
+                                            Console.WriteLine($"🔍 Expected path exists: {pathExists} ({fullExpectedPath})");
+                                        }
+                                        catch (Exception ex)
+                                        {
+                                            Console.WriteLine($"❌ Error calculating path from UUID: {ex.Message}");
+                                        }
+                                    }
+                                }
+                                catch (Exception ex)
+                                {
+                                    Console.WriteLine($"❌ Cannot interpret as ASCII: {ex.Message}");
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"❌ Error testing our dirid.c9r files: {ex.Message}");
+                Console.WriteLine($"Stack trace: {ex.StackTrace}");
+            }
+            
+            Console.WriteLine("\n===== Our dirid.c9r Test Complete =====");
         }
     }
 } 
