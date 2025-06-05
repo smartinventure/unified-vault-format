@@ -14,7 +14,7 @@ namespace UvfLib.Common
     {
         // Constants for scrypt
         private const int BLOCK_SIZE = 8;
-        private const int DEFAULT_LOG_N = 17; // 2^17 = 131,072 - Default if not using ScryptDeriveBytes
+        private const int DEFAULT_LOG_N = 15; // 2^15 = 32,768 - matches Java default
         private const int DEFAULT_R = 8;       // Default if not using ScryptDeriveBytes
         private const int DEFAULT_P = 1;
 

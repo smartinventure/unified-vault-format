@@ -13,6 +13,7 @@
 using System;
 using System.Security.Cryptography;
 using System.Text;
+using System.Text.Json;
 using UvfLib.Core.Common;
 using UvfLib.Core.Jwe;
 
@@ -42,7 +43,28 @@ namespace UvfLib.VaultHelpers
             try
             {
                 var masterkeyFile = MasterkeyFileAccess.CreateFromPassphrase(password);
-                return masterkeyFile.ToJson();
+                
+                // Create a Cryptomator-compatible object with ONLY the fields Cryptomator expects
+                // This excludes all UVF-specific fields that cause Cryptomator to reject the file
+                var cryptomatorMasterkey = new 
+                {
+                    version = masterkeyFile.Version,
+                    scryptSalt = Convert.ToBase64String(masterkeyFile.ScryptSalt!),
+                    scryptCostParam = masterkeyFile.ScryptCostParam,
+                    scryptBlockSize = masterkeyFile.ScryptBlockSize,
+                    primaryMasterKey = Convert.ToBase64String(masterkeyFile.EncMasterKey!),
+                    hmacMasterKey = Convert.ToBase64String(masterkeyFile.MacMasterKey!),
+                    versionMac = Convert.ToBase64String(masterkeyFile.VersionMac!)
+                };
+
+                // Serialize with indented formatting to match Cryptomator's format
+                var jsonOptions = new JsonSerializerOptions 
+                { 
+                    WriteIndented = true,
+                    Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping
+                };
+                
+                return JsonSerializer.SerializeToUtf8Bytes(cryptomatorMasterkey, jsonOptions);
             }
             catch (Exception ex)
             {

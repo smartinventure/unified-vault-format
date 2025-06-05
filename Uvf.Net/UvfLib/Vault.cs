@@ -26,6 +26,7 @@ using System.Collections.Generic; // Added for Dictionary and List
 using System.Linq; // Added for Linq operations if needed
 using UvfLib.Core.V3; // Added for UVFMasterkeyImpl constants if any, and HKDFHelper
 using System.Buffers.Binary; // Added for BinaryPrimitives
+using JwtBase64Url = Jose.Base64Url; // Alias for JWT Base64Url operations
 using CryptoOps = UvfLib.Core.Common.CryptographicOperations;
 
 [assembly: System.Runtime.CompilerServices.InternalsVisibleTo("UvfLib.Tests")]
@@ -365,61 +366,6 @@ namespace UvfLib
         }
 
         /// <summary>
-        /// Creates the vault.cryptomator JWT configuration file content for a new Cryptomator V8 vault.
-        /// This file contains vault configuration like format version, cipher combo, and shortening threshold.
-        /// </summary>
-        /// <returns>A byte array containing the vault.cryptomator JWT file data.</returns>
-        /// <exception cref="CryptoException">If JWT creation fails.</exception>
-        public static byte[] CreateNewCryptomatorV8VaultConfigContent()
-        {
-            try
-            {
-                // Create JWT payload with vault configuration
-                var payload = new
-                {
-                    jti = Guid.NewGuid().ToString(), // Unique identifier for this vault
-                    format = 8,                       // Vault format version
-                    cipherCombo = "SIV_GCM",         // Cipher combination used
-                    shorteningThreshold = 220        // Filename shortening threshold
-                };
-
-                // For simplicity, create an unsigned JWT (algorithm: "none")
-                // Real Cryptomator uses HMAC-SHA256, but we'll start with a simpler approach
-                string header = Convert.ToBase64String(Encoding.UTF8.GetBytes(
-                    """{"kid":"masterkeyfile:masterkey.cryptomator","alg":"HS256","typ":"JWT"}"""))
-                    .TrimEnd('='); // Remove padding
-
-                string payloadJson = System.Text.Json.JsonSerializer.Serialize(payload);
-                string payloadBase64 = Convert.ToBase64String(Encoding.UTF8.GetBytes(payloadJson))
-                    .TrimEnd('='); // Remove padding
-
-                // Create a dummy signature for now (real implementation would use HMAC-SHA256)
-                string signature = Convert.ToBase64String(new byte[32]) // 32 bytes = 256 bits
-                    .TrimEnd('='); // Remove padding
-
-                string jwt = $"{header}.{payloadBase64}.{signature}";
-                return Encoding.UTF8.GetBytes(jwt);
-            }
-            catch (Exception ex)
-            {
-                throw new CryptoException("Failed to create Cryptomator V8 vault config content", ex);
-            }
-        }
-
-        /// <summary>
-        /// Creates a new Cryptomator V8 vault file (masterkey.cryptomator) at the specified path.
-        /// </summary>
-        /// <param name="filePath">The path where the vault file will be created.</param>
-        /// <param name="password">The password for the new vault.</param>
-        /// <param name="pepper">Optional pepper to use during key derivation. If null, an empty pepper is used.</param>
-        public static void CreateNewCryptomatorV8Vault(string filePath, string password, byte[]? pepper = null)
-        {
-            if (string.IsNullOrEmpty(filePath)) throw new ArgumentNullException(nameof(filePath));
-            byte[] vaultFileContent = CreateNewCryptomatorV8VaultFileContent(password, pepper);
-            File.WriteAllBytes(filePath, vaultFileContent);
-        }
-
-        /// <summary>
         /// Creates both masterkey.cryptomator and vault.cryptomator files for a complete Cryptomator V8 vault.
         /// </summary>
         /// <param name="vaultDirectory">The directory where the vault files will be created.</param>
@@ -432,15 +378,128 @@ namespace UvfLib
             // Create the directory if it doesn't exist
             Directory.CreateDirectory(vaultDirectory);
             
-            // Create masterkey.cryptomator
+            // Create masterkey.cryptomator first
             string masterkeyPath = Path.Combine(vaultDirectory, "masterkey.cryptomator");
             byte[] masterkeyContent = CreateNewCryptomatorV8VaultFileContent(password, pepper);
             File.WriteAllBytes(masterkeyPath, masterkeyContent);
             
-            // Create vault.cryptomator
+            // Create vault.cryptomator with proper HMAC-SHA256 signature using the hmacMasterKey from the JSON file
             string vaultConfigPath = Path.Combine(vaultDirectory, "vault.cryptomator");
-            byte[] vaultConfigContent = CreateNewCryptomatorV8VaultConfigContent();
+            byte[] vaultConfigContent = CreateNewCryptomatorV8VaultConfigContentSigned(masterkeyContent, password);
             File.WriteAllBytes(vaultConfigPath, vaultConfigContent);
+        }
+
+        /// <summary>
+        /// Creates the vault.cryptomator JWT configuration file content with proper HMAC-SHA256 signature.
+        /// </summary>
+        /// <param name="masterkeyContent">The masterkey.cryptomator file content to extract the keys from.</param>
+        /// <param name="password">The password used to decrypt the masterkey for JWT signing.</param>
+        /// <returns>A byte array containing the properly signed vault.cryptomator JWT file data.</returns>
+        /// <exception cref="CryptoException">If JWT creation fails.</exception>
+        private static byte[] CreateNewCryptomatorV8VaultConfigContentSigned(byte[] masterkeyContent, string password)
+        {
+            try
+            {
+                // Create JWT payload with vault configuration
+                var payload = new
+                {
+                    jti = Guid.NewGuid().ToString(), // Unique identifier for this vault
+                    format = 8,                       // Vault format version
+                    cipherCombo = "SIV_GCM",         // Cipher combination used
+                    shorteningThreshold = 220        // Filename shortening threshold
+                };
+
+                // Create JWT header using Base64URL encoding
+                string header = JwtBase64Url.Encode(Encoding.UTF8.GetBytes(
+                    """{"kid":"masterkeyfile:masterkey.cryptomator","alg":"HS256","typ":"JWT"}"""));
+
+                // Serialize payload using compact JSON format (no spaces) to match Cryptomator
+                var jsonOptions = new JsonSerializerOptions 
+                { 
+                    WriteIndented = false  // Ensures compact format without spaces
+                };
+                string payloadJson = System.Text.Json.JsonSerializer.Serialize(payload, jsonOptions);
+                string payloadBase64 = JwtBase64Url.Encode(Encoding.UTF8.GetBytes(payloadJson));
+
+                // Create the signing input (header.payload)
+                string signingInput = $"{header}.{payloadBase64}";
+                byte[] signingInputBytes = Encoding.UTF8.GetBytes(signingInput);
+
+                // According to Cryptomator documentation: "Verify the JWT signature using the concatenation of encryption masterkey and MAC masterkey"
+                // We need to unwrap both keys and concatenate them for signing
+                byte[] concatenatedSigningKey;
+                string masterkeyJson = Encoding.UTF8.GetString(masterkeyContent);
+                using (JsonDocument doc = JsonDocument.Parse(masterkeyJson))
+                {
+                    // Extract wrapped keys and scrypt parameters
+                    if (!doc.RootElement.TryGetProperty("primaryMasterKey", out JsonElement encKeyElement) ||
+                        !doc.RootElement.TryGetProperty("hmacMasterKey", out JsonElement macKeyElement) ||
+                        !doc.RootElement.TryGetProperty("scryptSalt", out JsonElement saltElement) ||
+                        !doc.RootElement.TryGetProperty("scryptCostParam", out JsonElement costElement) ||
+                        !doc.RootElement.TryGetProperty("scryptBlockSize", out JsonElement blockSizeElement))
+                    {
+                        throw new InvalidOperationException("Required masterkey fields not found in JSON");
+                    }
+
+                    byte[] wrappedEncKey = Convert.FromBase64String(encKeyElement.GetString()!);
+                    byte[] wrappedMacKey = Convert.FromBase64String(macKeyElement.GetString()!);
+                    byte[] salt = Convert.FromBase64String(saltElement.GetString()!);
+                    int costParam = costElement.GetInt32();
+                    int blockSize = blockSizeElement.GetInt32();
+
+                    // Derive KEK using the same password that was used to create the masterkey
+                    // Note: This requires the password to be available during JWT creation
+                    // For now, we'll use the global Password constant - this should be passed as parameter in production
+                    byte[] kek = Org.BouncyCastle.Crypto.Generators.SCrypt.Generate(
+                        Encoding.UTF8.GetBytes(password), 
+                        salt, 
+                        costParam, 
+                        blockSize, 
+                        1, // parallelism = 1 for Cryptomator
+                        32 // KEK length = 32 bytes
+                    );
+
+                    try
+                    {
+                        // Unwrap both keys using AES Key Wrap
+                        byte[] rawEncKey = AesKeyWrap.Unwrap(kek, wrappedEncKey);
+                        byte[] rawMacKey = AesKeyWrap.Unwrap(kek, wrappedMacKey);
+
+                        // Concatenate as per Cryptomator specification: encryption key + MAC key
+                        concatenatedSigningKey = new byte[rawEncKey.Length + rawMacKey.Length];
+                        Buffer.BlockCopy(rawEncKey, 0, concatenatedSigningKey, 0, rawEncKey.Length);
+                        Buffer.BlockCopy(rawMacKey, 0, concatenatedSigningKey, rawEncKey.Length, rawMacKey.Length);
+
+                        // Clear sensitive data
+                        System.Security.Cryptography.CryptographicOperations.ZeroMemory(rawEncKey);
+                        System.Security.Cryptography.CryptographicOperations.ZeroMemory(rawMacKey);
+                    }
+                    finally
+                    {
+                        System.Security.Cryptography.CryptographicOperations.ZeroMemory(kek);
+                    }
+                }
+
+                // Create HMAC-SHA256 signature using concatenated key as per Cryptomator specification
+                byte[] signatureBytes;
+                using (var hmac = new HMACSHA256(concatenatedSigningKey))
+                {
+                    signatureBytes = hmac.ComputeHash(signingInputBytes);
+                }
+
+                // Clear the signing key
+                System.Security.Cryptography.CryptographicOperations.ZeroMemory(concatenatedSigningKey);
+
+                // Convert signature to Base64URL
+                string signature = JwtBase64Url.Encode(signatureBytes);
+
+                string jwt = $"{header}.{payloadBase64}.{signature}";
+                return Encoding.UTF8.GetBytes(jwt);
+            }
+            catch (Exception ex)
+            {
+                throw new CryptoException("Failed to create signed Cryptomator V8 vault config content", ex);
+            }
         }
 
         // --- Instance Methods for Operations ---

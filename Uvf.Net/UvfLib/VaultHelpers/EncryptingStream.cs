@@ -52,6 +52,9 @@ namespace UvfLib.VaultHelpers
 
         public EncryptingStream(Cryptor cryptor, Stream outputStream, bool leaveOpen)
         {
+#if DEBUG
+            Console.WriteLine($"DEBUG_EncryptingStream: CONSTRUCTOR - Outputting to stream type: {outputStream?.GetType().Name}, CanWrite: {outputStream?.CanWrite}");
+#endif
             _cryptor = cryptor ?? throw new ArgumentNullException(nameof(cryptor));
             _outputStream = outputStream ?? throw new ArgumentNullException(nameof(outputStream));
             _leaveOpen = leaveOpen;
@@ -124,9 +127,14 @@ namespace UvfLib.VaultHelpers
         {
             if (!_headerWritten)
             {
-                Memory<byte> encryptedHeaderMemory = _cryptor.FileHeaderCryptor().EncryptHeader(_fileHeader);
-                byte[] encryptedHeaderBytes = encryptedHeaderMemory.ToArray();
-                _outputStream.Write(encryptedHeaderBytes, 0, encryptedHeaderBytes.Length);
+#if DEBUG
+                Console.WriteLine($"DEBUG_EncryptingStream: EnsureHeaderWritten - Attempting to write header. CurrentChunkNumber: {_currentChunkNumber}");
+#endif
+                var encryptedHeaderBytes = _cryptor.FileHeaderCryptor().EncryptHeader(_fileHeader);
+                _outputStream.Write(encryptedHeaderBytes.Span);
+#if DEBUG
+                Console.WriteLine($"DEBUG_EncryptingStream: EnsureHeaderWritten - SUCCESSFULLY WROTE {encryptedHeaderBytes.Length} header bytes. CurrentChunkNumber: {_currentChunkNumber}");
+#endif
                 _headerWritten = true;
             }
         }
@@ -203,6 +211,7 @@ namespace UvfLib.VaultHelpers
                 nonce.CopyTo(_ciphertextChunkBuffer.Span);
                 
                 // Construct AAD: bigEndian(chunkNumber) . headerNonce (as per specification)
+                // The _aadBuffer for V8 was initialized in constructor with headerNonce (N_header) at offset 8
                 BinaryPrimitives.WriteInt64BigEndian(_aadBuffer.AsSpan(0, 8), _currentChunkNumber);
                 
                 // Encrypt using AES-GCM with proper AAD
@@ -215,9 +224,19 @@ namespace UvfLib.VaultHelpers
                 ciphertext.CopyTo(_ciphertextChunkBuffer.Span.Slice(Core.CryptomatorV8.Constants.GCM_NONCE_SIZE));
                 tag.CopyTo(_ciphertextChunkBuffer.Span.Slice(Core.CryptomatorV8.Constants.GCM_NONCE_SIZE + cleartextChunk.Length));
                 
+                long chunkNumberProcessed = _currentChunkNumber; // Capture for logging
                 _currentChunkNumber++;
                 
                 _outputStream.Write(_ciphertextChunkBuffer.Slice(0, expectedEncryptedLength).Span);
+                _outputStream.Flush();
+                
+#if DEBUG
+                // Only log for very small cleartext (likely dirid.c9r files)
+                if (cleartextChunk.Length <= 10)
+                {
+                    Console.WriteLine($"DEBUG_EncryptingStream: WriteChunk (V8) SMALL FILE - cleartext: {cleartextChunk.Length} bytes, wrote: {expectedEncryptedLength} bytes, chunk: {chunkNumberProcessed}");
+                }
+#endif
             }
             else
             {
@@ -230,19 +249,47 @@ namespace UvfLib.VaultHelpers
             CheckDisposed();
             EnsureHeaderWritten(); // Ensure header is written even if no data follows
 
+#if DEBUG
+            Console.WriteLine($"DEBUG_EncryptingStream: Flush() called - BufferPosition: {_bufferPosition}, CurrentChunk: {_currentChunkNumber}");
+#endif
+
             // Encrypt and write any remaining data in the buffer as the final chunk
             if (_bufferPosition > 0)
             {
+#if DEBUG
+                Console.WriteLine($"DEBUG_EncryptingStream: Flush() writing final chunk - BufferPosition: {_bufferPosition} bytes");
+#endif
                 EncryptAndWriteChunk(_cleartextChunkBuffer.AsMemory(0, _bufferPosition));
                 _bufferPosition = 0; // Clear buffer after flushing
+            }
+            else
+            {
+#if DEBUG
+                Console.WriteLine($"DEBUG_EncryptingStream: Flush() - No buffered data to write, but ensuring at least one chunk for empty file");
+#endif
+                // For empty files, we still need to write at least one chunk (even if 0 bytes)
+                // This is critical for dirid.c9r files which contain empty strings
+                if (_currentChunkNumber == 0)
+                {
+#if DEBUG
+                    Console.WriteLine($"DEBUG_EncryptingStream: Flush() - Writing empty chunk for empty file");
+#endif
+                    EncryptAndWriteChunk(_cleartextChunkBuffer.AsMemory(0, 0)); // Write 0-byte chunk
+                }
             }
 
             // CRITICAL: Ensure underlying stream is properly flushed
             _outputStream.Flush(); // Flush the underlying stream
+#if DEBUG
+            Console.WriteLine($"DEBUG_EncryptingStream: Flush() completed - FinalChunkNumber: {_currentChunkNumber}");
+#endif
         }
 
         protected override void Dispose(bool disposing)
         {
+#if DEBUG
+            Console.WriteLine($"DEBUG_EncryptingStream: Dispose() called - disposing: {disposing}, CurrentChunk: {_currentChunkNumber}");
+#endif
             if (!_isDisposed)
             {
                 if (disposing)
@@ -258,6 +305,9 @@ namespace UvfLib.VaultHelpers
                         if (_outputStream is FileStream fileStream)
                         {
                             fileStream.Flush(true); // Force OS flush
+#if DEBUG
+                            Console.WriteLine($"DEBUG_EncryptingStream: Dispose() - Forced OS flush on FileStream");
+#endif
                         }
                     }
                     finally
@@ -267,6 +317,9 @@ namespace UvfLib.VaultHelpers
 
                         if (!_leaveOpen)
                         {
+#if DEBUG
+                            Console.WriteLine($"DEBUG_EncryptingStream: Dispose() - Closing underlying stream");
+#endif
                             _outputStream?.Dispose();
                         }
                         _random?.Dispose(); 
@@ -276,6 +329,9 @@ namespace UvfLib.VaultHelpers
                     }
                 }
                 _isDisposed = true;
+#if DEBUG
+                Console.WriteLine($"DEBUG_EncryptingStream: Dispose() completed - Stream disposed");
+#endif
             }
             base.Dispose(disposing);
         }

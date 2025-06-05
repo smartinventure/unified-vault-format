@@ -4,6 +4,7 @@ using System.Security.Cryptography;
 using System.Text;
 using UvfLib.Core.Api;
 using Org.BouncyCastle.Crypto.Generators;
+using System.Text.Json;
 
 namespace UvfLib.Core.Common
 {
@@ -12,7 +13,7 @@ namespace UvfLib.Core.Common
     /// </summary>
     public class MasterkeyFileAccess
     {
-        private const int SCRYPT_COST_DEFAULT = 17; // 2^17 = 131072 iterations
+        private const int SCRYPT_COST_DEFAULT = 1 << 15; // 32768 (matches Java: 2^15, actual N value)
         private const int SCRYPT_BLOCK_SIZE_DEFAULT = 8;
         private const int SCRYPT_PARALLELIZATION_DEFAULT = 1;
 
@@ -137,6 +138,7 @@ namespace UvfLib.Core.Common
 
         /// <summary>
         /// Creates a masterkey file from a passphrase with custom parameters.
+        /// Returns a clean Cryptomator-compatible format without extra UVF fields.
         /// </summary>
         /// <param name="passphrase">The passphrase</param>
         /// <param name="costParam">The scrypt cost parameter</param>
@@ -170,7 +172,15 @@ namespace UvfLib.Core.Common
                 rng.GetBytes(salt);
             }
 
-            var masterkeyFile = CreateNew(combinedMasterkey, costParam, blockSize, parallelism);
+            // Create a clean MasterkeyFile with ONLY the essential fields set
+            var masterkeyFile = new MasterkeyFile
+            {
+                Version = 8, // Cryptomator v8 version
+                ScryptCostParam = costParam,
+                ScryptBlockSize = blockSize,
+                ScryptParallelism = parallelism,
+                ScryptSalt = salt
+            };
 
             try
             {
@@ -196,7 +206,7 @@ namespace UvfLib.Core.Common
                 using (var hmac = new HMACSHA256(macKey))
                 {
                     // Convert vault version to big-endian bytes
-                    byte[] versionBytes = BitConverter.GetBytes(masterkeyFile.VaultVersion);
+                    byte[] versionBytes = BitConverter.GetBytes(8); // Use version 8
                     if (BitConverter.IsLittleEndian)
                     {
                         Array.Reverse(versionBytes);
@@ -204,8 +214,7 @@ namespace UvfLib.Core.Common
                     versionMac = hmac.ComputeHash(versionBytes);
                 }
 
-                // Store in the format expected by Unlock method
-                masterkeyFile.ScryptSalt = salt;
+                // Store ONLY the essential fields for Cryptomator compatibility
                 masterkeyFile.EncMasterKey = wrappedEncKey;
                 masterkeyFile.MacMasterKey = wrappedMacKey;
                 masterkeyFile.VersionMac = versionMac;
@@ -872,5 +881,7 @@ namespace UvfLib.Core.Common
                 throw new IOException("Invalid masterkey file format", ex);
             }
         }
+
+
     }
 }
