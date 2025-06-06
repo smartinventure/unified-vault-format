@@ -365,8 +365,106 @@ namespace UvfLib
         }
 
         /// <summary>
-        /// Creates the vault.cryptomator JWT configuration file content for a new Cryptomator V8 vault.
-        /// This file contains vault configuration like format version, cipher combo, and shortening threshold.
+        /// Creates a new Cryptomator V8 vault configuration file content (vault.cryptomator) with proper JWT signing.
+        /// This method creates a properly signed JWT using the MAC key from the provided masterkey.
+        /// </summary>
+        /// <param name="masterkeyContent">The content of the masterkey.cryptomator file.</param>
+        /// <param name="password">The password for the vault.</param>
+        /// <returns>A byte array containing the vault.cryptomator JWT file data with proper signature.</returns>
+        /// <exception cref="CryptoException">If JWT creation or signing fails.</exception>
+        /// <exception cref="ArgumentNullException">If masterkeyContent or password is null.</exception>
+        private static byte[] CreateNewCryptomatorV8VaultConfigContentSigned(byte[] masterkeyContent, string password)
+        {
+            if (masterkeyContent == null) throw new ArgumentNullException(nameof(masterkeyContent));
+            if (password == null) throw new ArgumentNullException(nameof(password));
+
+            try
+            {
+                // Load the vault to extract the MAC key
+                using var vault = LoadCryptomatorV8Vault(masterkeyContent, password);
+                
+                // Create JWT payload with vault configuration
+                var payload = new
+                {
+                    jti = Guid.NewGuid().ToString(), // Unique identifier for this vault
+                    format = 8,                       // Vault format version
+                    cipherCombo = "SIV_GCM",         // Cipher combination used
+                    shorteningThreshold = 220        // Filename shortening threshold
+                };
+
+                // Create header (same as real Cryptomator)
+                var header = new
+                {
+                    kid = "masterkeyfile:masterkey.cryptomator",
+                    alg = "HS256",
+                    typ = "JWT"
+                };
+
+                var jsonOptions = new System.Text.Json.JsonSerializerOptions
+                {
+                    WriteIndented = false  // Compact format without spaces
+                };
+
+                string headerJson = System.Text.Json.JsonSerializer.Serialize(header, jsonOptions);
+                string payloadJson = System.Text.Json.JsonSerializer.Serialize(payload, jsonOptions);
+
+                // Encode to Base64URL (without padding)
+                string headerBase64 = UvfLib.Core.Common.Base64Url.Encode(Encoding.UTF8.GetBytes(headerJson));
+                string payloadBase64 = UvfLib.Core.Common.Base64Url.Encode(Encoding.UTF8.GetBytes(payloadJson));
+
+                // Extract MAC key for signing using reflection
+                var vaultType = typeof(Vault);
+                var perpetualMasterkeyField = vaultType.GetField("_perpetualMasterkey",
+                    System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+
+                if (perpetualMasterkeyField?.GetValue(vault) is var perpetualMasterkey && perpetualMasterkey != null)
+                {
+                    var perpetualMasterkeyType = perpetualMasterkey.GetType();
+                    var getMacKeyMethod = perpetualMasterkeyType.GetMethod("GetMacKey");
+
+                    if (getMacKeyMethod != null)
+                    {
+                        using (var macKeySecret = (IDisposable)getMacKeyMethod.Invoke(perpetualMasterkey, null)!)
+                        {
+                            var getEncodedMethod = macKeySecret.GetType().GetMethod("GetEncoded");
+                            if (getEncodedMethod != null)
+                            {
+                                byte[] macKeyBytes = (byte[])getEncodedMethod.Invoke(macKeySecret, null)!;
+
+                                // Sign the JWT
+                                string signingInput = $"{headerBase64}.{payloadBase64}";
+                                byte[] signingInputBytes = Encoding.UTF8.GetBytes(signingInput);
+
+                                byte[] signatureBytes;
+                                using (var hmac = new System.Security.Cryptography.HMACSHA256(macKeyBytes))
+                                {
+                                    signatureBytes = hmac.ComputeHash(signingInputBytes);
+                                }
+
+                                string signature = UvfLib.Core.Common.Base64Url.Encode(signatureBytes);
+                                string finalJWT = $"{headerBase64}.{payloadBase64}.{signature}";
+
+                                return new UTF8Encoding(false).GetBytes(finalJWT); // No BOM for Java compatibility
+                            }
+                        }
+                    }
+                }
+
+                throw new CryptoException("Could not extract MAC key from masterkey for JWT signing");
+            }
+            catch (CryptoException)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                throw new CryptoException("Failed to create properly signed Cryptomator V8 vault config content", ex);
+            }
+        }
+
+        /// <summary>
+        /// Creates a new Cryptomator V8 vault configuration file content (vault.cryptomator).
+        /// Returns a JWT-formatted content suitable for writing to vault.cryptomator.
         /// </summary>
         /// <returns>A byte array containing the vault.cryptomator JWT file data.</returns>
         /// <exception cref="CryptoException">If JWT creation fails.</exception>
@@ -1006,6 +1104,94 @@ namespace UvfLib
             }
 
             throw new InvalidOperationException("Seed IDs are only available for UVF vaults.");
+        }
+
+        /// <summary>
+        /// Gets the directory path for a CryptomatorV8 vault based on a UUID string.
+        /// This method converts a UUID string to the corresponding directory path in the vault.
+        /// </summary>
+        /// <param name="uuidString">The UUID string (e.g., "12345678-1234-1234-1234-123456789abc")</param>
+        /// <returns>The directory path (e.g., "d/XX/YYYYYYYY")</returns>
+        /// <exception cref="ArgumentNullException">If uuidString is null</exception>
+        /// <exception cref="ArgumentException">If uuidString is invalid</exception>
+        /// <exception cref="InvalidOperationException">If this is not a CryptomatorV8 vault</exception>
+        public string GetCryptomatorV8DirectoryPathByUuid(string uuidString)
+        {
+            if (_disposed) throw new ObjectDisposedException(nameof(Vault));
+            if (string.IsNullOrEmpty(uuidString)) throw new ArgumentNullException(nameof(uuidString));
+            if (!IsCryptomatorV8()) throw new InvalidOperationException("This method is only available for CryptomatorV8 vaults");
+
+            // Convert UUID string to bytes for DirectoryMetadata
+            // CryptomatorV8 DirectoryMetadataImpl stores DirId as byte[] internally
+            byte[] uuidBytes = System.Text.Encoding.ASCII.GetBytes(uuidString);
+            
+            // Create a temporary DirectoryMetadata with this DirId to calculate the path
+            var dirCryptor = _cryptor.DirectoryContentCryptor();
+            if (dirCryptor == null) throw new InvalidOperationException("Directory cryptor not available.");
+
+            // Create new metadata and set the DirId to our UUID bytes
+            var coreMetadata = dirCryptor.NewDirectoryMetadata();
+            
+            // Use reflection to set the _dirId field with byte[] (not string)
+            var metadataType = coreMetadata.GetType();
+            var dirIdField = metadataType.GetField("_dirId", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+            if (dirIdField != null)
+            {
+                // Set the field with byte[] directly - this is what CryptomatorV8 DirectoryMetadataImpl expects
+                dirIdField.SetValue(coreMetadata, uuidBytes);
+            }
+            else
+            {
+                // Fallback: try to find the field by other names or create a new metadata instance
+                throw new InvalidOperationException("Unable to set DirId on CryptomatorV8 DirectoryMetadata - field not found");
+            }
+
+            // Use the existing directory path calculation
+            var publicMetadata = ToPublic(coreMetadata);
+            return VaultDirectoryHelper.GetDirectoryPathInternal(_cryptor, publicMetadata);
+        }
+
+        /// <summary>
+        /// Creates a DirectoryMetadata instance from a UUID string for CryptomatorV8 vaults.
+        /// This method creates metadata that can be used for directory operations.
+        /// </summary>
+        /// <param name="uuidString">The UUID string (e.g., "12345678-1234-1234-1234-123456789abc")</param>
+        /// <returns>DirectoryMetadata instance for the given UUID</returns>
+        /// <exception cref="ArgumentNullException">If uuidString is null</exception>
+        /// <exception cref="ArgumentException">If uuidString is invalid</exception>
+        /// <exception cref="InvalidOperationException">If this is not a CryptomatorV8 vault</exception>
+        public DirectoryMetadata CreateCryptomatorV8DirectoryMetadataFromUuid(string uuidString)
+        {
+            if (_disposed) throw new ObjectDisposedException(nameof(Vault));
+            if (string.IsNullOrEmpty(uuidString)) throw new ArgumentNullException(nameof(uuidString));
+            if (!IsCryptomatorV8()) throw new InvalidOperationException("This method is only available for CryptomatorV8 vaults");
+
+            // Convert UUID string to bytes for DirectoryMetadata
+            // CryptomatorV8 DirectoryMetadataImpl stores DirId as byte[] internally
+            byte[] uuidBytes = System.Text.Encoding.ASCII.GetBytes(uuidString);
+
+            // Create a new DirectoryMetadata with the UUID as DirId
+            var dirCryptor = _cryptor.DirectoryContentCryptor();
+            if (dirCryptor == null) throw new InvalidOperationException("Directory cryptor not available.");
+
+            // Create new metadata and set the DirId to our UUID bytes
+            var coreMetadata = dirCryptor.NewDirectoryMetadata();
+            
+            // Use reflection to set the _dirId field with byte[] (not string)
+            var metadataType = coreMetadata.GetType();
+            var dirIdField = metadataType.GetField("_dirId", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+            if (dirIdField != null)
+            {
+                // Set the field with byte[] directly - this is what CryptomatorV8 DirectoryMetadataImpl expects
+                dirIdField.SetValue(coreMetadata, uuidBytes);
+            }
+            else
+            {
+                // Fallback: try to find the field by other names or create a new metadata instance
+                throw new InvalidOperationException("Unable to set DirId on CryptomatorV8 DirectoryMetadata - field not found");
+            }
+
+            return ToPublic(coreMetadata);
         }
 
         /// <summary>

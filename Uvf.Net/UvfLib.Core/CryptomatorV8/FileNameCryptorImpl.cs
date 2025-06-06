@@ -266,7 +266,6 @@ namespace UvfLib.Core.CryptomatorV8
             // Real Cryptomator uses standard Base64 with URL-safe characters but KEEPS the padding.
             // This explains the mixed padding pattern observed in real vaults.
             return Convert.ToBase64String(input)
-                .TrimEnd('=')
                 .Replace('+', '-')
                 .Replace('/', '_');
             // NO .TrimEnd('=') - keep natural Base64 padding for Cryptomator compatibility
@@ -285,7 +284,7 @@ namespace UvfLib.Core.CryptomatorV8
             // Real Cryptomator includes natural padding, so we don't need to add it back
             // But add safety check in case some edge cases need padding
             int padding = base64.Length % 4;
-            if (padding != 0)
+            switch (padding)
             {
                 case 2:
                     base64 += "==";
