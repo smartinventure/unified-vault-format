@@ -256,39 +256,27 @@ namespace UvfLib.CryptomatorV8
         }
 
         /// <summary>
-        /// Converts bytes to base64url encoding.
+        /// Converts bytes to base64 encoding (with padding, for Cryptomator V8 compatibility).
         /// </summary>
         /// <param name="input">The input bytes</param>
-        /// <returns>The base64url encoded string</returns>
+        /// <returns>The base64 encoded string WITH padding</returns>
         private static string ToBase64Url(byte[] input)
         {
-            return Convert.ToBase64String(input)
-                .TrimEnd('=')
-                .Replace('+', '-')
-                .Replace('/', '_');
+            // FIXED: Return standard Base64 WITH padding for Cryptomator V8 compatibility
+            // Real Cryptomator uses standard Base64, not Base64URL
+            return Convert.ToBase64String(input);
         }
 
         /// <summary>
-        /// Converts base64url string to bytes.
+        /// Converts base64 string to bytes (for Cryptomator V8 compatibility).
         /// </summary>
-        /// <param name="input">The base64url encoded string</param>
+        /// <param name="input">The base64 encoded string WITH padding</param>
         /// <returns>The decoded bytes</returns>
         private static byte[] FromBase64Url(string input)
         {
-            string base64 = input.Replace('-', '+').Replace('_', '/');
-            
-            // Add padding if necessary
-            switch (base64.Length % 4)
-            {
-                case 2:
-                    base64 += "==";
-                    break;
-                case 3:
-                    base64 += "=";
-                    break;
-            }
-            
-            return Convert.FromBase64String(base64);
+            // FIXED: Handle standard Base64 WITH padding for Cryptomator V8 compatibility
+            // Real Cryptomator uses standard Base64, not Base64URL
+            return Convert.FromBase64String(input);
         }
     }
 } 

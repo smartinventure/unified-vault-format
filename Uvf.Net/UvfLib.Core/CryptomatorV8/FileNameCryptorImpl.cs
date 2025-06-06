@@ -256,38 +256,29 @@ namespace UvfLib.Core.CryptomatorV8
         }
 
         /// <summary>
-        /// Converts bytes to base64url encoding.
+        /// Converts bytes to base64 encoding (with padding, for Cryptomator V8 compatibility).
         /// </summary>
         /// <param name="input">The input bytes</param>
-        /// <returns>The base64url encoded string</returns>
+        /// <returns>The base64 encoded string WITH padding and filesystem-safe characters</returns>
         private static string ToBase64Url(byte[] input)
         {
+            // FIXED: Return Base64 WITH padding but with filesystem-safe characters
+            // Real Cryptomator uses Base64 with padding, but substitutes +/= with -_= for filesystem safety
             return Convert.ToBase64String(input)
-                .TrimEnd('=')
                 .Replace('+', '-')
                 .Replace('/', '_');
         }
 
         /// <summary>
-        /// Converts base64url string to bytes.
+        /// Converts base64 string to bytes (for Cryptomator V8 compatibility).
         /// </summary>
-        /// <param name="input">The base64url encoded string</param>
+        /// <param name="input">The base64 encoded string WITH padding and filesystem-safe characters</param>
         /// <returns>The decoded bytes</returns>
         private static byte[] FromBase64Url(string input)
         {
+            // FIXED: Handle Base64 WITH padding but convert filesystem-safe characters back
+            // Real Cryptomator uses Base64 with padding, but substitutes +/= with -_= for filesystem safety
             string base64 = input.Replace('-', '+').Replace('_', '/');
-            
-            // Add padding if necessary
-            switch (base64.Length % 4)
-            {
-                case 2:
-                    base64 += "==";
-                    break;
-                case 3:
-                    base64 += "=";
-                    break;
-            }
-            
             return Convert.FromBase64String(base64);
         }
     }

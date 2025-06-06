@@ -24,8 +24,8 @@ namespace UvfConsole
     {
         // Configuration
         private const string SourceFolderPath = @"D:\temp\uvf\EncryptionTestSource";
-        private const string VaultFolderPath = @"D:\temp\uvf\EncryptionTestVault";
-        //private const string VaultFolderPath = @"D:\cyptomatortest\tester\tester";
+        private const string VaultFolderPath = @"D:\temp\uvf\IdenticalTestVault2";
+        //private const string VaultFolderPath = @"D:\cyptomatortest\martintest";
         private const string DecryptedFolderPath = @"D:\temp\uvf\EncryptionTestDecrypted";
         private const string Password = "your-super-secret-password";
         private const bool OutputTreeInfo = false;
@@ -87,24 +87,32 @@ namespace UvfConsole
 
         public static void Main(string[] args)
         {
+            Console.WriteLine("Hello!!!");
             if (args.Length == 0)
             {
-                Console.WriteLine("Usage: UvfConsole <encrypt|decrypt|testrun|analyze-jwt|test-our-jwt|test-signature|test-mackey|test-jwt-compare|test-own-validation|test-mac-derivation|test-concatenated-key|decrypt-real-dirid|test-our-dirid> [--uvf|--cryptomator]");
-                Console.WriteLine("  --uvf        : Use Universal Vault Format (default)");
-                Console.WriteLine("  --cryptomator: Use Cryptomator V8 format for legacy compatibility");
-                Console.WriteLine("  encrypt      : Encrypt files from source to vault");
-                Console.WriteLine("  decrypt      : Decrypt files from vault to target");
-                Console.WriteLine("  testrun      : Full round-trip test (encrypt then decrypt with verification)");
-                Console.WriteLine("  analyze-jwt  : Analyze real Cryptomator JWT signature process");
-                Console.WriteLine("  test-our-jwt : Test our generated JWT");
+                Console.WriteLine("UVF.NET - Universal Vault Format Library and Console Tool");
+                Console.WriteLine();
+                Console.WriteLine("Usage: UvfConsole <command> [--cryptomator]");
+                Console.WriteLine();
+                Console.WriteLine("Commands:");
+                Console.WriteLine("  encrypt       : Encrypt files from source to vault");
+                Console.WriteLine("  decrypt       : Decrypt files from vault to target");
+                Console.WriteLine("  testrun       : Full encrypt + decrypt + verify cycle");
+                Console.WriteLine("  analyze-jwt   : Analyze real Cryptomator JWT");
+                Console.WriteLine("  test-our-jwt  : Test our generated JWT");
                 Console.WriteLine("  test-signature: Test signature process");
-                Console.WriteLine("  test-mackey  : Test MAC key comparison");
-                Console.WriteLine("  test-jwt-compare: Test comprehensive JWT comparison");
+                Console.WriteLine("  test-mackey   : Test MAC key comparison");
+                Console.WriteLine("  test-jwt-compare: Test JWT comparison");
                 Console.WriteLine("  test-own-validation: Test own vault validation");
-                Console.WriteLine("  test-mac-derivation: Test MAC key derivation comparison");
+                Console.WriteLine("  test-mac-derivation: Test MAC key derivation");
                 Console.WriteLine("  test-concatenated-key: Test concatenated key validation");
                 Console.WriteLine("  decrypt-real-dirid: Decrypt real Cryptomator dirid.c9r file");
                 Console.WriteLine("  test-our-dirid: Test our own dirid.c9r file");
+                Console.WriteLine("  test-dirid-consistency: Test dirid.c9r backup consistency");
+                Console.WriteLine("  test-dirid-mapping: Show what each dirid.c9r points to");
+                Console.WriteLine("  test-dir-c9r-traversal: Analyze all dir.c9r files and traversal");
+                Console.WriteLine("  test-identical-vault: Create vault with real Cryptomator's exact parameters");
+                Console.WriteLine("  debugpath     : DEBUG: Manual UUID to path conversion testing");
                 return;
             }
 
@@ -173,6 +181,42 @@ namespace UvfConsole
                 return;
             }
             
+            if (mode == "test-dirid-consistency")
+            {
+                TestDiridConsistency();
+                return;
+            }
+            
+            if (mode == "test-parent-uuid")
+            {
+                TestParentUuidMapping();
+                return;
+            }
+            
+            if (mode == "test-dirid-mapping")
+            {
+                TestDiridMapping();
+                return;
+            }
+            
+            if (mode == "test-dir-c9r-traversal")
+            {
+                TestDirC9rTraversal();
+                return;
+            }
+            
+            if (mode == "test-identical-vault")
+            {
+                TestIdenticalVaultCreation();
+                return;
+            }
+            
+            if (mode == "debugpath")
+            {
+                DebugUuidToPathConversion();
+                return;
+            }
+            
             Console.WriteLine($"Vault Format: {vaultFormat}");
             
             Directory.CreateDirectory(VaultFolderPath);
@@ -199,8 +243,7 @@ namespace UvfConsole
             }
             else
             {
-                Console.WriteLine("Invalid mode. Use 'encrypt', 'decrypt', or 'testrun'.");
-                Console.WriteLine("Usage: UvfConsole <encrypt|decrypt|testrun> [--uvf|--cryptomator]");
+                Console.WriteLine("Invalid mode. Use one of the commands listed above.");
                 return;
             }
         }
@@ -644,13 +687,16 @@ namespace UvfConsole
                     byte[] decodedDirIdBytes = Convert.FromBase64String(subDirMetadata.DirId);
                     string rawUuidString = System.Text.Encoding.ASCII.GetString(decodedDirIdBytes);
                     
+                    // CORRECTED: dir.c9r should be INSIDE the encrypted subdirectory directory
+                    // This file contains the UUID pointing to the actual content location
                     string dirFilePath = Path.Combine(subDirPhysicalVaultPath, "dir.c9r");
                     File.WriteAllText(dirFilePath, rawUuidString); // Write as plaintext, 36 bytes
-                    Console.WriteLine($"    ENCRYPTION DEBUG: Writing to dir.c9r");
+                    Console.WriteLine($"    ENCRYPTION DEBUG: Writing to dir.c9r (FIXED LOCATION)");
                     Console.WriteLine($"      Original DirId (Base64): {subDirMetadata.DirId}");
                     Console.WriteLine($"      Raw UUID String: '{rawUuidString}'");
-                    Console.WriteLine($"      dir.c9r file path: {dirFilePath}");
+                    Console.WriteLine($"      dir.c9r file path (PARENT DIR): {dirFilePath}");
                     Console.WriteLine($"      dir.c9r content: '{rawUuidString}' ({rawUuidString.Length} bytes)");
+                    Console.WriteLine($"      Pointer: {Path.GetFileName(currentDirPhysicalVaultPath)} -> {encryptedSubDirName}");
                     
                     // Show UUID → Directory path mapping during encryption
                     string expectedContentPath = vault.GetCryptomatorV8DirectoryPathByUuid(rawUuidString);
@@ -926,7 +972,7 @@ namespace UvfConsole
                     Console.WriteLine($"      Input UUID: '{subDirId}'");
                     Console.WriteLine($"      Calculated path: '{dirPathCalculation}'");
                     Console.WriteLine($"      Full path: {actualContentPath}");
-                    Console.WriteLine($"      Path format: d/XX/YYYYYYYYYYYYYYYYYYYYYYYYYYYY");
+                    Console.WriteLine($"      Path format: d/XX/YYYYYYYYYYYYYYYYYYYYYYYY");
                     
                     // Extract the components to verify structure
                     if (dirPathCalculation.StartsWith("d/") && dirPathCalculation.Length > 3)
@@ -2346,6 +2392,7 @@ namespace UvfConsole
             // Real Cryptomator vault paths
             string realMasterkeyPath = @"D:\cyptomatortest\martintest\masterkey.cryptomator";
             string realDiridPath = @"D:\cyptomatortest\martintest\d\JT\THXHOONCL2NPW5ELQF3MQTGG764ZCY\dirid.c9r";
+            string realSubDiridPath = @"D:\cyptomatortest\martintest\d\V6\66TMDQNTYH3ILNYN4ER4YYVWNZIL2F\dirid.c9r";
             string realPassword = "your-super-secret-password"; // Assuming same password
             
             if (!File.Exists(realMasterkeyPath))
@@ -2362,18 +2409,16 @@ namespace UvfConsole
             
             try
             {
-                Console.WriteLine($"📋 Real masterkey path: {realMasterkeyPath}");
-                Console.WriteLine($"📋 Real dirid.c9r path: {realDiridPath}");
-                
-                // Check file size first
-                var fileInfo = new FileInfo(realDiridPath);
-                Console.WriteLine($"📏 Real dirid.c9r file size: {fileInfo.Length} bytes");
-                
                 // Load the real Cryptomator vault
                 byte[] realMasterkeyBytes = File.ReadAllBytes(realMasterkeyPath);
                 using (var vault = Vault.LoadCryptomatorV8Vault(realMasterkeyBytes, realPassword))
                 {
                     Console.WriteLine("✅ Real vault loaded successfully");
+                    
+                    // Test root directory dirid.c9r
+                    Console.WriteLine($"\n📋 Real ROOT directory dirid.c9r: {realDiridPath}");
+                    var fileInfo = new FileInfo(realDiridPath);
+                    Console.WriteLine($"📏 Real dirid.c9r file size: {fileInfo.Length} bytes");
                     
                     // Read the encrypted dirid.c9r file
                     byte[] encryptedDiridBytes = File.ReadAllBytes(realDiridPath);
@@ -2419,6 +2464,69 @@ namespace UvfConsole
                                 Console.WriteLine($"❌ Cannot interpret as UTF8: {ex.Message}");
                             }
                         }
+                    }
+                    
+                    // Test subdirectory dirid.c9r if it exists
+                    if (File.Exists(realSubDiridPath))
+                    {
+                        Console.WriteLine($"\n📋 Real SUBDIRECTORY dirid.c9r: {realSubDiridPath}");
+                        var subFileInfo = new FileInfo(realSubDiridPath);
+                        Console.WriteLine($"📏 Real sub-dirid.c9r file size: {subFileInfo.Length} bytes");
+                        
+                        byte[] encryptedSubDiridBytes = File.ReadAllBytes(realSubDiridPath);
+                        Console.WriteLine($"📄 Read {encryptedSubDiridBytes.Length} bytes from sub-dirid.c9r");
+                        
+                        using (var encryptedStream = new MemoryStream(encryptedSubDiridBytes))
+                        using (var decryptingStream = vault.GetDecryptingStream(encryptedStream))
+                        using (var decryptedStream = new MemoryStream())
+                        {
+                            decryptingStream.CopyTo(decryptedStream);
+                            byte[] decryptedSubContent = decryptedStream.ToArray();
+                            
+                            Console.WriteLine($"🔓 Sub-dirid decrypted content length: {decryptedSubContent.Length} bytes");
+                            
+                            if (decryptedSubContent.Length == 0)
+                            {
+                                Console.WriteLine("🔍 Sub-dirid content is EMPTY (0 bytes)");
+                            }
+                            else
+                            {
+                                Console.WriteLine($"🔍 Sub-dirid content (hex): {Convert.ToHexString(decryptedSubContent)}");
+                                
+                                try
+                                {
+                                    string subContentAsAscii = System.Text.Encoding.ASCII.GetString(decryptedSubContent);
+                                    Console.WriteLine($"🔍 Sub-dirid content (ASCII): '{subContentAsAscii}'");
+                                    
+                                    // If it looks like a UUID, show what path it should map to
+                                    if (subContentAsAscii.Length == 36 && subContentAsAscii.Contains('-'))
+                                    {
+                                        Console.WriteLine($"🔍 Looks like UUID: {subContentAsAscii}");
+                                        try
+                                        {
+                                            string expectedPath = vault.GetCryptomatorV8DirectoryPathByUuid(subContentAsAscii);
+                                            Console.WriteLine($"🔍 Expected content path: {expectedPath}");
+                                            
+                                            string fullExpectedPath = Path.Combine(@"D:\cyptomatortest\martintest", expectedPath);
+                                            bool pathExists = Directory.Exists(fullExpectedPath);
+                                            Console.WriteLine($"🔍 Expected path exists: {pathExists} ({fullExpectedPath})");
+                                        }
+                                        catch (Exception ex)
+                                        {
+                                            Console.WriteLine($"❌ Error calculating path from UUID: {ex.Message}");
+                                        }
+                                    }
+                                }
+                                catch (Exception ex)
+                                {
+                                    Console.WriteLine($"❌ Cannot interpret sub-dirid as ASCII: {ex.Message}");
+                                }
+                            }
+                        }
+                    }
+                    else
+                    {
+                        Console.WriteLine($"\n❌ Real subdirectory dirid.c9r not found: {realSubDiridPath}");
                     }
                 }
             }
@@ -2574,6 +2682,1474 @@ namespace UvfConsole
             }
             
             Console.WriteLine("\n===== Our dirid.c9r Test Complete =====");
+        }
+
+        static void TestRealVaultUuidMapping()
+        {
+            // Test the UUID from real Cryptomator vault
+            string realVaultUuid = "5255bfb8-615a-4c7b-9415-577f94386f98";
+            string expectedPath = "d/V6/66TMDQNTYH3ILNYN4ER4YYVWNZIL2F";
+            
+            Console.WriteLine("=== Real Vault UUID Mapping Test ===");
+            Console.WriteLine($"Real vault UUID: {realVaultUuid}");
+            Console.WriteLine($"Expected path: {expectedPath}");
+            
+            // Load the REAL Cryptomator vault instead of creating a temporary one
+            string realMasterkeyPath = @"D:\cyptomatortest\martintest\masterkey.cryptomator";
+            string realPassword = "your-super-secret-password";
+            
+            if (!File.Exists(realMasterkeyPath))
+            {
+                Console.WriteLine($"❌ Real masterkey file not found: {realMasterkeyPath}");
+                return;
+            }
+            
+            try 
+            {
+                // Load the REAL Cryptomator vault with its REAL keys
+                byte[] realMasterkeyBytes = File.ReadAllBytes(realMasterkeyPath);
+                using var realVault = Vault.LoadCryptomatorV8Vault(realMasterkeyBytes, realPassword);
+                
+                // Verify this is actually a CryptomatorV8 vault
+                if (!realVault.IsCryptomatorV8())
+                {
+                    Console.WriteLine("❌ ERROR: Failed to load real CryptomatorV8 vault");
+                    return;
+                }
+                
+                Console.WriteLine("✅ Successfully loaded REAL Cryptomator vault");
+                
+                string calculatedPath = realVault.GetCryptomatorV8DirectoryPathByUuid(realVaultUuid);
+                Console.WriteLine($"Calculated path: {calculatedPath}");
+                Console.WriteLine($"Paths match: {calculatedPath == expectedPath}");
+                
+                if (calculatedPath != expectedPath)
+                {
+                    Console.WriteLine("❌ MISMATCH! This reveals the UUID calculation issue.");
+                    Console.WriteLine($"Expected: {expectedPath}");
+                    Console.WriteLine($"Got:      {calculatedPath}");
+                    Console.WriteLine("This explains the Cryptomator compatibility problem.");
+                }
+                else
+                {
+                    Console.WriteLine("✅ Perfect match! UUID calculation is correct with real keys.");
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"❌ Error testing with real vault: {ex.Message}");
+            }
+        }
+
+        static void TestCryptomatorAlgorithmStepByStep()
+        {
+            Console.WriteLine("=== Step-by-Step Cryptomator Algorithm Test ===");
+            
+            string realUuid = "5255bfb8-615a-4c7b-9415-577f94386f98";
+            string expectedPath = "d/V6/66TMDQNTYH3ILNYN4ER4YYVWNZIL2F";
+            
+            Console.WriteLine($"Testing UUID: {realUuid}");
+            Console.WriteLine($"Expected path: {expectedPath}");
+            Console.WriteLine();
+            
+            // Load the REAL Cryptomator vault instead of creating a temporary one
+            string realMasterkeyPath = @"D:\cyptomatortest\martintest\masterkey.cryptomator";
+            string realPassword = "your-super-secret-password";
+            
+            if (!File.Exists(realMasterkeyPath))
+            {
+                Console.WriteLine($"❌ Real masterkey file not found: {realMasterkeyPath}");
+                return;
+            }
+            
+            try 
+            {
+                // Load the REAL Cryptomator vault with its REAL keys
+                byte[] realMasterkeyBytes = File.ReadAllBytes(realMasterkeyPath);
+                using var realVault = Vault.LoadCryptomatorV8Vault(realMasterkeyBytes, realPassword);
+                
+                Console.WriteLine("✅ Successfully loaded REAL Cryptomator vault");
+                Console.WriteLine();
+                
+                Console.WriteLine("Step 1: Convert UUID to bytes");
+                byte[] uuidBytes = System.Text.Encoding.UTF8.GetBytes(realUuid);
+                Console.WriteLine($"  UUID bytes length: {uuidBytes.Length}");
+                Console.WriteLine($"  UUID bytes (hex): {Convert.ToHexString(uuidBytes)}");
+                Console.WriteLine();
+                
+                // Test our implementation using the REAL vault keys
+                Console.WriteLine("Step 2: Using our implementation with REAL vault keys");
+                string ourResult = realVault.GetCryptomatorV8DirectoryPathByUuid(realUuid);
+                Console.WriteLine($"  Our result: {ourResult}");
+                Console.WriteLine($"  Matches expected: {ourResult == expectedPath}");
+                Console.WriteLine();
+                
+                if (ourResult != expectedPath)
+                {
+                    Console.WriteLine("Step 3: Manual algorithm analysis");
+                    Console.WriteLine("Our algorithm differs from real Cryptomator even with real keys.");
+                    Console.WriteLine("Need to reverse engineer the exact steps they use.");
+                    Console.WriteLine();
+                    
+                    // Extract just the path part for comparison
+                    string ourHash = ourResult.Replace("d/", "");
+                    string expectedHash = expectedPath.Replace("d/", "");
+                    
+                    Console.WriteLine($"Our hash:      {ourHash}");
+                    Console.WriteLine($"Expected hash: {expectedHash}");
+                    Console.WriteLine();
+                    
+                    // Compare the prefix and suffix
+                    string ourPrefix = ourHash.Substring(0, 2);
+                    string ourSuffix = ourHash.Substring(3);
+                    string expectedPrefix = expectedHash.Substring(0, 2);
+                    string expectedSuffix = expectedHash.Substring(3);
+                    
+                    Console.WriteLine($"Prefix: '{ourPrefix}' vs '{expectedPrefix}' - Match: {ourPrefix == expectedPrefix}");
+                    Console.WriteLine($"Suffix: '{ourSuffix}' vs '{expectedSuffix}' - Match: {ourSuffix == expectedSuffix}");
+                    Console.WriteLine();
+                    
+                    Console.WriteLine("Step 4: Algorithm difference analysis");
+                    Console.WriteLine("The issue is likely in one of these steps:");
+                    Console.WriteLine("1. AES-SIV encryption of UUID (key order, AD parameter)");
+                    Console.WriteLine("2. SHA1 hashing of encrypted bytes");
+                    Console.WriteLine("3. Base32 encoding (alphabet, padding)");
+                    Console.WriteLine("4. String splitting (first 2 chars vs last 30 chars)");
+                }
+                else
+                {
+                    Console.WriteLine("✅ Perfect match! Our algorithm works correctly with real keys.");
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"❌ Error: {ex.Message}");
+            }
+        }
+
+        static void ReverseEngineerCryptomatorHash()
+        {
+            Console.WriteLine("=== Reverse Engineering Real Cryptomator Hash ===");
+            
+            string expectedBase32 = "V666TMDQNTYH3ILNYN4ER4YYVWNZIL2F";
+            Console.WriteLine($"Expected Base32 hash: {expectedBase32}");
+            Console.WriteLine($"Length: {expectedBase32.Length}");
+            
+            try
+            {
+                // Decode the Base32 to get the SHA1 hash bytes
+                byte[] sha1HashBytes = DecodeBase32GoogleGuava(expectedBase32);
+                Console.WriteLine($"Decoded SHA1 hash: {Convert.ToHexString(sha1HashBytes)}");
+                Console.WriteLine($"SHA1 hash length: {sha1HashBytes.Length} bytes");
+                
+                if (sha1HashBytes.Length == 20) // SHA1 produces 20 bytes
+                {
+                    Console.WriteLine("✅ Valid SHA1 hash length");
+                    Console.WriteLine();
+                    Console.WriteLine("This means the real Cryptomator:");
+                    Console.WriteLine("1. Does some encryption/processing of the UUID");
+                    Console.WriteLine("2. SHA1 hashes the result");
+                    Console.WriteLine("3. Base32 encodes the SHA1 hash");
+                    Console.WriteLine();
+                    Console.WriteLine("The question is: what exactly is step 1?");
+                    Console.WriteLine("It might not be AES-SIV at all!");
+                }
+                else
+                {
+                    Console.WriteLine($"❌ Unexpected hash length: {sha1HashBytes.Length} bytes");
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Error decoding Base32: {ex.Message}");
+            }
+        }
+        
+        static byte[] DecodeBase32GoogleGuava(string input)
+        {
+            const string BASE32_ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
+            
+            if (string.IsNullOrEmpty(input))
+                return Array.Empty<byte>();
+                
+            var result = new List<byte>();
+            int buffer = 0;
+            int bitsLeft = 0;
+            
+            foreach (char c in input.ToUpperInvariant())
+            {
+                int value = BASE32_ALPHABET.IndexOf(c);
+                if (value == -1)
+                    throw new ArgumentException($"Invalid Base32 character: {c}");
+                    
+                buffer = (buffer << 5) | value;
+                bitsLeft += 5;
+                
+                if (bitsLeft >= 8)
+                {
+                    result.Add((byte)(buffer >> (bitsLeft - 8)));
+                    bitsLeft -= 8;
+                }
+            }
+            
+            return result.ToArray();
+        }
+
+        static void BruteForceTestCryptomatorAlgorithm()
+        {
+            Console.WriteLine("=== Brute Force Test: Finding Correct Algorithm ===");
+            
+            string testUuid = "5255bfb8-615a-4c7b-9415-577f94386f98";
+            string expectedSha1 = "AFBDE9B0706CF07DA16DC37848F318AD9B942F45";
+            
+            Console.WriteLine($"Testing UUID: {testUuid}");
+            Console.WriteLine($"Expected SHA1: {expectedSha1}");
+            Console.WriteLine();
+            
+            try 
+            {
+                // Test 1: Direct SHA1 of UUID string
+                Console.WriteLine("Test 1: Direct SHA1 of UUID string");
+                TestDirectSha1(testUuid, expectedSha1);
+                Console.WriteLine();
+                
+                // Test 2: SHA1 of UUID bytes (UTF8)
+                Console.WriteLine("Test 2: SHA1 of UUID bytes (UTF8)");
+                TestSha1OfBytes(testUuid, System.Text.Encoding.UTF8, expectedSha1);
+                Console.WriteLine();
+                
+                // Test 3: SHA1 of UUID bytes (ASCII)
+                Console.WriteLine("Test 3: SHA1 of UUID bytes (ASCII)");
+                TestSha1OfBytes(testUuid, System.Text.Encoding.ASCII, expectedSha1);
+                Console.WriteLine();
+                
+                // Test 4: Try different input formats
+                Console.WriteLine("Test 4: Different UUID formats");
+                TestDifferentUuidFormats(testUuid, expectedSha1);
+                Console.WriteLine();
+                
+                // Test 5: Try our current AES-SIV approach but with different parameters
+                Console.WriteLine("Test 5: AES-SIV with different parameters");
+                TestAesSivVariations(testUuid, expectedSha1);
+                
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Error: {ex.Message}");
+            }
+        }
+        
+        static void TestDirectSha1(string input, string expectedSha1)
+        {
+            using var sha1 = System.Security.Cryptography.SHA1.Create();
+            byte[] inputBytes = System.Text.Encoding.UTF8.GetBytes(input);
+            byte[] hashBytes = sha1.ComputeHash(inputBytes);
+            string actualSha1 = Convert.ToHexString(hashBytes);
+            
+            Console.WriteLine($"  Input: '{input}'");
+            Console.WriteLine($"  SHA1: {actualSha1}");
+            Console.WriteLine($"  Match: {actualSha1 == expectedSha1} {(actualSha1 == expectedSha1 ? "✅" : "❌")}");
+        }
+        
+        static void TestSha1OfBytes(string input, System.Text.Encoding encoding, string expectedSha1)
+        {
+            using var sha1 = System.Security.Cryptography.SHA1.Create();
+            byte[] inputBytes = encoding.GetBytes(input);
+            byte[] hashBytes = sha1.ComputeHash(inputBytes);
+            string actualSha1 = Convert.ToHexString(hashBytes);
+            
+            Console.WriteLine($"  Input: '{input}' ({encoding.EncodingName})");
+            Console.WriteLine($"  SHA1: {actualSha1}");
+            Console.WriteLine($"  Match: {actualSha1 == expectedSha1} {(actualSha1 == expectedSha1 ? "✅" : "❌")}");
+        }
+        
+        static void TestDifferentUuidFormats(string baseUuid, string expectedSha1)
+        {
+            string[] variations = {
+                baseUuid,                                    // Original
+                baseUuid.Replace("-", ""),                   // No dashes
+                baseUuid.ToUpperInvariant(),                 // Uppercase
+                baseUuid.ToUpperInvariant().Replace("-", ""), // Uppercase no dashes
+                "{" + baseUuid + "}",                        // With braces
+                baseUuid.Replace("-", "").ToUpperInvariant() // Uppercase hex
+            };
+            
+            using var sha1 = System.Security.Cryptography.SHA1.Create();
+            
+            foreach (string variation in variations)
+            {
+                byte[] inputBytes = System.Text.Encoding.UTF8.GetBytes(variation);
+                byte[] hashBytes = sha1.ComputeHash(inputBytes);
+                string actualSha1 = Convert.ToHexString(hashBytes);
+                
+                Console.WriteLine($"  Format: '{variation}'");
+                Console.WriteLine($"  SHA1: {actualSha1}");
+                Console.WriteLine($"  Match: {actualSha1 == expectedSha1} {(actualSha1 == expectedSha1 ? "✅" : "❌")}");
+                Console.WriteLine();
+            }
+        }
+        
+        static void TestAesSivVariations(string testUuid, string expectedSha1)
+        {
+            Console.WriteLine("  Testing AES-SIV + SHA1 variations...");
+            Console.WriteLine("  (This requires a vault to get keys - skipping for now)");
+            Console.WriteLine("  Our current AES-SIV approach produces different results");
+            Console.WriteLine("  The issue might be in key derivation or associated data");
+        }
+
+        static void ManualCryptomatorSpecTest()
+        {
+            Console.WriteLine("=== Manual Implementation of Cryptomator Specification ===");
+            
+            string testUuid = "5255bfb8-615a-4c7b-9415-577f94386f98";
+            string expectedPath = "d/V6/66TMDQNTYH3ILNYN4ER4YYVWNZIL2F";
+            string expectedSha1 = "AFBDE9B0706CF07DA16DC37848F318AD9B942F45";
+            
+            Console.WriteLine($"UUID: {testUuid}");
+            Console.WriteLine($"Expected path: {expectedPath}");
+            Console.WriteLine($"Expected SHA1: {expectedSha1}");
+            Console.WriteLine();
+            
+            Console.WriteLine("According to Cryptomator specification:");
+            Console.WriteLine("1. aesSiv(dirId, null, encryptionMasterKey, macMasterKey)");
+            Console.WriteLine("2. sha1(encrypted_result)");
+            Console.WriteLine("3. base32(sha1_hash)");
+            Console.WriteLine("4. d/XX/YYYYYYYY (first 2 chars / next 30 chars)");
+            Console.WriteLine();
+            
+            // Load the REAL Cryptomator vault instead of creating a temporary one
+            string realMasterkeyPath = @"D:\cyptomatortest\martintest\masterkey.cryptomator";
+            string realPassword = "your-super-secret-password";
+            
+            if (!File.Exists(realMasterkeyPath))
+            {
+                Console.WriteLine($"❌ Real masterkey file not found: {realMasterkeyPath}");
+                return;
+            }
+            
+            try 
+            {
+                // Load the REAL Cryptomator vault with its REAL keys
+                byte[] realMasterkeyBytes = File.ReadAllBytes(realMasterkeyPath);
+                using var realVault = Vault.LoadCryptomatorV8Vault(realMasterkeyBytes, realPassword);
+                
+                Console.WriteLine("Step 1: Our implementation result using REAL vault keys");
+                string ourPath = realVault.GetCryptomatorV8DirectoryPathByUuid(testUuid);
+                Console.WriteLine($"Our path: {ourPath}");
+                Console.WriteLine($"Matches: {ourPath == expectedPath}");
+                Console.WriteLine();
+                
+                if (ourPath != expectedPath)
+                {
+                    Console.WriteLine("Step 2: Analysis of the difference");
+                    string ourHash = ourPath.Replace("d/", "");
+                    string expectedHash = expectedPath.Replace("d/", "");
+                    
+                    Console.WriteLine($"Our hash:      {ourHash}");
+                    Console.WriteLine($"Expected hash: {expectedHash}");
+                    Console.WriteLine();
+                    
+                    Console.WriteLine("Step 3: Reverse engineer the working hash");
+                    // Since we know the expected hash, let's decode it to see the SHA1
+                    try
+                    {
+                        byte[] expectedSha1Bytes = DecodeBase32GoogleGuava(expectedHash.Replace("/", ""));
+                        string decodedSha1 = Convert.ToHexString(expectedSha1Bytes);
+                        Console.WriteLine($"Decoded SHA1 from expected hash: {decodedSha1}");
+                        Console.WriteLine($"Matches expected SHA1: {decodedSha1 == expectedSha1}");
+                        Console.WriteLine();
+                        
+                        if (decodedSha1 == expectedSha1)
+                        {
+                            Console.WriteLine("✅ Confirmed: Expected hash correctly decodes to expected SHA1");
+                            Console.WriteLine("❌ Problem: Our AES-SIV encryption produces different input to SHA1");
+                            Console.WriteLine("   Even with the REAL vault keys, our result differs.");
+                            Console.WriteLine();
+                            Console.WriteLine("Possible issues:");
+                            Console.WriteLine("- Different AES-SIV key derivation");
+                            Console.WriteLine("- Different associated data (not null)");
+                            Console.WriteLine("- Different input format (not UTF8 string)");
+                            Console.WriteLine("- Completely different encryption algorithm");
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        Console.WriteLine($"Error decoding hash: {ex.Message}");
+                    }
+                }
+                else
+                {
+                    Console.WriteLine("✅ Perfect match! Our implementation works correctly with real keys.");
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"❌ Error: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// DEBUG METHOD: Manual experimentation with UUID to path conversion
+        /// TODO: Remove this method when debugging is complete
+        /// </summary>
+        static void DebugUuidToPathConversion()
+        {
+            Console.WriteLine("=== DEBUG: Manual UUID to Path Conversion ===");
+            Console.WriteLine("🚧 This is a temporary debugging method");
+            Console.WriteLine();
+            
+            // Known values from real Cryptomator vault
+            string testUuid = "5255bfb8-615a-4c7b-9415-577f94386f98";
+            string expectedPath = "d/V6/66TMDQNTYH3ILNYN4ER4YYVWNZIL2F";
+            string expectedBase32Hash = "V666TMDQNTYH3ILNYN4ER4YYVWNZIL2F";
+            string expectedSha1 = "AFBDE9B0706CF07DA16DC37848F318AD9B942F45";
+            
+            Console.WriteLine($"🎯 Target UUID: {testUuid}");
+            Console.WriteLine($"🎯 Expected path: {expectedPath}");
+            Console.WriteLine($"🎯 Expected Base32 hash: {expectedBase32Hash}");
+            Console.WriteLine($"🎯 Expected SHA1: {expectedSha1}");
+            Console.WriteLine();
+            
+            // Load the REAL Cryptomator vault instead of creating a temporary one
+            string realMasterkeyPath = @"D:\cyptomatortest\martintest\masterkey.cryptomator";
+            string realPassword = "your-super-secret-password";
+            
+            if (!File.Exists(realMasterkeyPath))
+            {
+                Console.WriteLine($"❌ Real masterkey file not found: {realMasterkeyPath}");
+                return;
+            }
+            
+            try
+            {
+                // Step 1: Show our implementation result using REAL vault keys
+                Console.WriteLine("📊 Step 1: Our Implementation Using REAL Vault Keys");
+                byte[] realMasterkeyBytes = File.ReadAllBytes(realMasterkeyPath);
+                using var realVault = Vault.LoadCryptomatorV8Vault(realMasterkeyBytes, realPassword);
+                
+                Console.WriteLine("✅ Successfully loaded REAL Cryptomator vault");
+                
+                string ourCurrentPath = realVault.GetCryptomatorV8DirectoryPathByUuid(testUuid);
+                Console.WriteLine($"   Our result: {ourCurrentPath}");
+                Console.WriteLine($"   Expected:   {expectedPath}");
+                Console.WriteLine($"   ✅ Match: {ourCurrentPath == expectedPath}");
+                Console.WriteLine();
+                
+                // Step 2: Analyze the expected hash
+                Console.WriteLine("🔍 Step 2: Analyze Expected Hash");
+                try
+                {
+                    byte[] decodedSha1 = DecodeBase32GoogleGuava(expectedBase32Hash);
+                    string sha1Hex = Convert.ToHexString(decodedSha1);
+                    Console.WriteLine($"   Decoded SHA1: {sha1Hex}");
+                    Console.WriteLine($"   Length: {decodedSha1.Length} bytes");
+                    Console.WriteLine($"   ✅ Matches expected: {sha1Hex == expectedSha1}");
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"   ❌ Error decoding: {ex.Message}");
+                }
+                Console.WriteLine();
+                
+                // Step 3: Manual experimentation area
+                Console.WriteLine("🧪 Step 3: Manual Experimentation Area");
+                Console.WriteLine("   This is where you can add your own debugging code:");
+                Console.WriteLine();
+                
+                // TODO: Add your experimental code here
+                Console.WriteLine("   // Example experiments you could try:");
+                Console.WriteLine("   // 1. Try different AES-SIV key combinations");
+                Console.WriteLine("   // 2. Try different input formats (bytes vs string)");
+                Console.WriteLine("   // 3. Try different associated data parameters");
+                Console.WriteLine("   // 4. Try completely different encryption methods");
+                Console.WriteLine("   // 5. Try to work backwards from the known SHA1");
+                Console.WriteLine();
+                
+                // Step 4: Working backwards experiment
+                Console.WriteLine("🔄 Step 4: Working Backwards from Known SHA1");
+                Console.WriteLine("   We know the final SHA1 hash should be:");
+                Console.WriteLine($"   {expectedSha1}");
+                Console.WriteLine("   This means the AES-SIV encrypted bytes should hash to this value.");
+                Console.WriteLine("   The question is: what are those encrypted bytes?");
+                Console.WriteLine();
+                
+                if (ourCurrentPath == expectedPath)
+                {
+                    Console.WriteLine("🎉 SUCCESS: Our algorithm now works with real keys!");
+                    Console.WriteLine("   The issue was using wrong keys, not wrong algorithm.");
+                }
+                else
+                {
+                    Console.WriteLine("🔍 STILL INVESTIGATING: Even with real keys, result differs.");
+                    Console.WriteLine("   This indicates a fundamental algorithm difference.");
+                }
+                Console.WriteLine();
+                
+                // You can add more experimental code here
+                Console.WriteLine("💡 Next steps for debugging:");
+                Console.WriteLine("   1. Contact Cryptomator developers for AES-SIV parameter clarification");
+                Console.WriteLine("   2. Try different key derivation methods");
+                Console.WriteLine("   3. Test with null vs empty associated data");
+                Console.WriteLine("   4. Verify input format (UTF8 string vs raw bytes)");
+                Console.WriteLine();
+                
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"❌ Error in debugging: {ex.Message}");
+                Console.WriteLine($"Stack trace: {ex.StackTrace}");
+            }
+            
+            Console.WriteLine("🚧 End of debugging method");
+        }
+
+        private static void TestDiridConsistency()
+        {
+            Console.WriteLine("===== Testing dirid.c9r Consistency (Backup Directory IDs) =====");
+            Console.WriteLine("This tests if dirid.c9r files correctly contain parent directory IDs");
+            Console.WriteLine();
+            
+            // Test both vaults
+            Console.WriteLine("🔍 REAL CRYPTOMATOR VAULT:");
+            TestVaultDiridConsistency(@"D:\cyptomatortest\martintest", "your-super-secret-password");
+            
+            Console.WriteLine("\n🔍 OUR VAULT:");
+            TestVaultDiridConsistency(@"D:\temp\uvf\EncryptionTestVault", "your-super-secret-password");
+            
+            Console.WriteLine("\n===== dirid.c9r Consistency Test Complete =====");
+        }
+
+        private static void TestParentUuidMapping()
+        {
+            Console.WriteLine("===== Testing Parent UUID Mapping =====");
+            
+            // Real Cryptomator vault test
+            Console.WriteLine("🔍 REAL CRYPTOMATOR VAULT:");
+            Console.WriteLine("Subdirectory dirid.c9r contains UUID: 5255bfb8-615a-4c7b-9415-577f94386f98");
+            Console.WriteLine("Expected to map to root: d/JT/THXHOONCL2NPW5ELQF3MQTGG764ZCY");
+            
+            try
+            {
+                byte[] realMasterkeyBytes = File.ReadAllBytes(@"D:\cyptomatortest\martintest\masterkey.cryptomator");
+                using var realVault = Vault.LoadCryptomatorV8Vault(realMasterkeyBytes, "your-super-secret-password");
+                
+                string calculatedPath = realVault.GetCryptomatorV8DirectoryPathByUuid("5255bfb8-615a-4c7b-9415-577f94386f98");
+                Console.WriteLine($"Calculated path: {calculatedPath}");
+                Console.WriteLine($"✅ Real vault consistency: {calculatedPath == "d/JT/THXHOONCL2NPW5ELQF3MQTGG764ZCY"}");
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"❌ Error: {ex.Message}");
+            }
+            
+            Console.WriteLine();
+            
+            // Our vault test
+            Console.WriteLine("🔍 OUR VAULT:");
+            Console.WriteLine("Subdirectory dirid.c9r contains UUID: 4cf27cc8-ed7e-45af-ad7b-f6cf46e1079d");
+            Console.WriteLine("Expected to map to root: d/5O/VFGSIRT2CEZBBXJU6PCWPIPQMQ7HI3");
+            
+            try
+            {
+                byte[] ourMasterkeyBytes = File.ReadAllBytes(@"D:\temp\uvf\EncryptionTestVault\masterkey.cryptomator");
+                using var ourVault = Vault.LoadCryptomatorV8Vault(ourMasterkeyBytes, "your-super-secret-password");
+                
+                string calculatedPath = ourVault.GetCryptomatorV8DirectoryPathByUuid("4cf27cc8-ed7e-45af-ad7b-f6cf46e1079d");
+                Console.WriteLine($"Calculated path: {calculatedPath}");
+                Console.WriteLine($"✅ Our vault consistency: {calculatedPath == "d/5O/VFGSIRT2CEZBBXJU6PCWPIPQMQ7HI3"}");
+                
+                if (calculatedPath != "d/5O/VFGSIRT2CEZBBXJU6PCWPIPQMQ7HI3")
+                {
+                    Console.WriteLine("🎯 FOUND THE ISSUE: Our subdirectory's dirid.c9r contains wrong parent UUID!");
+                    Console.WriteLine("This means our dirid.c9r creation logic is broken!");
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"❌ Error: {ex.Message}");
+            }
+            
+            Console.WriteLine("\n===== Parent UUID Mapping Test Complete =====");
+        }
+
+        private static void TestVaultDiridConsistency(string vaultPath, string password)
+        {
+            Console.WriteLine($"Testing vault: {vaultPath}");
+            
+            string masterkeyPath = Path.Combine(vaultPath, "masterkey.cryptomator");
+            if (!File.Exists(masterkeyPath))
+            {
+                Console.WriteLine($"❌ Masterkey not found: {masterkeyPath}");
+                return;
+            }
+            
+            try
+            {
+                byte[] masterkeyBytes = File.ReadAllBytes(masterkeyPath);
+                using var vault = Vault.LoadCryptomatorV8Vault(masterkeyBytes, password);
+                
+                Console.WriteLine("✅ Vault loaded successfully");
+                
+                // Find all dirid.c9r files
+                string[] diridFiles = Directory.GetFiles(vaultPath, "dirid.c9r", SearchOption.AllDirectories);
+                Console.WriteLine($"📋 Found {diridFiles.Length} dirid.c9r files");
+                
+                foreach (string diridPath in diridFiles)
+                {
+                    Console.WriteLine($"\n📄 Testing: {diridPath}");
+                    
+                    // Get the directory containing this dirid.c9r
+                    string containingDir = Path.GetDirectoryName(diridPath);
+                    string relativePath = Path.GetRelativePath(vaultPath, containingDir);
+                    Console.WriteLine($"   Directory: {relativePath}");
+                    
+                    // Check if this is the root directory
+                    bool isRoot = relativePath.Split(Path.DirectorySeparatorChar).Length == 3; // d/XX/YYYYYY
+                    Console.WriteLine($"   Is root directory: {isRoot}");
+                    
+                    // Decrypt the dirid.c9r file
+                    var fileInfo = new FileInfo(diridPath);
+                    Console.WriteLine($"   File size: {fileInfo.Length} bytes");
+                    
+                    byte[] encryptedBytes = File.ReadAllBytes(diridPath);
+                    using (var encryptedStream = new MemoryStream(encryptedBytes))
+                    using (var decryptingStream = vault.GetDecryptingStream(encryptedStream))
+                    using (var decryptedStream = new MemoryStream())
+                    {
+                        decryptingStream.CopyTo(decryptedStream);
+                        byte[] decryptedContent = decryptedStream.ToArray();
+                        
+                        Console.WriteLine($"   Decrypted length: {decryptedContent.Length} bytes");
+                        
+                        if (decryptedContent.Length == 0)
+                        {
+                            Console.WriteLine($"   Content: EMPTY (expected for root directory)");
+                            if (!isRoot)
+                            {
+                                Console.WriteLine($"   ❌ ERROR: Non-root directory has empty dirid.c9r!");
+                            }
+                        }
+                        else
+                        {
+                            string parentUuid = System.Text.Encoding.ASCII.GetString(decryptedContent);
+                            Console.WriteLine($"   Content: '{parentUuid}' (parent directory UUID)");
+                            
+                            if (isRoot)
+                            {
+                                Console.WriteLine($"   ❌ ERROR: Root directory should have empty dirid.c9r!");
+                            }
+                            else
+                            {
+                                // Calculate what path this parent UUID should map to
+                                try
+                                {
+                                    string expectedParentPath = vault.GetCryptomatorV8DirectoryPathByUuid(parentUuid);
+                                    Console.WriteLine($"   Expected parent path: {expectedParentPath}");
+                                    
+                                    // Check if this parent path actually exists
+                                    string fullParentPath = Path.Combine(vaultPath, expectedParentPath);
+                                    bool parentExists = Directory.Exists(fullParentPath);
+                                    Console.WriteLine($"   Parent exists: {parentExists}");
+                                    
+                                    if (parentExists)
+                                    {
+                                        // Verify logical parent-child relationship
+                                        string actualParent = Path.GetDirectoryName(relativePath);
+                                        string expectedParent = expectedParentPath.Replace('/', Path.DirectorySeparatorChar);
+                                        
+                                        Console.WriteLine($"   Actual parent: {actualParent}");
+                                        Console.WriteLine($"   Expected parent: {expectedParent}");
+                                        Console.WriteLine($"   ✅ Parent relationship: {actualParent == expectedParent}");
+                                        
+                                        if (actualParent != expectedParent)
+                                        {
+                                            Console.WriteLine($"   ❌ MISMATCH: dirid.c9r points to wrong parent!");
+                                        }
+                                    }
+                                    else
+                                    {
+                                        Console.WriteLine($"   ❌ ERROR: Parent directory doesn't exist!");
+                                    }
+                                }
+                                catch (Exception ex)
+                                {
+                                    Console.WriteLine($"   ❌ ERROR calculating parent path: {ex.Message}");
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"❌ Error testing vault: {ex.Message}");
+            }
+        }
+
+        private static void TestDiridMapping()
+        {
+            Console.WriteLine("===== Testing dirid.c9r Mapping Analysis =====");
+            Console.WriteLine("This shows what each dirid.c9r contains and where it points to");
+            Console.WriteLine();
+            
+            // Test both vaults
+            Console.WriteLine("🔍 REAL CRYPTOMATOR VAULT:");
+            AnalyzeDiridMapping(@"D:\cyptomatortest\martintest", "your-super-secret-password");
+            
+            Console.WriteLine("\n🔍 OUR VAULT:");
+            AnalyzeDiridMapping(@"D:\temp\uvf\EncryptionTestVault", "your-super-secret-password");
+            
+            Console.WriteLine("\n===== dirid.c9r Mapping Analysis Complete =====");
+        }
+
+        private static void AnalyzeDiridMapping(string vaultPath, string password)
+        {
+            Console.WriteLine($"Analyzing vault: {vaultPath}");
+            
+            string masterkeyPath = Path.Combine(vaultPath, "masterkey.cryptomator");
+            if (!File.Exists(masterkeyPath))
+            {
+                Console.WriteLine($"❌ Masterkey not found: {masterkeyPath}");
+                return;
+            }
+            
+            try
+            {
+                byte[] masterkeyBytes = File.ReadAllBytes(masterkeyPath);
+                using var vault = Vault.LoadCryptomatorV8Vault(masterkeyBytes, password);
+                
+                // Find all dirid.c9r files
+                string[] diridFiles = Directory.GetFiles(vaultPath, "dirid.c9r", SearchOption.AllDirectories);
+                Console.WriteLine($"Found {diridFiles.Length} dirid.c9r files:");
+                
+                foreach (string diridPath in diridFiles)
+                {
+                    // Get the directory containing this dirid.c9r
+                    string containingDir = Path.GetDirectoryName(diridPath);
+                    string relativePath = Path.GetRelativePath(vaultPath, containingDir);
+                    
+                    Console.WriteLine($"\n📍 dirid.c9r Location: {relativePath}");
+                    
+                    // Decrypt the dirid.c9r file
+                    byte[] encryptedBytes = File.ReadAllBytes(diridPath);
+                    using (var encryptedStream = new MemoryStream(encryptedBytes))
+                    using (var decryptingStream = vault.GetDecryptingStream(encryptedStream))
+                    using (var decryptedStream = new MemoryStream())
+                    {
+                        decryptingStream.CopyTo(decryptedStream);
+                        byte[] decryptedContent = decryptedStream.ToArray();
+                        
+                        if (decryptedContent.Length == 0)
+                        {
+                            Console.WriteLine($"   📄 Content: EMPTY");
+                            Console.WriteLine($"   🎯 Points to: ROOT (empty UUID)");
+                            Console.WriteLine($"   ✅ Correct: This IS the root directory");
+                        }
+                        else
+                        {
+                            string containedUuid = System.Text.Encoding.ASCII.GetString(decryptedContent);
+                            Console.WriteLine($"   📄 Content: '{containedUuid}'");
+                            
+                            try
+                            {
+                                string targetPath = vault.GetCryptomatorV8DirectoryPathByUuid(containedUuid);
+                                Console.WriteLine($"   🎯 Points to: {targetPath}");
+                                
+                                // Check if it points to itself or somewhere else
+                                string normalizedRelativePath = relativePath.Replace('\\', '/');
+                                if (targetPath == normalizedRelativePath)
+                                {
+                                    Console.WriteLine($"   ✅ Points to: ITSELF (backup of own UUID)");
+                                }
+                                else
+                                {
+                                    Console.WriteLine($"   ❓ Points to: DIFFERENT directory");
+                                    Console.WriteLine($"      Expected (self): {normalizedRelativePath}");
+                                    Console.WriteLine($"      Actually points to: {targetPath}");
+                                    
+                                    // Check if that directory exists
+                                    string fullTargetPath = Path.Combine(vaultPath, targetPath);
+                                    bool targetExists = Directory.Exists(fullTargetPath);
+                                    Console.WriteLine($"      Target exists: {targetExists}");
+                                }
+                            }
+                            catch (Exception ex)
+                            {
+                                Console.WriteLine($"   ❌ ERROR calculating target path: {ex.Message}");
+                            }
+                        }
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"❌ Error analyzing vault: {ex.Message}");
+            }
+        }
+
+        private static void TestDirC9rTraversal()
+        {
+            Console.WriteLine("===== Testing dir.c9r Directory Traversal =====");
+            Console.WriteLine("This analyzes all dir.c9r files and shows what directories they point to");
+            Console.WriteLine();
+            
+            // Test both vaults
+            Console.WriteLine("🔍 REAL CRYPTOMATOR VAULT:");
+            AnalyzeDirC9rTraversal(@"D:\cyptomatortest\martintest2", "your-super-secret-password");
+            
+            Console.WriteLine("\n🔍 OUR VAULT:");
+            AnalyzeDirC9rTraversal(@"D:\temp\uvf\IdenticalTestVault2", "your-super-secret-password");
+            
+            Console.WriteLine("\n===== dir.c9r Directory Traversal Analysis Complete =====");
+        }
+
+        private static void AnalyzeDirC9rTraversal(string vaultPath, string password)
+        {
+            Console.WriteLine($"Analyzing vault: {vaultPath}");
+            
+            string masterkeyPath = Path.Combine(vaultPath, "masterkey.cryptomator");
+            if (!File.Exists(masterkeyPath))
+            {
+                Console.WriteLine($"❌ Masterkey not found: {masterkeyPath}");
+                return;
+            }
+            
+            try
+            {
+                byte[] masterkeyBytes = File.ReadAllBytes(masterkeyPath);
+                using var vault = Vault.LoadCryptomatorV8Vault(masterkeyBytes, password);
+                
+                // Find all dir.c9r files
+                string[] dirC9rFiles = Directory.GetFiles(vaultPath, "dir.c9r", SearchOption.AllDirectories);
+                Console.WriteLine($"Found {dirC9rFiles.Length} dir.c9r files:");
+                
+                foreach (string dirC9rPath in dirC9rFiles)
+                {
+                    // Get the directory containing this dir.c9r
+                    string containingDir = Path.GetDirectoryName(dirC9rPath);
+                    string relativePath = Path.GetRelativePath(vaultPath, containingDir);
+                    
+                    Console.WriteLine($"\n📍 dir.c9r Location: {relativePath}");
+                    
+                    try
+                    {
+                        // Read the dir.c9r file (it's unencrypted UTF8)
+                        string uuidContent = File.ReadAllText(dirC9rPath, System.Text.Encoding.UTF8).Trim();
+                        Console.WriteLine($"   📄 Content: '{uuidContent}' (UUID)");
+                        Console.WriteLine($"   📏 Length: {uuidContent.Length} characters");
+                        
+                        if (string.IsNullOrEmpty(uuidContent))
+                        {
+                            Console.WriteLine($"   ❌ ERROR: Empty dir.c9r file!");
+                            continue;
+                        }
+                        
+                        // Calculate what directory this UUID points to
+                        string targetPath = vault.GetCryptomatorV8DirectoryPathByUuid(uuidContent);
+                        Console.WriteLine($"   🎯 Points to: {targetPath}");
+                        
+                        // Check if the target directory exists
+                        string fullTargetPath = Path.Combine(vaultPath, targetPath);
+                        bool targetExists = Directory.Exists(fullTargetPath);
+                        Console.WriteLine($"   📂 Target exists: {targetExists}");
+                        
+                        if (targetExists)
+                        {
+                            // Show what's in the target directory
+                            string[] filesInTarget = Directory.GetFiles(fullTargetPath);
+                            string[] dirsInTarget = Directory.GetDirectories(fullTargetPath);
+                            Console.WriteLine($"   📋 Target contains: {filesInTarget.Length} files, {dirsInTarget.Length} subdirs");
+                            
+                            // Check for essential files
+                            bool hasDialridC9r = File.Exists(Path.Combine(fullTargetPath, "dirid.c9r"));
+                            Console.WriteLine($"   🔧 Has dirid.c9r: {hasDialridC9r}");
+                            
+                            // Show a few file examples
+                            if (filesInTarget.Length > 0)
+                            {
+                                Console.WriteLine($"   📝 Sample files:");
+                                for (int i = 0; i < Math.Min(3, filesInTarget.Length); i++)
+                                {
+                                    string fileName = Path.GetFileName(filesInTarget[i]);
+                                    var fileInfo = new FileInfo(filesInTarget[i]);
+                                    Console.WriteLine($"      - {fileName} ({fileInfo.Length} bytes)");
+                                }
+                                if (filesInTarget.Length > 3)
+                                {
+                                    Console.WriteLine($"      ... and {filesInTarget.Length - 3} more files");
+                                }
+                            }
+                            
+                            // Show subdirectory examples
+                            if (dirsInTarget.Length > 0)
+                            {
+                                Console.WriteLine($"   📁 Sample subdirs:");
+                                for (int i = 0; i < Math.Min(3, dirsInTarget.Length); i++)
+                                {
+                                    string dirName = Path.GetFileName(dirsInTarget[i]);
+                                    Console.WriteLine($"      - {dirName}");
+                                }
+                                if (dirsInTarget.Length > 3)
+                                {
+                                    Console.WriteLine($"      ... and {dirsInTarget.Length - 3} more subdirs");
+                                }
+                            }
+                        }
+                        else
+                        {
+                            Console.WriteLine($"   ❌ ERROR: Target directory doesn't exist!");
+                            Console.WriteLine($"      This breaks directory traversal!");
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        Console.WriteLine($"   ❌ ERROR processing dir.c9r: {ex.Message}");
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"❌ Error analyzing vault: {ex.Message}");
+            }
+        }
+
+        private static void TestIdenticalVaultCreation()
+        {
+            Console.WriteLine("===== Testing Identical Vault Creation =====");
+            Console.WriteLine("This creates our vault using real Cryptomator's masterkey and UUIDs");
+            Console.WriteLine();
+            
+            string realVaultPath = @"D:\cyptomatortest\martintest2";  // NEW VAULT PATH
+            string realMasterkeyPath = Path.Combine(realVaultPath, "masterkey.cryptomator");
+            string testVaultPath = @"D:\temp\uvf\IdenticalTestVault2";  // NEW TEST VAULT PATH
+            string password = "your-super-secret-password";
+            
+            // Clean up test vault
+            if (Directory.Exists(testVaultPath))
+            {
+                Directory.Delete(testVaultPath, true);
+            }
+            Directory.CreateDirectory(testVaultPath);
+            
+            Console.WriteLine($"📋 Real vault: {realVaultPath}");
+            Console.WriteLine($"🔧 Test vault: {testVaultPath}");
+            Console.WriteLine();
+            
+            try
+            {
+                // First, analyze the real vault structure
+                Console.WriteLine("🔍 ANALYZING REAL VAULT STRUCTURE:");
+                byte[] realMasterkeyBytes = File.ReadAllBytes(realMasterkeyPath);
+                using var analyzeVault = Vault.LoadCryptomatorV8Vault(realMasterkeyBytes, password);
+                
+                string realRootPath = analyzeVault.GetRootDirectoryPath();
+                string realRootFullPath = Path.Combine(realVaultPath, realRootPath);
+                Console.WriteLine($"Real root path: {realRootPath}");
+                Console.WriteLine($"Real root full path: {realRootFullPath}");
+                
+                // Find all dir.c9r files in the real vault
+                string[] realDirC9rFiles = Directory.GetFiles(realVaultPath, "dir.c9r", SearchOption.AllDirectories);
+                Console.WriteLine($"Found {realDirC9rFiles.Length} dir.c9r files in real vault:");
+                
+                var subdirUuids = new List<string>();
+                
+                foreach (string dirC9rPath in realDirC9rFiles)
+                {
+                    string uuidContent = File.ReadAllText(dirC9rPath, System.Text.Encoding.UTF8).Trim();
+                    string relativePath = Path.GetRelativePath(realVaultPath, dirC9rPath);
+                    Console.WriteLine($"  {relativePath} → UUID: {uuidContent}");
+                    
+                    if (!string.IsNullOrEmpty(uuidContent) && uuidContent.Length == 36)
+                    {
+                        subdirUuids.Add(uuidContent);
+                    }
+                }
+                
+                // Copy the real masterkey to our test vault
+                string testMasterkeyPath = Path.Combine(testVaultPath, "masterkey.cryptomator");
+                File.WriteAllBytes(testMasterkeyPath, realMasterkeyBytes);
+                
+                // Create vault.cryptomator (empty file for V8)
+                string testVaultCryptomatorPath = Path.Combine(testVaultPath, "vault.cryptomator");
+                File.WriteAllText(testVaultCryptomatorPath, "");
+                
+                Console.WriteLine("✅ Copied real masterkey to test vault");
+                
+                // Load vault with real masterkey
+                using var vault = Vault.LoadCryptomatorV8Vault(realMasterkeyBytes, password);
+                Console.WriteLine("✅ Loaded vault with real masterkey");
+                
+                // Create root directory structure (same as real vault)
+                DirectoryMetadata rootMetadata = vault.GetRootDirectoryMetadata();
+                string rootDirPath = Path.Combine(testVaultPath, vault.GetRootDirectoryPath());
+                Directory.CreateDirectory(rootDirPath);
+                Console.WriteLine($"📁 Created root directory: {vault.GetRootDirectoryPath()}");
+                
+                // Create root dirid.c9r (empty for root)
+                string rootDiridPath = Path.Combine(rootDirPath, "dirid.c9r");
+                using (FileStream diridStream = File.Create(rootDiridPath))
+                using (Stream encryptingStream = vault.GetEncryptingStream(diridStream))
+                {
+                    // Write empty content for root
+                }
+                Console.WriteLine($"✅ Created root dirid.c9r: {new FileInfo(rootDiridPath).Length} bytes");
+                
+                // Create subdirectories using the UUIDs from the real vault
+                for (int i = 0; i < subdirUuids.Count; i++)
+                {
+                    string forcedSubdirUuid = subdirUuids[i];
+                    string subdirName = (i == 0) ? "test" : $"subdir{i}"; // Assume first is "test", others are subdir0, subdir1, etc.
+                    
+                    Console.WriteLine($"\n🔄 Creating subdirectory {i + 1} with UUID: {forcedSubdirUuid}");
+                    
+                    // Create DirectoryMetadata with forced UUID
+                    DirectoryMetadata subdirMetadata = vault.CreateCryptomatorV8DirectoryMetadataFromUuid(forcedSubdirUuid);
+                    Console.WriteLine($"📋 Created metadata - DirId: {subdirMetadata.DirId}");
+                    
+                    // Calculate paths
+                    string expectedSubdirContentPath = vault.GetCryptomatorV8DirectoryPathByUuid(forcedSubdirUuid);
+                    string fullSubdirContentPath = Path.Combine(testVaultPath, expectedSubdirContentPath);
+                    Console.WriteLine($"🎯 Expected subdirectory content path: {expectedSubdirContentPath}");
+                    
+                    // Create subdirectory content directory
+                    Directory.CreateDirectory(fullSubdirContentPath);
+                    
+                    // Create subdirectory dirid.c9r (contains its own UUID)
+                    string subdirDiridPath = Path.Combine(fullSubdirContentPath, "dirid.c9r");
+                    using (FileStream diridStream = File.Create(subdirDiridPath))
+                    using (Stream encryptingStream = vault.GetEncryptingStream(diridStream))
+                    {
+                        byte[] uuidBytes = System.Text.Encoding.ASCII.GetBytes(forcedSubdirUuid);
+                        encryptingStream.Write(uuidBytes, 0, uuidBytes.Length);
+                    }
+                    Console.WriteLine($"✅ Created subdirectory dirid.c9r: {new FileInfo(subdirDiridPath).Length} bytes");
+                    
+                    // Create encrypted subdirectory name in root
+                    string encryptedSubdirName = vault.EncryptFilename(subdirName, rootMetadata);
+                    string encryptedSubdirPath = Path.Combine(rootDirPath, encryptedSubdirName);
+                    Directory.CreateDirectory(encryptedSubdirPath);
+                    Console.WriteLine($"📁 Created encrypted subdirectory: {encryptedSubdirName}");
+                    
+                    // Create dir.c9r file in encrypted subdirectory (pointing to content)
+                    string dirC9rPath = Path.Combine(encryptedSubdirPath, "dir.c9r");
+                    File.WriteAllText(dirC9rPath, forcedSubdirUuid, System.Text.Encoding.UTF8);
+                    Console.WriteLine($"✅ Created dir.c9r: {dirC9rPath}");
+                    Console.WriteLine($"📄 Content: '{forcedSubdirUuid}'");
+                }
+                
+                // CRITICAL: Create vault.cryptomator file properly signed with our masterkey
+                Console.WriteLine();
+                // FIXED: Simply copy the vault.cryptomator from the real vault
+                // Since we copied the masterkey.cryptomator, the vault.cryptomator should also match
+                Console.WriteLine("🔧 Copying vault.cryptomator from real vault...");
+                string realVaultConfigPath = Path.Combine(realVaultPath, "vault.cryptomator");
+                string testVaultConfigPath = Path.Combine(testVaultPath, "vault.cryptomator");
+                File.Copy(realVaultConfigPath, testVaultConfigPath, true);
+                
+                long fileSize = new FileInfo(testVaultConfigPath).Length;
+                Console.WriteLine($"✅ Copied vault.cryptomator: {fileSize} bytes");
+                
+                // Now populate with actual files from EncryptionTestSource
+                string sourcePath = @"D:\temp\uvf\EncryptionTestSource";
+                if (Directory.Exists(sourcePath))
+                {
+                    Console.WriteLine($"\n📂 Populating vault with files from: {sourcePath}");
+                    PopulateVaultWithExistingStructure(vault, sourcePath, testVaultPath, subdirUuids);
+                }
+                
+                Console.WriteLine($"\n💡 Complete vault created at: {testVaultPath}");
+                Console.WriteLine("🎯 Structure and files should now match martintest2 exactly!");
+                
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"❌ Error creating identical vault: {ex.Message}");
+                Console.WriteLine($"Stack trace: {ex.StackTrace}");
+            }
+            
+            Console.WriteLine("\n===== Identical Vault Creation Complete =====");
+        }
+
+        private static void PopulateVaultWithExistingStructure(Vault vault, string sourcePath, string vaultPath, List<string> subdirUuids)
+        {
+            // Get root metadata and path
+            DirectoryMetadata rootMetadata = vault.GetRootDirectoryMetadata();
+            string rootDirPath = Path.Combine(vaultPath, vault.GetRootDirectoryPath());
+            
+            Console.WriteLine($"📁 Populating root directory: {vault.GetRootDirectoryPath()}");
+            
+            // Encrypt files in root directory
+            foreach (string sourceFilePath in Directory.GetFiles(sourcePath))
+            {
+                string plainName = Path.GetFileName(sourceFilePath);
+                string encryptedName = vault.EncryptFilename(plainName, rootMetadata);
+                string targetEncryptedFilePath = Path.Combine(rootDirPath, encryptedName);
+                
+                Console.WriteLine($"  📄 Encrypting: {plainName} -> {encryptedName}");
+                
+                using (FileStream sourceStream = File.OpenRead(sourceFilePath))
+                using (FileStream targetStream = File.Create(targetEncryptedFilePath))
+                using (Stream encryptingStream = vault.GetEncryptingStream(targetStream))
+                {
+                    sourceStream.CopyTo(encryptingStream);
+                }
+            }
+            
+            // Process subdirectories using existing UUIDs
+            var sourceSubdirs = Directory.GetDirectories(sourcePath);
+            for (int i = 0; i < sourceSubdirs.Length && i < subdirUuids.Count; i++)
+            {
+                string sourceSubdirPath = sourceSubdirs[i];
+                string plainSubdirName = Path.GetFileName(sourceSubdirPath);
+                string forcedUuid = subdirUuids[i];
+                
+                Console.WriteLine($"\n📁 Populating subdirectory: {plainSubdirName} (UUID: {forcedUuid})");
+                
+                // Calculate content path using forced UUID
+                string contentPath = vault.GetCryptomatorV8DirectoryPathByUuid(forcedUuid);
+                string fullContentPath = Path.Combine(vaultPath, contentPath);
+                
+                Console.WriteLine($"  📂 Content directory: {contentPath}");
+                
+                // Create DirectoryMetadata for this subdirectory
+                DirectoryMetadata subdirMetadata = vault.CreateCryptomatorV8DirectoryMetadataFromUuid(forcedUuid);
+                
+                // Encrypt files in this subdirectory
+                foreach (string sourceFilePath in Directory.GetFiles(sourceSubdirPath))
+                {
+                    string plainName = Path.GetFileName(sourceFilePath);
+                    string encryptedName = vault.EncryptFilename(plainName, subdirMetadata);
+                    string targetEncryptedFilePath = Path.Combine(fullContentPath, encryptedName);
+                    
+                    Console.WriteLine($"    📄 Encrypting: {plainName} -> {encryptedName}");
+                    
+                    using (FileStream sourceStream = File.OpenRead(sourceFilePath))
+                    using (FileStream targetStream = File.Create(targetEncryptedFilePath))
+                    using (Stream encryptingStream = vault.GetEncryptingStream(targetStream))
+                    {
+                        sourceStream.CopyTo(encryptingStream);
+                    }
+                }
+            }
+            
+            Console.WriteLine("\n✅ Vault population complete!");
+        }
+
+        private static void CreateProperVaultCryptomator(string realVaultPath, string testVaultPath, string password)
+        {
+            Console.WriteLine("🔧 Creating properly signed vault.cryptomator file...");
+            
+            // Read the real vault.cryptomator to get the payload structure
+            string realVaultConfigPath = Path.Combine(realVaultPath, "vault.cryptomator");
+            string realJWT = File.ReadAllText(realVaultConfigPath).Trim();
+            Console.WriteLine($"📄 Real JWT: {realJWT}");
+            
+            var jwtParts = realJWT.Split('.');
+            if (jwtParts.Length != 3)
+            {
+                throw new InvalidOperationException("Invalid JWT format in real vault");
+            }
+            
+            // Decode the real payload to understand the structure
+            string realPayloadJson = UvfLib.Core.Common.Base64Url.DecodeToString(jwtParts[1]);
+            Console.WriteLine($"📋 Real payload: {realPayloadJson}");
+            
+            // Parse the payload to extract settings
+            using (JsonDocument doc = JsonDocument.Parse(realPayloadJson))
+            {
+                var root = doc.RootElement;
+                int format = root.GetProperty("format").GetInt32();
+                string cipherCombo = root.GetProperty("cipherCombo").GetString();
+                int shorteningThreshold = root.GetProperty("shorteningThreshold").GetInt32();
+                
+                Console.WriteLine($"📊 Settings: format={format}, cipherCombo={cipherCombo}, threshold={shorteningThreshold}");
+                
+                // Generate a new JTI (UUID)
+                string newJti = Guid.NewGuid().ToString();
+                Console.WriteLine($"🆔 New JTI: {newJti}");
+                
+                // Create our own payload with the same settings but new JTI
+                var ourPayload = new
+                {
+                    jti = newJti,
+                    format = format,
+                    cipherCombo = cipherCombo,
+                    shorteningThreshold = shorteningThreshold
+                };
+                
+                var jsonOptions = new System.Text.Json.JsonSerializerOptions 
+                { 
+                    WriteIndented = false  // Compact format
+                };
+                string ourPayloadJson = System.Text.Json.JsonSerializer.Serialize(ourPayload, jsonOptions);
+                Console.WriteLine($"📋 Our payload: {ourPayloadJson}");
+                
+                // Create header (same as real Cryptomator)
+                var header = new
+                {
+                    kid = "masterkeyfile:masterkey.cryptomator",
+                    alg = "HS256",
+                    typ = "JWT"
+                };
+                string headerJson = System.Text.Json.JsonSerializer.Serialize(header, jsonOptions);
+                string headerBase64 = UvfLib.Core.Common.Base64Url.Encode(Encoding.UTF8.GetBytes(headerJson));
+                string payloadBase64 = UvfLib.Core.Common.Base64Url.Encode(Encoding.UTF8.GetBytes(ourPayloadJson));
+                
+                Console.WriteLine($"🔤 Header: {headerJson}");
+                Console.WriteLine($"🔤 Header (Base64): {headerBase64}");
+                Console.WriteLine($"🔤 Payload (Base64): {payloadBase64}");
+                
+                // Load our masterkey to get the MAC key for signing
+                string ourMasterkeyPath = Path.Combine(testVaultPath, "masterkey.cryptomator");
+                byte[] masterkeyBytes = File.ReadAllBytes(ourMasterkeyPath);
+                
+                using (var vault = Vault.LoadCryptomatorV8Vault(masterkeyBytes, password))
+                {
+                    // Get MAC key for signing
+                    var vaultType = typeof(Vault);
+                    var perpetualMasterkeyField = vaultType.GetField("_perpetualMasterkey", 
+                        System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+                    
+                    if (perpetualMasterkeyField != null)
+                    {
+                        var perpetualMasterkey = perpetualMasterkeyField.GetValue(vault);
+                        if (perpetualMasterkey != null)
+                        {
+                            var perpetualMasterkeyType = perpetualMasterkey.GetType();
+                            var getMacKeyMethod = perpetualMasterkeyType.GetMethod("GetMacKey");
+                            
+                            if (getMacKeyMethod != null)
+                            {
+                                using (var macKeySecret = (IDisposable)getMacKeyMethod.Invoke(perpetualMasterkey, null)!)
+                                {
+                                    var getEncodedMethod = macKeySecret.GetType().GetMethod("GetEncoded");
+                                    if (getEncodedMethod != null)
+                                    {
+                                        byte[] macKeyBytes = (byte[])getEncodedMethod.Invoke(macKeySecret, null)!;
+                                        Console.WriteLine($"🔑 MAC Key length: {macKeyBytes.Length} bytes");
+                                        
+                                        // Sign the JWT
+                                        string signingInput = $"{headerBase64}.{payloadBase64}";
+                                        byte[] signingInputBytes = Encoding.UTF8.GetBytes(signingInput);
+                                        
+                                        byte[] signatureBytes;
+                                        using (var hmac = new HMACSHA256(macKeyBytes))
+                                        {
+                                            signatureBytes = hmac.ComputeHash(signingInputBytes);
+                                        }
+                                        
+                                        string signature = UvfLib.Core.Common.Base64Url.Encode(signatureBytes);
+                                        Console.WriteLine($"🔐 Signature: {signature}");
+                                        
+                                        // Create final JWT
+                                        string finalJWT = $"{headerBase64}.{payloadBase64}.{signature}";
+                                        Console.WriteLine($"📄 Final JWT: {finalJWT}");
+                                        
+                                        // Write to our vault WITHOUT BOM (important for Java compatibility)
+                                        string ourVaultConfigPath = Path.Combine(testVaultPath, "vault.cryptomator");
+                                        byte[] jwtBytes = new UTF8Encoding(false).GetBytes(finalJWT); // false = no BOM
+                                        File.WriteAllBytes(ourVaultConfigPath, jwtBytes);
+                                        
+                                        long fileSize = new FileInfo(ourVaultConfigPath).Length;
+                                        Console.WriteLine($"✅ Created properly signed vault.cryptomator: {fileSize} bytes");
+                                        
+                                        return;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                
+                throw new InvalidOperationException("Could not extract MAC key from masterkey");
+            }
+        }
+
+        private static void TestMacKeyExtraction()
+        {
+            Console.WriteLine("===== Testing MAC Key Extraction =====");
+            
+            string realVaultPath = @"D:\cyptomatortest\martintest2";
+            string realMasterkeyPath = Path.Combine(realVaultPath, "masterkey.cryptomator");
+            string realVaultConfigPath = Path.Combine(realVaultPath, "vault.cryptomator");
+            string password = "your-super-secret-password";
+            
+            try
+            {
+                // Load the real masterkey
+                byte[] masterkeyBytes = File.ReadAllBytes(realMasterkeyPath);
+                Console.WriteLine($"📄 Masterkey size: {masterkeyBytes.Length} bytes");
+                
+                using (var vault = Vault.LoadCryptomatorV8Vault(masterkeyBytes, password))
+                {
+                    Console.WriteLine("✅ Vault loaded successfully");
+                    
+                    // Extract MAC key using reflection (same as our previous method)
+                    var vaultType = typeof(Vault);
+                    var perpetualMasterkeyField = vaultType.GetField("_perpetualMasterkey", 
+                        System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+                    
+                    if (perpetualMasterkeyField != null)
+                    {
+                        var perpetualMasterkey = perpetualMasterkeyField.GetValue(vault);
+                        if (perpetualMasterkey != null)
+                        {
+                            var perpetualMasterkeyType = perpetualMasterkey.GetType();
+                            var getMacKeyMethod = perpetualMasterkeyType.GetMethod("GetMacKey");
+                            
+                            if (getMacKeyMethod != null)
+                            {
+                                using (var macKeySecret = (IDisposable)getMacKeyMethod.Invoke(perpetualMasterkey, null)!)
+                                {
+                                    var getEncodedMethod = macKeySecret.GetType().GetMethod("GetEncoded");
+                                    if (getEncodedMethod != null)
+                                    {
+                                        byte[] macKeyBytes = (byte[])getEncodedMethod.Invoke(macKeySecret, null)!;
+                                        Console.WriteLine($"🔑 Extracted MAC Key: {macKeyBytes.Length} bytes");
+                                        Console.WriteLine($"🔑 MAC Key (hex): {Convert.ToHexString(macKeyBytes)}");
+                                        
+                                        // Test signing with this key
+                                        TestJWTSigning(macKeyBytes, realVaultConfigPath);
+                                        return;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    
+                    Console.WriteLine("❌ Could not extract MAC key using reflection");
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"❌ Error: {ex.Message}");
+            }
+        }
+        
+        private static void TestJWTSigning(byte[] macKeyBytes, string realVaultConfigPath)
+        {
+            Console.WriteLine("\n🔧 Testing JWT Signing...");
+            
+            // Read the real JWT to compare
+            string realJWT = File.ReadAllText(realVaultConfigPath).Trim();
+            Console.WriteLine($"📄 Real JWT: {realJWT}");
+            
+            var jwtParts = realJWT.Split('.');
+            if (jwtParts.Length != 3)
+            {
+                Console.WriteLine("❌ Invalid JWT format");
+                return;
+            }
+            
+            // Test: can we verify the real JWT signature with our extracted key?
+            string realSigningInput = $"{jwtParts[0]}.{jwtParts[1]}";
+            byte[] realSigningInputBytes = Encoding.UTF8.GetBytes(realSigningInput);
+            
+            byte[] expectedSignatureBytes;
+            using (var hmac = new HMACSHA256(macKeyBytes))
+            {
+                expectedSignatureBytes = hmac.ComputeHash(realSigningInputBytes);
+            }
+            
+            string expectedSignature = UvfLib.Core.Common.Base64Url.Encode(expectedSignatureBytes);
+            string actualSignature = jwtParts[2];
+            
+            Console.WriteLine($"🔐 Expected signature: {expectedSignature}");
+            Console.WriteLine($"🔐 Actual signature:   {actualSignature}");
+            Console.WriteLine($"✅ Signatures match: {expectedSignature == actualSignature}");
+            
+            if (expectedSignature == actualSignature)
+            {
+                Console.WriteLine("🎉 SUCCESS: We can correctly sign JWTs with this MAC key!");
+                
+                // Now test creating our own JWT
+                CreateOurOwnJWT(macKeyBytes, jwtParts[1]); // Use same payload
+            }
+            else
+            {
+                Console.WriteLine("❌ FAILED: MAC key extraction or signing process is incorrect");
+                
+                // Debug the signing process
+                Console.WriteLine($"\n🔍 Debugging signature mismatch:");
+                Console.WriteLine($"   MAC key length: {macKeyBytes.Length}");
+                Console.WriteLine($"   Signing input: '{realSigningInput}'");
+                Console.WriteLine($"   Signing input bytes: {realSigningInputBytes.Length}");
+                Console.WriteLine($"   Expected sig bytes: {expectedSignatureBytes.Length}");
+            }
+        }
+        
+        private static void CreateOurOwnJWT(byte[] macKeyBytes, string realPayloadBase64)
+        {
+            Console.WriteLine("\n🔧 Creating our own JWT...");
+            
+            // Decode the real payload to understand the structure
+            string realPayloadJson = UvfLib.Core.Common.Base64Url.DecodeToString(realPayloadBase64);
+            Console.WriteLine($"📋 Real payload: {realPayloadJson}");
+            
+            // Parse the payload to extract settings
+            using (JsonDocument doc = JsonDocument.Parse(realPayloadJson))
+            {
+                var root = doc.RootElement;
+                int format = root.GetProperty("format").GetInt32();
+                string cipherCombo = root.GetProperty("cipherCombo").GetString();
+                int shorteningThreshold = root.GetProperty("shorteningThreshold").GetInt32();
+                
+                // Generate a new JTI (UUID) for our vault
+                string newJti = Guid.NewGuid().ToString();
+                Console.WriteLine($"🆔 Our JTI: {newJti}");
+                
+                // Create our payload with the same settings but new JTI
+                var ourPayload = new
+                {
+                    jti = newJti,
+                    format = format,
+                    cipherCombo = cipherCombo,
+                    shorteningThreshold = shorteningThreshold
+                };
+                
+                var jsonOptions = new System.Text.Json.JsonSerializerOptions 
+                { 
+                    WriteIndented = false  // Compact format
+                };
+                string ourPayloadJson = System.Text.Json.JsonSerializer.Serialize(ourPayload, jsonOptions);
+                Console.WriteLine($"📋 Our payload: {ourPayloadJson}");
+                
+                // Create header (same as real Cryptomator)
+                var header = new
+                {
+                    kid = "masterkeyfile:masterkey.cryptomator",
+                    alg = "HS256",
+                    typ = "JWT"
+                };
+                string headerJson = System.Text.Json.JsonSerializer.Serialize(header, jsonOptions);
+                string headerBase64 = UvfLib.Core.Common.Base64Url.Encode(Encoding.UTF8.GetBytes(headerJson));
+                string payloadBase64 = UvfLib.Core.Common.Base64Url.Encode(Encoding.UTF8.GetBytes(ourPayloadJson));
+                
+                // Sign our JWT
+                string signingInput = $"{headerBase64}.{payloadBase64}";
+                byte[] signingInputBytes = Encoding.UTF8.GetBytes(signingInput);
+                
+                byte[] signatureBytes;
+                using (var hmac = new HMACSHA256(macKeyBytes))
+                {
+                    signatureBytes = hmac.ComputeHash(signingInputBytes);
+                }
+                
+                string signature = UvfLib.Core.Common.Base64Url.Encode(signatureBytes);
+                string finalJWT = $"{headerBase64}.{payloadBase64}.{signature}";
+                
+                Console.WriteLine($"🔐 Our signature: {signature}");
+                Console.WriteLine($"📄 Our final JWT: {finalJWT}");
+                
+                // Test: write this to a temp file and see if it works
+                string testPath = Path.Combine(Path.GetTempPath(), "test_vault.cryptomator");
+                byte[] jwtBytes = new UTF8Encoding(false).GetBytes(finalJWT); // No BOM
+                File.WriteAllBytes(testPath, jwtBytes);
+                
+                Console.WriteLine($"💾 Saved test JWT to: {testPath}");
+                Console.WriteLine($"📏 File size: {jwtBytes.Length} bytes");
+                Console.WriteLine("🎯 This JWT should work with real Cryptomator!");
+            }
         }
     }
 } 
