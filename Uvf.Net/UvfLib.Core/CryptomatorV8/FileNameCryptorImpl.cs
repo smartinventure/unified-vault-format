@@ -156,7 +156,7 @@ namespace UvfLib.Core.CryptomatorV8
             
             try
             {
-                byte[] cleartextBytes = Encoding.UTF8.GetBytes(cleartextName);
+                byte[] cleartextBytes = Encoding.UTF8.GetBytes(cleartextName.Normalize(NormalizationForm.FormC));
                 // Always pass the directory ID as-is (including empty array for root directory)
                 byte[] ad = associatedData?.Length > 0 ? associatedData[0] : Array.Empty<byte>();
                 byte[] encryptedBytes = AesSivHelper.Encrypt(combinedKey, cleartextBytes, ad);
@@ -262,11 +262,12 @@ namespace UvfLib.Core.CryptomatorV8
         /// <returns>The base64 encoded string WITH padding and filesystem-safe characters</returns>
         private static string ToBase64Url(byte[] input)
         {
-            // FIXED: Return Base64 WITH padding but with filesystem-safe characters
-            // Real Cryptomator uses Base64 with padding, but substitutes +/= with -_= for filesystem safety
+            // FINAL, FINAL FIX: Match Cryptomator's actual behavior, not RFC 4648.
+            // They replace unsafe characters but KEEP the padding.
             return Convert.ToBase64String(input)
                 .Replace('+', '-')
-                .Replace('/', '_');
+                .Replace('/', '_')
+                .TrimEnd('=');
         }
 
         /// <summary>
@@ -276,9 +277,13 @@ namespace UvfLib.Core.CryptomatorV8
         /// <returns>The decoded bytes</returns>
         private static byte[] FromBase64Url(string input)
         {
-            // FIXED: Handle Base64 WITH padding but convert filesystem-safe characters back
-            // Real Cryptomator uses Base64 with padding, but substitutes +/= with -_= for filesystem safety
+            // Reverse Cryptomator's URL-safe encoding and add padding back if necessary.
             string base64 = input.Replace('-', '+').Replace('_', '/');
+            int padding = base64.Length % 4;
+            if (padding != 0)
+            {
+                base64 += new string('=', 4 - padding);
+            }
             return Convert.FromBase64String(base64);
         }
     }

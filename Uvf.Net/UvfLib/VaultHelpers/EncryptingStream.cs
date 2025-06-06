@@ -211,14 +211,16 @@ namespace UvfLib.VaultHelpers
                 nonce.CopyTo(_ciphertextChunkBuffer.Span);
                 
                 // Construct AAD: bigEndian(chunkNumber) . headerNonce (as per specification)
-                // The _aadBuffer for V8 was initialized in constructor with headerNonce (N_header) at offset 8
-                BinaryPrimitives.WriteInt64BigEndian(_aadBuffer.AsSpan(0, 8), _currentChunkNumber);
+                byte[] chunkNumberBytes = new byte[8];
+                BinaryPrimitives.WriteInt64BigEndian(chunkNumberBytes, _currentChunkNumber);
+                byte[] headerNonce = v8Cryptor.GetNonce().ToArray();
                 
                 // Encrypt using AES-GCM with proper AAD
                 byte[] ciphertext = new byte[cleartextChunk.Length];
                 byte[] tag = new byte[Core.CryptomatorV8.Constants.GCM_TAG_SIZE];
                 
-                _fileContentAesGcm.Encrypt(nonce, cleartextChunk.Span, ciphertext, tag, _aadBuffer);
+                // Pass AAD as two separate byte arrays to match Java's two updateAAD calls
+                _fileContentAesGcm.Encrypt(nonce, cleartextChunk.Span, ciphertext, tag, associatedData: new[] { chunkNumberBytes, headerNonce });
                 
                 // Copy ciphertext and tag to the buffer
                 ciphertext.CopyTo(_ciphertextChunkBuffer.Span.Slice(Core.CryptomatorV8.Constants.GCM_NONCE_SIZE));

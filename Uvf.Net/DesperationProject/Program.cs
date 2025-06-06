@@ -2,118 +2,218 @@
 using System.Collections.Generic;
 using System.Security.Cryptography;
 using System.Text;
-using Jose;
+using System.IO;
+using System.Linq;
 
 class Program
 {
+    static string path1 = @"D:\temp\uvf\IdenticalTestVault2";
+    static string path2 = @"D:\cyptomatortest\martintest2";
+    
     static void Main(string[] args)
     {
-        Console.WriteLine("Starting Minimal Reproducible Example for jose-jwt...");
-
-        string password = "your-super-secret-password"; // Same as in your UvfConsole
-        int pbkdf2Iterations = 10000;
-        int saltSizeBytes = 16;
-        JweAlgorithm keyManagementAlgorithm = JweAlgorithm.PBES2_HS512_A256KW;
-        JweEncryption contentEncryptionAlgorithm = JweEncryption.A256GCM;
-
-        string dummyPayloadJson = "{\"message\":\"hello world\", \"timestamp\":\"" + DateTime.UtcNow.ToLongTimeString() + "\"}";
-        byte[] salt = RandomNumberGenerator.GetBytes(saltSizeBytes);
-
-        Console.WriteLine($"MRE - Password Length: {password.Length}");
-        using (var sha256 = SHA256.Create())
-        {
-            var hashedBytes = sha256.ComputeHash(Encoding.UTF8.GetBytes(password));
-            Console.WriteLine($"MRE - Password SHA256: {Convert.ToBase64String(hashedBytes)}");
-        }
-        Console.WriteLine($"MRE - PBKDF2 Iterations (p2c): {pbkdf2Iterations}");
-        Console.WriteLine($"MRE - Generated Salt (p2s): {Base64Url.Encode(salt)}");
-        Console.WriteLine($"MRE - KeyManagementAlgorithm: {keyManagementAlgorithm}");
-        Console.WriteLine($"MRE - ContentEncryptionAlgorithm: {contentEncryptionAlgorithm}");
-        Console.WriteLine($"MRE - Payload: {dummyPayloadJson}");
-
-        var extraHeaders = new Dictionary<string, object>
-        {
-            { "p2s", Base64Url.Encode(salt) },
-            { "p2c", pbkdf2Iterations }
-        };
-
-        var settings = new JwtSettings();
-        string jweString = "";
-
-        try
-        {
-            Console.WriteLine("MRE - Attempting JWT.Encode...");
-            jweString = JWT.Encode(dummyPayloadJson, password, keyManagementAlgorithm, contentEncryptionAlgorithm, extraHeaders: extraHeaders, settings: settings);
-            Console.WriteLine($"MRE - JWT.Encode successful. JWE String (first 30 chars): {(jweString.Length > 30 ? jweString.Substring(0, 30) : jweString)}...");
-        }
-        catch (Exception ex)
-        {
-            Console.WriteLine($"MRE - ERROR during JWT.Encode: {ex.ToString()}");
-            Console.WriteLine("MRE - Test cannot continue.");
-            return;
-        }
-
-        Console.WriteLine("MRE - Attempting JWT.Decode...");
-        try
-        {
-            string decryptedPayload = JWT.Decode(jweString, password, settings: settings);
-            Console.WriteLine("MRE - JWT.Decode successful!");
-            Console.WriteLine($"MRE - Decrypted Payload: {decryptedPayload}");
-        }
-        catch (Jose.IntegrityException intEx)
-        {
-            Console.WriteLine($"MRE - INTEGRITY EXCEPTION during JWT.Decode: {intEx.Message}");
-            Console.WriteLine($"MRE - Stack trace: {intEx.StackTrace}");
-        }
-        catch (Exception ex)
-        {
-            Console.WriteLine($"MRE - OTHER EXCEPTION during JWT.Decode: {ex.GetType().Name}: {ex.Message}");
-        }
-
-        Console.WriteLine("\n\n========== TEST 2: Without explicit p2s/p2c ==========\n");
-        
-        // Test 2: Let jose-jwt handle p2s and p2c internally
-        Console.WriteLine("MRE Test 2 - Attempting JWT.Encode WITHOUT explicit p2s/p2c...");
-        string jweString2 = "";
+        Console.WriteLine("=== Vault File Comparison Tool ===");
+        Console.WriteLine($"Path 1: {path1}");
+        Console.WriteLine($"Path 2: {path2}");
+        Console.WriteLine();
         
         try
         {
-            // No extraHeaders this time - let jose-jwt generate salt and use default iterations
-            jweString2 = JWT.Encode(dummyPayloadJson, password, keyManagementAlgorithm, contentEncryptionAlgorithm, settings: settings);
-            Console.WriteLine($"MRE Test 2 - JWT.Encode successful. JWE String (first 30 chars): {(jweString2.Length > 30 ? jweString2.Substring(0, 30) : jweString2)}...");
+            // Get all files from both paths
+            var files1 = GetAllFiles(path1);
+            var files2 = GetAllFiles(path2);
             
-            // Decode the header to see what jose-jwt generated
-            var parts = jweString2.Split('.');
-            if (parts.Length >= 1)
+            Console.WriteLine($"Found {files1.Count} files in Path 1");
+            Console.WriteLine($"Found {files2.Count} files in Path 2");
+            Console.WriteLine();
+            
+            // Compare files
+            var results = CompareFiles(files1, files2);
+            
+            // Print summary
+            PrintSummary(results, files1, files2);
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Error: {ex.Message}");
+        }
+        
+        Console.WriteLine("\nPress any key to exit...");
+        Console.ReadKey();
+    }
+    
+    static Dictionary<string, FileInfo> GetAllFiles(string rootPath)
+    {
+        var files = new Dictionary<string, FileInfo>();
+        
+        if (!Directory.Exists(rootPath))
+        {
+            Console.WriteLine($"Warning: Directory not found: {rootPath}");
+            return files;
+        }
+        
+        var allFiles = Directory.GetFiles(rootPath, "*", SearchOption.AllDirectories);
+        
+        foreach (string filePath in allFiles)
+        {
+            try
             {
-                var decodedHeader = Encoding.UTF8.GetString(Base64Url.Decode(parts[0]));
-                Console.WriteLine($"MRE Test 2 - JWE Protected Header: {decodedHeader}");
+                string relativePath = Path.GetRelativePath(rootPath, filePath);
+                var fileInfo = new FileInfo(filePath);
+                files[relativePath] = fileInfo;
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Warning: Could not process file {filePath}: {ex.Message}");
             }
         }
-        catch (Exception ex)
-        {
-            Console.WriteLine($"MRE Test 2 - ERROR during JWT.Encode: {ex.GetType().Name}: {ex.Message}");
-            Console.WriteLine("MRE Test 2 - Cannot continue with decode.");
-            Console.WriteLine("\nMRE - All tests finished.");
-            return;
-        }
-
-        Console.WriteLine("MRE Test 2 - Attempting JWT.Decode...");
-        try
-        {
-            string decryptedPayload2 = JWT.Decode(jweString2, password, settings: settings);
-            Console.WriteLine("MRE Test 2 - JWT.Decode successful!");
-            Console.WriteLine($"MRE Test 2 - Decrypted Payload: {decryptedPayload2}");
-        }
-        catch (Jose.IntegrityException intEx)
-        {
-            Console.WriteLine($"MRE Test 2 - INTEGRITY EXCEPTION during JWT.Decode: {intEx.Message}");
-        }
-        catch (Exception ex)
-        {
-            Console.WriteLine($"MRE Test 2 - OTHER EXCEPTION during JWT.Decode: {ex.GetType().Name}: {ex.Message}");
-        }
-
-        Console.WriteLine("\nMRE - All tests finished.");
+        
+        return files;
     }
+    
+    static ComparisonResults CompareFiles(Dictionary<string, FileInfo> files1, Dictionary<string, FileInfo> files2)
+    {
+        var results = new ComparisonResults();
+        
+        Console.WriteLine("=== FILE-BY-FILE COMPARISON ===");
+        
+        // Compare files from path1
+        foreach (var kvp1 in files1)
+        {
+            string relativePath = kvp1.Key;
+            var file1 = kvp1.Value;
+            
+            if (files2.ContainsKey(relativePath))
+            {
+                var file2 = files2[relativePath];
+                
+                try
+                {
+                    string md5_1 = CalculateMD5(file1.FullName);
+                    string md5_2 = CalculateMD5(file2.FullName);
+                    
+                    bool matches = md5_1.Equals(md5_2, StringComparison.OrdinalIgnoreCase);
+                    
+                    if (matches)
+                    {
+                        Console.WriteLine($"✅ MATCH: {relativePath}");
+                        Console.WriteLine($"   Size: {file1.Length} bytes | MD5: {md5_1}");
+                        results.MatchingFiles.Add(relativePath);
+                    }
+                    else
+                    {
+                        Console.WriteLine($"❌ DIFFER: {relativePath}");
+                        Console.WriteLine($"   Path1: {file1.Length} bytes | MD5: {md5_1}");
+                        Console.WriteLine($"   Path2: {file2.Length} bytes | MD5: {md5_2}");
+                        results.DifferentFiles.Add(relativePath);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"⚠️  ERROR: {relativePath} - {ex.Message}");
+                    results.ErrorFiles.Add(relativePath);
+                }
+            }
+            else
+            {
+                Console.WriteLine($"📁 ONLY IN PATH1: {relativePath} ({file1.Length} bytes)");
+                results.OnlyInPath1.Add(relativePath);
+            }
+            
+            Console.WriteLine();
+        }
+        
+        // Find files only in path2
+        foreach (var kvp2 in files2)
+        {
+            string relativePath = kvp2.Key;
+            var file2 = kvp2.Value;
+            
+            if (!files1.ContainsKey(relativePath))
+            {
+                Console.WriteLine($"📁 ONLY IN PATH2: {relativePath} ({file2.Length} bytes)");
+                results.OnlyInPath2.Add(relativePath);
+                Console.WriteLine();
+            }
+        }
+        
+        return results;
+    }
+    
+    static string CalculateMD5(string filePath)
+    {
+        using var md5 = MD5.Create();
+        using var stream = File.OpenRead(filePath);
+        byte[] hashBytes = md5.ComputeHash(stream);
+        return Convert.ToHexString(hashBytes);
+    }
+    
+    static void PrintSummary(ComparisonResults results, Dictionary<string, FileInfo> files1, Dictionary<string, FileInfo> files2)
+    {
+        Console.WriteLine("=== SUMMARY ===");
+        Console.WriteLine();
+        
+        Console.WriteLine($"📊 STATISTICS:");
+        Console.WriteLine($"   Total files in Path 1: {files1.Count}");
+        Console.WriteLine($"   Total files in Path 2: {files2.Count}");
+        Console.WriteLine($"   Files found in both:    {results.MatchingFiles.Count + results.DifferentFiles.Count}");
+        Console.WriteLine();
+        
+        Console.WriteLine($"🎯 COMPARISON RESULTS:");
+        Console.WriteLine($"   ✅ Identical files:     {results.MatchingFiles.Count}");
+        Console.WriteLine($"   ❌ Different files:     {results.DifferentFiles.Count}");
+        Console.WriteLine($"   📁 Only in Path 1:      {results.OnlyInPath1.Count}");
+        Console.WriteLine($"   📁 Only in Path 2:      {results.OnlyInPath2.Count}");
+        Console.WriteLine($"   ⚠️  Errors:             {results.ErrorFiles.Count}");
+        Console.WriteLine();
+        
+        if (results.OnlyInPath1.Count > 0)
+        {
+            Console.WriteLine($"📁 FILES ONLY IN PATH 1 ({results.OnlyInPath1.Count}):");
+            foreach (string file in results.OnlyInPath1.Take(10))
+            {
+                Console.WriteLine($"   - {file}");
+            }
+            if (results.OnlyInPath1.Count > 10)
+            {
+                Console.WriteLine($"   ... and {results.OnlyInPath1.Count - 10} more");
+            }
+            Console.WriteLine();
+        }
+        
+        if (results.OnlyInPath2.Count > 0)
+        {
+            Console.WriteLine($"📁 FILES ONLY IN PATH 2 ({results.OnlyInPath2.Count}):");
+            foreach (string file in results.OnlyInPath2.Take(10))
+            {
+                Console.WriteLine($"   - {file}");
+            }
+            if (results.OnlyInPath2.Count > 10)
+            {
+                Console.WriteLine($"   ... and {results.OnlyInPath2.Count - 10} more");
+            }
+            Console.WriteLine();
+        }
+        
+        // Calculate match percentage
+        int totalComparableFiles = results.MatchingFiles.Count + results.DifferentFiles.Count;
+        if (totalComparableFiles > 0)
+        {
+            double matchPercentage = (double)results.MatchingFiles.Count / totalComparableFiles * 100;
+            Console.WriteLine($"📈 MATCH RATE: {results.MatchingFiles.Count}/{totalComparableFiles} ({matchPercentage:F1}%)");
+        }
+        else
+        {
+            Console.WriteLine($"📈 MATCH RATE: No comparable files found");
+        }
+    }
+}
+
+class ComparisonResults
+{
+    public List<string> MatchingFiles { get; } = new List<string>();
+    public List<string> DifferentFiles { get; } = new List<string>();
+    public List<string> OnlyInPath1 { get; } = new List<string>();
+    public List<string> OnlyInPath2 { get; } = new List<string>();
+    public List<string> ErrorFiles { get; } = new List<string>();
 }

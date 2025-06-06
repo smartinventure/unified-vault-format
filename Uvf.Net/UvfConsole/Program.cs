@@ -112,6 +112,8 @@ namespace UvfConsole
                 Console.WriteLine("  test-dirid-mapping: Show what each dirid.c9r points to");
                 Console.WriteLine("  test-dir-c9r-traversal: Analyze all dir.c9r files and traversal");
                 Console.WriteLine("  test-identical-vault: Create vault with real Cryptomator's exact parameters");
+                Console.WriteLine("  test-mac-key: Test MAC key extraction and JWT signing");
+                Console.WriteLine("  vault-compare: Compare all files between real vault and our vault with checksums");
                 Console.WriteLine("  debugpath     : DEBUG: Manual UUID to path conversion testing");
                 return;
             }
@@ -208,6 +210,18 @@ namespace UvfConsole
             if (mode == "test-identical-vault")
             {
                 TestIdenticalVaultCreation();
+                return;
+            }
+            
+            if (mode == "test-mac-key")
+            {
+                TestMacKeyExtraction();
+                return;
+            }
+            
+            if (mode == "vault-compare")
+            {
+                TestVaultFileComparison();
                 return;
             }
             
@@ -657,9 +671,9 @@ namespace UvfConsole
                 bool processSubDir = true;
                 DirectoryMetadata existingSubDirMetadata = null;
 
-                // For both UVF and Cryptomator V8: encryptedSubDirName should be a DIRECTORY
-                // The encrypted directory name becomes the actual directory name in the filesystem
-                string subDirPhysicalVaultPath = Path.Combine(currentDirPhysicalVaultPath, encryptedSubDirName);
+                                 // For both UVF and Cryptomator V8: encryptedSubDirName should be a DIRECTORY
+                 // The encrypted directory name becomes the actual directory name in the filesystem
+                 string subDirPhysicalVaultPath = Path.Combine(currentDirPhysicalVaultPath, encryptedSubDirName);
 
                 if (vault.IsCryptomatorV8())
                 {
@@ -3732,22 +3746,45 @@ namespace UvfConsole
                     
                     // Create dir.c9r file in encrypted subdirectory (pointing to content)
                     string dirC9rPath = Path.Combine(encryptedSubdirPath, "dir.c9r");
-                    File.WriteAllText(dirC9rPath, forcedSubdirUuid, System.Text.Encoding.UTF8);
+                    // FIXED: Use an encoding without a BOM for Java compatibility
+                    File.WriteAllBytes(dirC9rPath, new UTF8Encoding(false).GetBytes(forcedSubdirUuid));
                     Console.WriteLine($"✅ Created dir.c9r: {dirC9rPath}");
                     Console.WriteLine($"📄 Content: '{forcedSubdirUuid}'");
                 }
                 
                 // CRITICAL: Create vault.cryptomator file properly signed with our masterkey
                 Console.WriteLine();
-                // FIXED: Simply copy the vault.cryptomator from the real vault
-                // Since we copied the masterkey.cryptomator, the vault.cryptomator should also match
-                Console.WriteLine("🔧 Copying vault.cryptomator from real vault...");
-                string realVaultConfigPath = Path.Combine(realVaultPath, "vault.cryptomator");
-                string testVaultConfigPath = Path.Combine(testVaultPath, "vault.cryptomator");
-                File.Copy(realVaultConfigPath, testVaultConfigPath, true);
+                // FIXED: Use the existing proven method that implements correct Cryptomator JWT signing
+                Console.WriteLine("🔧 Creating properly signed vault.cryptomator using proven method...");
                 
-                long fileSize = new FileInfo(testVaultConfigPath).Length;
-                Console.WriteLine($"✅ Copied vault.cryptomator: {fileSize} bytes");
+                // Read the masterkey content that we copied
+                byte[] masterkeyContent = File.ReadAllBytes(testMasterkeyPath);
+                
+                // Use the existing CreateNewCryptomatorV8VaultConfigContentSigned method from Vault.cs
+                // This method implements the exact same process as real Cryptomator:
+                // 1. Unwraps both encryption and MAC keys using the password
+                // 2. Concatenates them as per Cryptomator specification
+                // 3. Signs JWT with HMAC-SHA256 using concatenated key
+                // 4. Uses correct Base64URL encoding
+                
+                // Access the private method via reflection
+                var createConfigMethod = typeof(Vault).GetMethod("CreateNewCryptomatorV8VaultConfigContentSigned", 
+                    System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
+                
+                if (createConfigMethod != null)
+                {
+                    byte[] vaultConfigContent = (byte[])createConfigMethod.Invoke(null, new object[] { masterkeyContent, password });
+                    
+                    string testVaultConfigPath = Path.Combine(testVaultPath, "vault.cryptomator");
+                    File.WriteAllBytes(testVaultConfigPath, vaultConfigContent);
+                    
+                    Console.WriteLine($"✅ Created properly signed vault.cryptomator: {vaultConfigContent.Length} bytes");
+                    Console.WriteLine("🎯 Using EXACT same algorithm as real Cryptomator!");
+                }
+                else
+                {
+                    throw new InvalidOperationException("Could not access CreateNewCryptomatorV8VaultConfigContentSigned method");
+                }
                 
                 // Now populate with actual files from EncryptionTestSource
                 string sourcePath = @"D:\temp\uvf\EncryptionTestSource";
@@ -4150,6 +4187,221 @@ namespace UvfConsole
                 Console.WriteLine($"📏 File size: {jwtBytes.Length} bytes");
                 Console.WriteLine("🎯 This JWT should work with real Cryptomator!");
             }
+        }
+
+        private static void TestVaultFileComparison()
+        {
+            Console.WriteLine("===== Vault File Comparison =====");
+            Console.WriteLine("Comparing all files between real vault and our vault with checksums");
+            Console.WriteLine();
+            
+            string realVaultPath = @"D:\cyptomatortest\martintest2";
+            string ourVaultPath = @"D:\temp\uvf\IdenticalTestVault2";
+            
+            try
+            {
+                // Get all files from both vaults
+                var realFiles = GetAllVaultFiles(realVaultPath, "REAL VAULT");
+                var ourFiles = GetAllVaultFiles(ourVaultPath, "OUR VAULT");
+                
+                // Compare the file lists
+                CompareVaultFiles(realFiles, ourFiles);
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"❌ Error during vault comparison: {ex.Message}");
+            }
+            
+            Console.WriteLine("\n===== Vault File Comparison Complete =====");
+        }
+        
+        private static Dictionary<string, VaultFileInfo> GetAllVaultFiles(string vaultPath, string vaultName)
+        {
+            Console.WriteLine($"\n🔍 Analyzing {vaultName}: {vaultPath}");
+            
+            var files = new Dictionary<string, VaultFileInfo>();
+            
+            if (!Directory.Exists(vaultPath))
+            {
+                Console.WriteLine($"❌ Vault directory not found: {vaultPath}");
+                return files;
+            }
+            
+            // Get all files recursively
+            string[] allFiles = Directory.GetFiles(vaultPath, "*", SearchOption.AllDirectories);
+            Console.WriteLine($"📊 Found {allFiles.Length} total files");
+            
+            foreach (string filePath in allFiles)
+            {
+                try
+                {
+                    string relativePath = Path.GetRelativePath(vaultPath, filePath);
+                    var fileInfo = new FileInfo(filePath);
+                    
+                    // Calculate MD5 checksum
+                    string md5Hash = CalculateFileMD5(filePath);
+                    
+                    var vaultFileInfo = new VaultFileInfo
+                    {
+                        RelativePath = relativePath,
+                        FullPath = filePath,
+                        Size = fileInfo.Length,
+                        MD5Hash = md5Hash,
+                        LastModified = fileInfo.LastWriteTime
+                    };
+                    
+                    files[relativePath] = vaultFileInfo;
+                    
+                    // Show progress for large files
+                    if (fileInfo.Length > 1024)
+                    {
+                        Console.WriteLine($"   📄 {relativePath} ({fileInfo.Length} bytes) - MD5: {md5Hash}");
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"   ❌ Error processing {filePath}: {ex.Message}");
+                }
+            }
+            
+            Console.WriteLine($"✅ {vaultName}: {files.Count} files processed");
+            return files;
+        }
+        
+        private static void CompareVaultFiles(Dictionary<string, VaultFileInfo> realFiles, Dictionary<string, VaultFileInfo> ourFiles)
+        {
+            Console.WriteLine($"\n📊 COMPARISON RESULTS:");
+            Console.WriteLine($"   Real vault: {realFiles.Count} files");
+            Console.WriteLine($"   Our vault:  {ourFiles.Count} files");
+            
+            // Files that exist in both vaults
+            var matchingFiles = new List<string>();
+            var identicalFiles = new List<string>();
+            var differentFiles = new List<string>();
+            
+            // Files only in real vault
+            var onlyInReal = new List<string>();
+            
+            // Files only in our vault  
+            var onlyInOurs = new List<string>();
+            
+            // Check files in real vault
+            foreach (var kvp in realFiles)
+            {
+                string relativePath = kvp.Key;
+                var realFile = kvp.Value;
+                
+                if (ourFiles.ContainsKey(relativePath))
+                {
+                    matchingFiles.Add(relativePath);
+                    var ourFile = ourFiles[relativePath];
+                    
+                    if (realFile.MD5Hash == ourFile.MD5Hash && realFile.Size == ourFile.Size)
+                    {
+                        identicalFiles.Add(relativePath);
+                    }
+                    else
+                    {
+                        differentFiles.Add(relativePath);
+                        Console.WriteLine($"\n❌ DIFFERENT: {relativePath}");
+                        Console.WriteLine($"   Real: {realFile.Size} bytes, MD5: {realFile.MD5Hash}");
+                        Console.WriteLine($"   Ours: {ourFile.Size} bytes, MD5: {ourFile.MD5Hash}");
+                    }
+                }
+                else
+                {
+                    onlyInReal.Add(relativePath);
+                }
+            }
+            
+            // Check files only in our vault
+            foreach (var kvp in ourFiles)
+            {
+                string relativePath = kvp.Key;
+                if (!realFiles.ContainsKey(relativePath))
+                {
+                    onlyInOurs.Add(relativePath);
+                }
+            }
+            
+            // Summary
+            Console.WriteLine($"\n📈 SUMMARY:");
+            Console.WriteLine($"   ✅ Identical files: {identicalFiles.Count}");
+            Console.WriteLine($"   ❌ Different files: {differentFiles.Count}");
+            Console.WriteLine($"   📁 Only in real:    {onlyInReal.Count}");
+            Console.WriteLine($"   📁 Only in ours:    {onlyInOurs.Count}");
+            
+            // Show files only in real vault
+            if (onlyInReal.Count > 0)
+            {
+                Console.WriteLine($"\n📁 FILES ONLY IN REAL VAULT ({onlyInReal.Count}):");
+                foreach (string file in onlyInReal.Take(10))
+                {
+                    var realFile = realFiles[file];
+                    Console.WriteLine($"   - {file} ({realFile.Size} bytes)");
+                }
+                if (onlyInReal.Count > 10)
+                {
+                    Console.WriteLine($"   ... and {onlyInReal.Count - 10} more files");
+                }
+            }
+            
+            // Show files only in our vault
+            if (onlyInOurs.Count > 0)
+            {
+                Console.WriteLine($"\n📁 FILES ONLY IN OUR VAULT ({onlyInOurs.Count}):");
+                foreach (string file in onlyInOurs.Take(10))
+                {
+                    var ourFile = ourFiles[file];
+                    Console.WriteLine($"   - {file} ({ourFile.Size} bytes)");
+                }
+                if (onlyInOurs.Count > 10)
+                {
+                    Console.WriteLine($"   ... and {onlyInOurs.Count - 10} more files");
+                }
+            }
+            
+            // Show structural differences
+            Console.WriteLine($"\n🏗️ STRUCTURAL ANALYSIS:");
+            
+            // Count by file extension
+            var realExtensions = realFiles.Keys.Select(f => Path.GetExtension(f).ToLower()).GroupBy(e => e).ToDictionary(g => g.Key, g => g.Count());
+            var ourExtensions = ourFiles.Keys.Select(f => Path.GetExtension(f).ToLower()).GroupBy(e => e).ToDictionary(g => g.Key, g => g.Count());
+            
+            var allExtensions = realExtensions.Keys.Union(ourExtensions.Keys).OrderBy(e => e);
+            
+            Console.WriteLine($"   File type comparison:");
+            foreach (string ext in allExtensions)
+            {
+                int realCount = realExtensions.GetValueOrDefault(ext, 0);
+                int ourCount = ourExtensions.GetValueOrDefault(ext, 0);
+                string status = realCount == ourCount ? "✅" : "❌";
+                Console.WriteLine($"   {status} {ext}: Real={realCount}, Ours={ourCount}");
+            }
+        }
+        
+        private static string CalculateFileMD5(string filePath)
+        {
+            try
+            {
+                using var md5 = System.Security.Cryptography.MD5.Create();
+                using var stream = File.OpenRead(filePath);
+                byte[] hashBytes = md5.ComputeHash(stream);
+                return Convert.ToHexString(hashBytes);
+            }
+            catch (Exception ex)
+            {
+                return $"ERROR: {ex.Message}";
+            }
+        }
+        
+        private class VaultFileInfo
+        {
+            public string RelativePath { get; set; } = "";
+            public string FullPath { get; set; } = "";
+            public long Size { get; set; }
+            public string MD5Hash { get; set; } = "";
+            public DateTime LastModified { get; set; }
         }
     }
 } 
