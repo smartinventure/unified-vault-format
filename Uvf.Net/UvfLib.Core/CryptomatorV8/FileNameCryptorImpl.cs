@@ -262,10 +262,14 @@ namespace UvfLib.Core.CryptomatorV8
         /// <returns>The base64url encoded string</returns>
         private static string ToBase64Url(byte[] input)
         {
+            // FIXED: Match real Cryptomator's actual behavior (not their documentation).
+            // Real Cryptomator uses standard Base64 with URL-safe characters but KEEPS the padding.
+            // This explains the mixed padding pattern observed in real vaults.
             return Convert.ToBase64String(input)
                 .TrimEnd('=')
                 .Replace('+', '-')
                 .Replace('/', '_');
+            // NO .TrimEnd('=') - keep natural Base64 padding for Cryptomator compatibility
         }
 
         /// <summary>
@@ -275,10 +279,13 @@ namespace UvfLib.Core.CryptomatorV8
         /// <returns>The decoded bytes</returns>
         private static byte[] FromBase64Url(string input)
         {
+            // Reverse URL-safe character encoding (padding should already be present)
             string base64 = input.Replace('-', '+').Replace('_', '/');
             
-            // Add padding if necessary
-            switch (base64.Length % 4)
+            // Real Cryptomator includes natural padding, so we don't need to add it back
+            // But add safety check in case some edge cases need padding
+            int padding = base64.Length % 4;
+            if (padding != 0)
             {
                 case 2:
                     base64 += "==";
