@@ -12,7 +12,7 @@ namespace UvfLib.Core.Common
     /// </summary>
     public class MasterkeyFileAccess
     {
-        private const int SCRYPT_COST_DEFAULT = 17; // 2^17 = 131072 iterations
+        private const int SCRYPT_COST_DEFAULT = 15; // 2^15 = 32768 iterations (Java Cryptomator standard)
         private const int SCRYPT_BLOCK_SIZE_DEFAULT = 8;
         private const int SCRYPT_PARALLELIZATION_DEFAULT = 1;
 

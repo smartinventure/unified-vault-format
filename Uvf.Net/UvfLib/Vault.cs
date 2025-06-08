@@ -648,6 +648,53 @@ namespace UvfLib
             return new VaultHelpers.DecryptingStream(_cryptor, inputStream, leaveOpen);
         }
 
+        /// <summary>
+        /// Opens an encrypted file for reading and returns a stream that decrypts data automatically.
+        /// </summary>
+        /// <param name="encryptedFilePath">Path to the encrypted file in the vault</param>
+        /// <returns>A stream for reading decrypted content</returns>
+        /// <exception cref="ArgumentNullException">If encryptedFilePath is null</exception>
+        /// <exception cref="FileNotFoundException">If the encrypted file doesn't exist</exception>
+        /// <exception cref="ObjectDisposedException">If the vault has been disposed</exception>
+        /// <exception cref="InvalidOperationException">If the vault is not initialized correctly</exception>
+        public Stream GetReadStream(string encryptedFilePath)
+        {
+            if (_disposed) throw new ObjectDisposedException(nameof(Vault));
+            if (string.IsNullOrEmpty(encryptedFilePath)) throw new ArgumentNullException(nameof(encryptedFilePath));
+            
+            if (!File.Exists(encryptedFilePath))
+            {
+                throw new FileNotFoundException($"Encrypted file not found: {encryptedFilePath}");
+            }
+
+            var fileStream = new FileStream(encryptedFilePath, FileMode.Open, FileAccess.Read, FileShare.Read);
+            return VaultHelpers.VaultStreamHelper.GetDecryptingStreamInternal(_cryptor, fileStream, leaveOpen: false);
+        }
+
+        /// <summary>
+        /// Creates or overwrites an encrypted file and returns a stream that encrypts data automatically.
+        /// </summary>
+        /// <param name="encryptedFilePath">Path where the encrypted file will be created/overwritten</param>
+        /// <returns>A stream for writing content that gets encrypted</returns>
+        /// <exception cref="ArgumentNullException">If encryptedFilePath is null</exception>
+        /// <exception cref="ObjectDisposedException">If the vault has been disposed</exception>
+        /// <exception cref="InvalidOperationException">If the vault is not initialized correctly</exception>
+        public Stream GetWriteStream(string encryptedFilePath)
+        {
+            if (_disposed) throw new ObjectDisposedException(nameof(Vault));
+            if (string.IsNullOrEmpty(encryptedFilePath)) throw new ArgumentNullException(nameof(encryptedFilePath));
+            
+            // Ensure the directory exists
+            var directory = Path.GetDirectoryName(encryptedFilePath);
+            if (!string.IsNullOrEmpty(directory))
+            {
+                Directory.CreateDirectory(directory);
+            }
+
+            var fileStream = new FileStream(encryptedFilePath, FileMode.Create, FileAccess.Write, FileShare.None);
+            return VaultHelpers.VaultStreamHelper.GetEncryptingStreamInternal(_cryptor, fileStream, leaveOpen: false);
+        }
+
         // --- Directory Metadata Operations ---
 
         /// <summary>
