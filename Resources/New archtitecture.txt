@@ -1,0 +1,359 @@
+Perfect! Let me tackle this systematically:
+
+## 1. 🐛 **Fix the Simple Bug in Program.cs**
+
+The issue is in `DecryptDirectory` where CryptomatorV8-specific code is being executed for UVF vaults. Let me fix this:
+Search files...
+
+Read file: Uvf.Net/UvfConsole/Program.cs
+
+Now I can see the exact issue! In the `DecryptDirectory` method around lines 956-977, there's CryptomatorV8-specific code running for all vault types without format checking. Let me fix this:
+
+I need to complete the fix and handle the linter errors. Let me continue the edit to add the UVF branch and fix the variable scope issue:
+
+Perfect! The bug is now fixed. UVF vaults will use the proper UVF decryption logic instead of trying to execute CryptomatorV8-specific code.
+
+## 2. 🏗️ **Comprehensive Architectural Plan**
+
+Now let me provide the **complete architectural vision** that integrates all concepts:
+
+### **🎯 Master Architecture: "Uvf.Net Universal Crypto Platform"**
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                           🌐 CROSS-LANGUAGE BINDINGS                         │
+│  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐         │
+│  │   Python    │  │     PHP     │  │   Node.js   │  │     Go      │         │
+│  │   Bindings  │  │   Bindings  │  │   Bindings  │  │   Bindings  │         │
+│  └─────────────┘  └─────────────┘  └─────────────┘  └─────────────┘         │
+│                                    │                                         │
+│                          ┌─────────▼─────────┐                              │
+│                          │  🔒 UvfLib.Native │  ◀── AOT Compiled C API      │
+│                          │   (C Interface)   │                              │
+│                          └─────────┬─────────┘                              │
+└─────────────────────────────────────┼─────────────────────────────────────────┘
+┌─────────────────────────────────────▼─────────────────────────────────────────┐
+│                      🔒 PROPRIETARY HIGH-LEVEL API                            │
+│  ┌─────────────────────────────────────────────────────────────────────────┐  │
+│  │                    UvfLib.Storage (FUSE-like Layer)                     │  │
+│  │  ┌───────────────┐  ┌───────────────┐  ┌─────────────────────────────┐ │  │
+│  │  │ IVaultStorage │  │ UvfStorage    │  │    CryptomatorV8Storage     │ │  │
+│  │  │ (Interface)   │  │ (Decorator)   │  │       (Decorator)           │ │  │
+│  │  └───────────────┘  └───────────────┘  └─────────────────────────────┘ │  │
+│  │                                  │                                      │  │
+│  │                      ┌───────────▼──────────┐                          │  │
+│  │                      │     IStorage         │  ◀─── Your existing       │  │
+│  │                      │  (Storage Backend)   │       abstraction         │  │
+│  │                      └─────────┬────────────┘                          │  │
+│  │  ┌───────────────┐            │            ┌─────────────────┐        │  │
+│  │  │ LocalStorage  │            │            │  AzureStorage   │        │  │
+│  │  └───────────────┘            │            └─────────────────┘        │  │
+│  │                              │                                        │  │
+│  └──────────────────────────────┼────────────────────────────────────────┘  │
+│                                 │                                           │
+│  ┌─────────────────────────────▼─────────────────────────────────────────┐  │
+│  │                    UvfLib.FileSystem                                   │  │
+│  │  ┌──────────────┐  ┌─────────────┐  ┌─────────────────────────────────┐│  │
+│  │  │  IVault      │  │  UvfVault   │  │    CryptomatorV8Vault          ││  │
+│  │  │ (Interface)  │  │ (Concrete)  │  │      (Concrete)                ││  │
+│  │  └──────────────┘  └─────────────┘  └─────────────────────────────────┘│  │
+│  └─────────────────────────────────────────────────────────────────────────┘  │
+└─────────────────────────────────────────┼───────────────────────────────────────┘
+┌─────────────────────────────────────────▼───────────────────────────────────────┐
+│                          🔓 OPEN SOURCE CORE                                    │
+│  ┌─────────────────────────────────────────────────────────────────────────┐    │
+│  │                           UvfLib.Core                                   │    │
+│  │  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐  ┌─────────────────┐ │    │
+│  │  │     Api     │  │   Common    │  │     V3      │  │  CryptomatorV8  │ │    │
+│  │  │(Interfaces) │  │ (Utilities) │  │(UVF Format) │  │    (Legacy)     │ │    │
+│  │  └─────────────┘  └─────────────┘  └─────────────┘  └─────────────────┘ │    │
+│  └─────────────────────────────────────────────────────────────────────────┘    │
+└──────────────────────────────────────────────────────────────────────────────────┘
+```
+
+### **📁 Complete Directory Structure**
+
+```
+Uvf.Net/
+├── 🔓 UvfLib.Core/                     # OPEN SOURCE - Cryptographic Core
+│   ├── Api/                            # Core interfaces & contracts
+│   ├── Common/                         # Shared crypto utilities
+│   ├── V3/                             # UVF format implementation  
+│   ├── CryptomatorV8/                  # Cryptomator V8 implementation
+│   └── UvfLib.Core.csproj             # Standalone open-source package
+│
+├── 🔒 UvfLib.FileSystem/               # PROPRIETARY - High-Level Vault API
+│   ├── Abstractions/                  # Vault abstractions
+│   │   ├── IVault.cs                  # Main vault interface
+│   │   ├── VaultEntry.cs              # File/directory entries
+│   │   ├── VaultConfiguration.cs      # Vault settings
+│   │   └── VaultInfo.cs               # Vault metadata
+│   ├── Implementation/                # Concrete vault implementations
+│   │   ├── VaultBase.cs               # Shared vault functionality
+│   │   ├── UvfVault.cs                # UVF-specific implementation
+│   │   ├── CryptomatorV8Vault.cs      # Cryptomator-specific implementation
+│   │   └── VaultSecurityManager.cs    # Security policies
+│   ├── Builder/                       # Fluent configuration API
+│   │   ├── VaultBuilder.cs            # Main builder
+│   │   ├── UvfVaultBuilder.cs         # UVF-specific builder
+│   │   └── CryptomatorVaultBuilder.cs # Cryptomator-specific builder
+│   ├── Caching/                       # Performance optimizations
+│   │   ├── IVaultCache.cs
+│   │   └── MemoryVaultCache.cs
+│   ├── Legacy/                        # Backward compatibility
+│   │   └── Vault.cs                   # Your existing facade
+│   └── UvfLib.FileSystem.csproj       # References Core
+│
+├── 🔒 UvfLib.Storage/                  # PROPRIETARY - FUSE-like Storage Layer
+│   ├── Abstractions/                  # Storage interfaces (your existing)
+│   │   ├── IStorage.cs                # Your existing interface
+│   │   ├── EnumStorageType.cs         # Your existing enum  
+│   │   └── FileObject.cs              # Your existing class
+│   ├── Connectors/                    # Storage implementations
+│   │   ├── LocalStorage.cs            # Your existing local storage
+│   │   ├── AzureStorage.cs            # Future: Azure blob storage
+│   │   └── S3Storage.cs               # Future: Amazon S3 storage
+│   ├── Decorators/                    # Vault storage decorators
+│   │   ├── IVaultStorage.cs           # Vault-aware storage interface
+│   │   ├── VaultStorageBase.cs        # Base decorator
+│   │   ├── UvfStorage.cs              # UVF format decorator
+│   │   └── CryptomatorV8Storage.cs    # Cryptomator format decorator
+│   ├── Throttling/                    # Your existing throttling
+│   │   └── ThrottledStreamStopWatch.cs
+│   └── UvfLib.Storage.csproj          # References FileSystem
+│
+├── 🔒 UvfLib.Native/                   # PROPRIETARY - Cross-Language Bindings
+│   ├── Interop/                       # C interface for AOT
+│   │   ├── VaultNativeInterface.cs    # Main C API
+│   │   ├── ErrorCodes.cs              # Error handling
+│   │   └── MarshalHelper.cs           # Memory management
+│   ├── Bindings/                      # Language-specific bindings
+│   │   ├── Python/
+│   │   │   ├── uvf_vault.py           # Python wrapper
+│   │   │   └── setup.py               # Python package
+│   │   ├── Php/
+│   │   │   └── UvfVault.php           # PHP wrapper  
+│   │   ├── NodeJs/
+│   │   │   ├── uvf-vault.js           # Node.js wrapper
+│   │   │   └── package.json           # NPM package
+│   │   └── Go/
+│   │       └── uvf_vault.go           # Go wrapper
+│   └── UvfLib.Native.csproj           # AOT compilation
+│
+├── Examples/                          # 🔓 OPEN SOURCE (Basic examples)
+│   ├── BasicEncryption/
+│   ├── VaultCreation/
+│   └── CrossPlatform/
+│
+├── Tests/
+│   ├── UvfLib.Core.Tests/             # 🔓 OPEN SOURCE
+│   ├── UvfLib.FileSystem.Tests/       # 🔒 PROPRIETARY
+│   └── UvfLib.Integration.Tests/      # 🔒 PROPRIETARY
+│
+└── Tools/
+    ├── UvfConsole/                    # 🔒 PROPRIETARY (Enhanced)
+    └── VaultMigrator/                 # 🔒 PROPRIETARY
+```
+
+### **🔧 Implementation Strategy**
+
+#### **Phase 1: Fix & Stabilize (1 week)**
+1. ✅ **Fix UVF bug** (DONE!)
+2. **Migrate IStorage classes**:
+   ```csharp
+   // Update namespaces
+   namespace UvfLib.Storage.Abstractions { } // Was FolderMagicLib.StorageConnectors
+   namespace UvfLib.Storage.Connectors { }   // New location
+   namespace UvfLib.Storage.Throttling { }   // Your existing throttling
+   ```
+
+#### **Phase 2: Core Separation (2 weeks)**
+1. **Extract UvfLib.Core**:
+   ```csharp
+   // UvfLib.Core/UvfLib.Core.csproj
+   <Project Sdk="Microsoft.NET.Sdk">
+     <PropertyGroup>
+       <TargetFramework>netstandard2.0</TargetFramework>
+       <PackageId>UvfLib.Core</PackageId>
+       <PackageLicenseExpression>MIT</PackageLicenseExpression>
+       <Description>Open-source cryptographic core for UVF and Cryptomator</Description>
+     </PropertyGroup>
+   </Project>
+   ```
+
+2. **Create format-specific vault classes**:
+   ```csharp
+   // UvfLib.FileSystem/Abstractions/IVault.cs
+   public interface IVault : IDisposable
+   {
+       VaultInfo GetInfo();
+       Task<Stream> OpenReadAsync(string path);
+       Task<Stream> OpenWriteAsync(string path);
+       Task<VaultEntry[]> ListDirectoryAsync(string path);
+       Task CreateDirectoryAsync(string path);
+       Task DeleteAsync(string path);
+   }
+
+   // UvfLib.FileSystem/Implementation/UvfVault.cs
+   public sealed class UvfVault : VaultBase, IVault
+   {
+       private readonly UvfLib.Core.Vault _coreVault;
+       
+       public UvfVault(UvfLib.Core.Vault coreVault, VaultConfiguration config) 
+           : base(config)
+       {
+           _coreVault = coreVault;
+       }
+
+       // UVF-specific optimizations
+       public void RotateKeys() { /* UVF-only method */ }
+       public int GetCurrentSeedId() { /* UVF-only method */ }
+   }
+
+   // UvfLib.FileSystem/Implementation/CryptomatorV8Vault.cs  
+   public sealed class CryptomatorV8Vault : VaultBase, IVault
+   {
+       private readonly UvfLib.Core.Vault _coreVault;
+       
+       // Cryptomator-specific methods
+       public string GetDirectoryPathByUuid(string uuid) { /* C8-only method */ }
+   }
+   ```
+
+#### **Phase 3: Storage Decorators (2 weeks)**
+```csharp
+// UvfLib.Storage/Decorators/IVaultStorage.cs
+public interface IVaultStorage : IDisposable
+{
+    IStorage UnderlyingStorage { get; }
+    VaultFormat Format { get; }
+    
+    // Vault-aware operations
+    Task<Stream> OpenVaultFileAsync(string virtualPath);
+    Task<VaultEntry[]> ListVaultDirectoryAsync(string virtualPath);
+    Task CreateVaultDirectoryAsync(string virtualPath);
+}
+
+// UvfLib.Storage/Decorators/UvfStorage.cs
+public class UvfStorage : VaultStorageBase, IVaultStorage
+{
+    private readonly UvfVault _vault;
+    private readonly IStorage _underlyingStorage;
+    
+    public UvfStorage(IStorage storage, UvfVault vault) 
+    {
+        _underlyingStorage = storage;
+        _vault = vault;
+    }
+    
+    public override async Task<Stream> OpenVaultFileAsync(string virtualPath)
+    {
+        // 1. Map virtual path to encrypted path
+        string encryptedPath = _vault.MapToPhysicalPath(virtualPath);
+        
+        // 2. Open via underlying storage
+        IntPtr handle = await _underlyingStorage.OpenAsync(encryptedPath, FuseFlags.O_RDONLY);
+        
+        // 3. Wrap in decrypting stream
+        var rawStream = new StorageStream(handle, _underlyingStorage);
+        return _vault.GetDecryptingStream(rawStream);
+    }
+}
+```
+
+#### **Phase 4: Builder Pattern (1 week)**
+```csharp
+// UvfLib.FileSystem/Builder/VaultBuilder.cs
+public static class VaultBuilder
+{
+    public static UvfVaultBuilder Uvf() => new UvfVaultBuilder();
+    public static CryptomatorVaultBuilder Cryptomator() => new CryptomatorVaultBuilder();
+}
+
+// Usage examples:
+var uvfVault = await VaultBuilder.Uvf()
+    .WithPassword("secret")
+    .WithStorage(localStorage)
+    .WithCaching(CachePolicy.Aggressive)
+    .FromFileAsync("vault.uvf");
+
+var cryptomatorVault = await VaultBuilder.Cryptomator()
+    .WithPassword("secret") 
+    .WithStorage(azureStorage)
+    .FromDirectoryAsync("vault-folder");
+
+// FUSE-like decorator usage:
+using var vaultStorage = new UvfStorage(localStorage, uvfVault);
+var files = await vaultStorage.ListVaultDirectoryAsync("/Documents");
+using var stream = await vaultStorage.OpenVaultFileAsync("/Documents/secret.txt");
+```
+
+#### **Phase 5: Native Interface (3 weeks)**
+```csharp
+// UvfLib.Native/Interop/VaultNativeInterface.cs
+[UnmanagedCallersOnly(EntryPoint = "uvf_vault_create")]
+public static unsafe int CreateVault(byte* path, byte* password, int format)
+{
+    try
+    {
+        string pathStr = Marshal.PtrToStringUTF8((IntPtr)path);
+        string passwordStr = Marshal.PtrToStringUTF8((IntPtr)password);
+        
+        var vault = format switch
+        {
+            0 => VaultBuilder.Uvf().WithPassword(passwordStr).CreateAsync(pathStr),
+            1 => VaultBuilder.Cryptomator().WithPassword(passwordStr).CreateAsync(pathStr),
+            _ => throw new ArgumentException("Invalid format")
+        };
+        
+        return RegisterVaultHandle(vault.Result);
+    }
+    catch
+    {
+        return -1; // Error code
+    }
+}
+
+[UnmanagedCallersOnly(EntryPoint = "uvf_file_read")]
+public static unsafe int ReadFile(int vaultHandle, byte* path, byte* buffer, int size)
+{
+    // Implementation using registered vault handles
+}
+```
+
+### **🎯 Key Benefits of This Architecture**
+
+1. **🔓 Open Source Trust**: Core crypto is fully transparent
+2. **🔒 Commercial Value**: High-level APIs remain proprietary
+3. **🧱 Format Separation**: Clean UVF vs CryptomatorV8 separation  
+4. **🔌 Storage Abstraction**: Works with any storage backend
+5. **🌐 Cross-Language**: AOT enables Python, PHP, Node.js, Go
+6. **⚡ Performance**: FUSE-like direct storage access
+7. **🔄 Backward Compatible**: Existing `Vault.cs` still works
+8. **🏗️ Future-Proof**: Easy to add new formats/features
+
+### **📦 Licensing & Distribution**
+
+```yaml
+UvfLib.Core:
+  license: MIT
+  repository: github.com/company/uvf-core (public)
+  nuget: UvfLib.Core (free)
+
+UvfLib.FileSystem:
+  license: Commercial
+  repository: private
+  nuget: UvfLib.FileSystem (paid)
+
+UvfLib.Storage: 
+  license: Commercial
+  repository: private
+  nuget: UvfLib.Storage (paid)
+
+UvfLib.Native:
+  license: Commercial  
+  distribution: Direct download (paid)
+  languages: Python, PHP, Node.js, Go
+```
+
+This architecture gives you the **best of all worlds**: open-source credibility, commercial value, technical excellence, and cross-platform reach. Ready to implement this step by step?
