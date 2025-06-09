@@ -1,6 +1,5 @@
-﻿using FolderMagicLib.Application;
-
-namespace FolderMagicLib.StorageConnectors
+﻿
+namespace UvfLib.Storage.Abstractions
 {
     public interface IStorage : IDisposable
     {

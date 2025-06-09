@@ -1,7 +1,7 @@
 using System.Diagnostics;
 using FolderMagicLib.Logging;
 
-namespace FolderMagicLib.StorageConnectors.Throttling
+namespace UvfLib.Storage.Abstractions.Throttling
 {
     public class ThrottledStreamStopWatch : Stream
     {

@@ -18,7 +18,7 @@ namespace UvfLib.Core.Jwe
         private const JweEncryption ContentEncryptionAlgorithm = JweEncryption.A256GCM;
         // private const JweEncryption ContentEncryptionAlgorithm = JweEncryption.A128GCM; // Diagnostic change
         private const int DefaultPbkdf2Iterations = 64000; // Default iteration count
-        // private const int Pbkdf2SaltSizeBytes = 16; // Salt size will be handled by JwtSettings or jose-jwt default
+        // Note: Salt (p2s) is automatically generated as random 96-bit value by jose-jwt per RFC 7518
 
         /// <summary>
         /// Creates a JWE-formatted string representing an encrypted vault.uvf file.
@@ -27,6 +27,10 @@ namespace UvfLib.Core.Jwe
         /// <param name="password">The password to protect the vault.</param>
         /// <param name="pbkdf2Iterations">Configurable PBKDF2 iteration count. If null, DefaultPbkdf2Iterations is used.</param>
         /// <returns>A JWE compact serialization string.</returns>
+        /// <remarks>
+        /// The PBES2 salt (p2s) is automatically generated as a random 96-bit value by jose-jwt library
+        /// per RFC 7518 Section 4.8.1.1. Only the iteration count (p2c) can be explicitly controlled.
+        /// </remarks>
         public static string CreateVault(UvfMasterkeyPayload payload, string password, int? pbkdf2Iterations = null)
         {
             if (payload == null) throw new ArgumentNullException(nameof(payload));
@@ -59,7 +63,7 @@ namespace UvfLib.Core.Jwe
             var extraHeaders = new Dictionary<string, object>
             {
                 { "uvf.spec.version", payload.UvfSpecVersion },
-                { "p2c", iterationsToUse } // Explicitly set p2c in the header
+                { "p2c", iterationsToUse } // Only set p2c - p2s will be random per RFC 7518
             };
             
             var settings = new JwtSettings();

@@ -1,12 +1,10 @@
 ﻿using System.Runtime.InteropServices;
-using FolderMagicLib.VirtualFolderEmulators.Cbfs;
-using FolderMagicLib.Layers;
 using System.Collections.Concurrent;
 using FolderMagicLib.Application;
 using FolderMagicLib.StorageConnectors.Throttling;
 using ThrottledStreamStopWatch = FolderMagicLib.StorageConnectors.Throttling.ThrottledStreamStopWatch;
 
-namespace FolderMagicLib.StorageConnectors
+namespace UvfLib.Storage.Abstractions
 {
     public class LocalStorage : IStorage, IDisposable
     {

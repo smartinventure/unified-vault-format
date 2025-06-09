@@ -2,7 +2,7 @@ using System;
 using System.IO;
 using FolderMagicLib.Logging;
 
-namespace FolderMagicLib.StorageConnectors.Throttling
+namespace UvfLib.Storage.Abstractions.Throttling
 {
     /// <summary>
     /// Implementation of the throttling service that applies read/write speed limits to streams.

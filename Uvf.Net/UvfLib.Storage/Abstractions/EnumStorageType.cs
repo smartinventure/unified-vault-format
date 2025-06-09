@@ -1,4 +1,4 @@
-﻿namespace FolderMagicLib.StorageConnectors
+﻿namespace UvfLib.Storage.Abstractions
 {
     /// <summary>
     /// Defines the type of storage backend to use.
