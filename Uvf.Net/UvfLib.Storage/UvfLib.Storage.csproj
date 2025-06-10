@@ -4,7 +4,12 @@
     <TargetFramework>net8.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
+    <Description>Vault-specific storage decorators for UVF and Cryptomator formats</Description>
   </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="FolderMagic.StorageLib" Version="1.0.250610.1735-dev" />
+  </ItemGroup>
 
   <ItemGroup>
     <ProjectReference Include="..\UvfLib.Core\UvfLib.Core.csproj" />

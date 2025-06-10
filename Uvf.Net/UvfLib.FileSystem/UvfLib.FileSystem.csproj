@@ -7,8 +7,11 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <PackageReference Include="StorageLib" Version="1.0.0" />
+  </ItemGroup>
+
+  <ItemGroup>
     <ProjectReference Include="..\UvfLib.Core\UvfLib.Core.csproj" />
-    <ProjectReference Include="..\UvfLib.Storage\UvfLib.Storage.csproj" />
   </ItemGroup>
 
 </Project>
