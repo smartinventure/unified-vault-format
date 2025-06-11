@@ -8,7 +8,7 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\UvfLib\UvfLib.csproj" />
+    <ProjectReference Include="..\UvfLib.Storage\UvfLib.Storage.csproj" />
   </ItemGroup>
 
 </Project>

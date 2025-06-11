@@ -13,6 +13,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\UvfLib.Core\UvfLib.Core.csproj" />
+    <ProjectReference Include="..\UvfLib.Vault\UvfLib.Vault.csproj" />
   </ItemGroup>
 
 </Project>

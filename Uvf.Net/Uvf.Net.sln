@@ -3,7 +3,7 @@ Microsoft Visual Studio Solution File, Format Version 12.00
 # Visual Studio Version 17
 VisualStudioVersion = 17.12.35707.178
 MinimumVisualStudioVersion = 10.0.40219.1
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "UvfLib", "UvfLib\UvfLib.csproj", "{3E457A03-7DDB-4147-9AD0-EF4F82ED827D}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "UvfLib.Vault", "UvfLib.Vault\UvfLib.Vault.csproj", "{3E457A03-7DDB-4147-9AD0-EF4F82ED827D}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "UvfConsole", "UvfConsole\UvfConsole.csproj", "{A54BE64A-0358-4F66-A83F-E610C842F922}"
 EndProject
@@ -14,8 +14,6 @@ EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "UvfLib.Core", "UvfLib.Core\UvfLib.Core.csproj", "{0C07CF89-D981-47D9-AA73-3F9E673A6E68}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "UvfLib.Storage", "UvfLib.Storage\UvfLib.Storage.csproj", "{02808B11-6792-4B5C-BD7F-CD6E304DF3D1}"
-EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "UvfLib.FileSystem", "UvfLib.FileSystem\UvfLib.FileSystem.csproj", "{899378E7-FE11-4257-9F53-737115532000}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "UvfLib.Native", "UvfLib.Native\UvfLib.Native.csproj", "{CDAF5B78-5D5D-4144-B982-2FAE75672367}"
 EndProject
@@ -140,24 +138,6 @@ Global
 		{02808B11-6792-4B5C-BD7F-CD6E304DF3D1}.Release|x64.Build.0 = Release|Any CPU
 		{02808B11-6792-4B5C-BD7F-CD6E304DF3D1}.Release|x86.ActiveCfg = Release|Any CPU
 		{02808B11-6792-4B5C-BD7F-CD6E304DF3D1}.Release|x86.Build.0 = Release|Any CPU
-		{899378E7-FE11-4257-9F53-737115532000}.Benchmark|Any CPU.ActiveCfg = Debug|Any CPU
-		{899378E7-FE11-4257-9F53-737115532000}.Benchmark|Any CPU.Build.0 = Debug|Any CPU
-		{899378E7-FE11-4257-9F53-737115532000}.Benchmark|x64.ActiveCfg = Debug|Any CPU
-		{899378E7-FE11-4257-9F53-737115532000}.Benchmark|x64.Build.0 = Debug|Any CPU
-		{899378E7-FE11-4257-9F53-737115532000}.Benchmark|x86.ActiveCfg = Debug|Any CPU
-		{899378E7-FE11-4257-9F53-737115532000}.Benchmark|x86.Build.0 = Debug|Any CPU
-		{899378E7-FE11-4257-9F53-737115532000}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
-		{899378E7-FE11-4257-9F53-737115532000}.Debug|Any CPU.Build.0 = Debug|Any CPU
-		{899378E7-FE11-4257-9F53-737115532000}.Debug|x64.ActiveCfg = Debug|Any CPU
-		{899378E7-FE11-4257-9F53-737115532000}.Debug|x64.Build.0 = Debug|Any CPU
-		{899378E7-FE11-4257-9F53-737115532000}.Debug|x86.ActiveCfg = Debug|Any CPU
-		{899378E7-FE11-4257-9F53-737115532000}.Debug|x86.Build.0 = Debug|Any CPU
-		{899378E7-FE11-4257-9F53-737115532000}.Release|Any CPU.ActiveCfg = Release|Any CPU
-		{899378E7-FE11-4257-9F53-737115532000}.Release|Any CPU.Build.0 = Release|Any CPU
-		{899378E7-FE11-4257-9F53-737115532000}.Release|x64.ActiveCfg = Release|Any CPU
-		{899378E7-FE11-4257-9F53-737115532000}.Release|x64.Build.0 = Release|Any CPU
-		{899378E7-FE11-4257-9F53-737115532000}.Release|x86.ActiveCfg = Release|Any CPU
-		{899378E7-FE11-4257-9F53-737115532000}.Release|x86.Build.0 = Release|Any CPU
 		{CDAF5B78-5D5D-4144-B982-2FAE75672367}.Benchmark|Any CPU.ActiveCfg = Debug|Any CPU
 		{CDAF5B78-5D5D-4144-B982-2FAE75672367}.Benchmark|Any CPU.Build.0 = Debug|Any CPU
 		{CDAF5B78-5D5D-4144-B982-2FAE75672367}.Benchmark|x64.ActiveCfg = Debug|Any CPU
