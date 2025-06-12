@@ -149,7 +149,7 @@ namespace UvfLib.Storage.PathTranslators
         /// Loads directory metadata from a dir.c9r file in a reference directory.
         /// Follows the exact pattern from Program.cs ProcessDirectory.
         /// </summary>
-        private async Task<DirectoryMetadata> LoadDirectoryMetadataFromDirC9rAsync(string referenceDir, CancellationToken cancellationToken)
+        public async Task<DirectoryMetadata> LoadDirectoryMetadataFromDirC9rAsync(string referenceDir, CancellationToken cancellationToken)
         {
             string dirC9rPath = Path.Combine(referenceDir, "dir.c9r");
             
@@ -207,17 +207,98 @@ namespace UvfLib.Storage.PathTranslators
                 await _underlyingStorage.CreateDirectoryAsync(actualContentPath, cancellationToken);
                 
                 // 6. Create dirid.c9r in content directory (encrypted own UUID)
+                // CRITICAL: Root directory has empty dirid.c9r, subdirectories have their own UUID
                 string diridFilePath = Path.Combine(actualContentPath, "dirid.c9r");
                 using (FileStream diridStream = File.Create(diridFilePath))
                 using (Stream encryptingStream = _vault.GetEncryptingStream(diridStream))
                 {
-                    byte[] dirIdBytes = System.Text.Encoding.ASCII.GetBytes(rawUuidString);
+                    // Check if this is effectively a root directory
+                    // Note: In our case, we're creating subdirectories under root, so they're never root
+                    bool isRootDirectory = false; // This method only creates subdirectories
+                    
+                    string actualDirIdToEncrypt;
+                    if (isRootDirectory)
+                    {
+                        actualDirIdToEncrypt = ""; // Root directory ID is empty string for Cryptomator
+                    }
+                    else
+                    {
+                        // For subdirectories: dirid.c9r contains raw UUID string (36 bytes)
+                        actualDirIdToEncrypt = rawUuidString;
+                    }
+                    
+                    byte[] dirIdBytes = System.Text.Encoding.ASCII.GetBytes(actualDirIdToEncrypt);
                     await encryptingStream.WriteAsync(dirIdBytes, 0, dirIdBytes.Length, cancellationToken);
                 }
                 
                 // Move to the next level
                 currentDirMetadata = subDirMetadata;
                 currentReferenceDir = subDirReferenceDir;
+            }
+        }
+
+        /// <summary>
+        /// Deletes a directory in the Cryptomator V8 structure.
+        /// This deletes both the content directory (recursively) and the reference directory.
+        /// </summary>
+        public async Task DeleteDirectoryAsync(string virtualDirPath, CancellationToken cancellationToken = default)
+        {
+            if (string.IsNullOrEmpty(virtualDirPath) || virtualDirPath == "/")
+            {
+                throw new ArgumentException("Cannot delete root directory", nameof(virtualDirPath));
+            }
+
+            // Navigate to the directory and get its paths
+            string[] pathParts = virtualDirPath.Trim('/').Split('/', StringSplitOptions.RemoveEmptyEntries);
+            
+            DirectoryMetadata currentDirMetadata = _vault.GetRootDirectoryMetadata();
+            string currentReferenceDir = Path.Combine(_vaultBasePath, _vault.GetRootDirectoryPath());
+
+            // Navigate through the path, but stop before the last part (the directory to delete)
+            for (int i = 0; i < pathParts.Length - 1; i++)
+            {
+                string dirName = pathParts[i];
+                
+                // Encrypt directory name using current directory's metadata
+                string encryptedDirName = _vault.EncryptFilename(dirName, currentDirMetadata);
+                
+                // Move to the reference directory
+                currentReferenceDir = Path.Combine(currentReferenceDir, encryptedDirName);
+                
+                // Load the subdirectory metadata from dir.c9r
+                currentDirMetadata = await LoadDirectoryMetadataFromDirC9rAsync(currentReferenceDir, cancellationToken);
+            }
+
+            // Get the directory to delete
+            string targetDirName = pathParts[pathParts.Length - 1];
+            string encryptedTargetDirName = _vault.EncryptFilename(targetDirName, currentDirMetadata);
+            
+            // Reference directory path
+            string targetReferenceDir = Path.Combine(currentReferenceDir, encryptedTargetDirName);
+            
+            // Get the target directory's metadata to find its content directory
+            DirectoryMetadata targetDirMetadata = await LoadDirectoryMetadataFromDirC9rAsync(targetReferenceDir, cancellationToken);
+            
+            // Content directory path
+            string targetContentDir = Path.Combine(_vaultBasePath, _vault.GetDirectoryPath(targetDirMetadata));
+
+            try
+            {
+                // Step 1: Delete content directory recursively (this contains all files and subdirectories)
+                if (await _underlyingStorage.DirectoryExistsAsync(targetContentDir, cancellationToken))
+                {
+                    await _underlyingStorage.DeleteDirectoryAsync(targetContentDir, cancellationToken);
+                }
+
+                // Step 2: Delete reference directory (this contains dir.c9r file)
+                if (await _underlyingStorage.DirectoryExistsAsync(targetReferenceDir, cancellationToken))
+                {
+                    await _underlyingStorage.DeleteDirectoryAsync(targetReferenceDir, cancellationToken);
+                }
+            }
+            catch (Exception ex)
+            {
+                throw new IOException($"Failed to delete directory {virtualDirPath}: {ex.Message}", ex);
             }
         }
 

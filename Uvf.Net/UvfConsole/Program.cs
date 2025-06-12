@@ -1,5 +1,6 @@
 ﻿using UvfLib.Vault;
 using UvfLib.Vault.VaultHelpers;
+using UvfLib.Core.Api;
 using System.Diagnostics;
 using System.Linq;
 using System.Collections.Generic;

@@ -284,7 +284,7 @@ namespace UvfLib.Storage.Decorators
         public abstract Task MoveAsync(string sourceFilePath, string destinationFilePath, bool overwrite, CancellationToken cancellationToken = default);
 
         // Enumeration operations - format specific
-        public abstract Task<IEnumerable<FileObject>> EnumerateFilesAndDirectoriesAsync(string realPath, bool readOnly = true, CancellationToken cancellationToken = default);
+        public abstract Task<IEnumerable<FileObject>> ReadDirAsync(string directoryPath, bool readOnly = true, CancellationToken cancellationToken = default);
         public abstract Task<IEnumerable<string>> EnumerateFileSystemEntriesAsync(string path, CancellationToken cancellationToken = default);
 
         #endregion

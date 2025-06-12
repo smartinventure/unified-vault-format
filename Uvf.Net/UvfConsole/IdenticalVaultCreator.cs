@@ -1,5 +1,5 @@
 using UvfLib;
-using UvfLib.VaultHelpers;
+using UvfLib.Vault.VaultHelpers;
 using System;
 using System.Collections.Generic;
 using System.IO;

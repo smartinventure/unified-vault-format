@@ -102,9 +102,9 @@ namespace UvfLib.Storage.Decorators
 
         #region Directory Enumeration - UVF Specific
 
-        public override Task<IEnumerable<FileObject>> EnumerateFilesAndDirectoriesAsync(string realPath, bool readOnly = true, CancellationToken cancellationToken = default)
+        public override Task<IEnumerable<FileObject>> ReadDirAsync(string realPath, bool readOnly = true, CancellationToken cancellationToken = default)
         {
-            throw new NotImplementedException("EnumerateFilesAndDirectoriesAsync - will enumerate and decrypt both files and directories");
+            throw new NotImplementedException("ReadDirAsync - will enumerate and decrypt both files and directories");
         }
 
         public override Task<IEnumerable<string>> EnumerateFileSystemEntriesAsync(string path, CancellationToken cancellationToken = default)

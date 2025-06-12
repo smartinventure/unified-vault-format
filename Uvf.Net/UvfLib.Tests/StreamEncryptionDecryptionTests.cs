@@ -1,6 +1,6 @@
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 using System.Security.Cryptography;
-using UvfLib.VaultHelpers;
+using UvfLib.Vault.VaultHelpers;
 using UvfLib.Core.V3;
 using System.IO;
 using System.Collections.Generic;
