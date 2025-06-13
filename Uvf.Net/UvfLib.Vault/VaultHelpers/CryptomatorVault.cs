@@ -132,9 +132,7 @@ namespace UvfLib.Vault.VaultHelpers
                 // For Cryptomator v8, only process .c9r files
                 if (_vault!.IsCryptomatorV8() && !fileName.EndsWith(".c9r"))
                     continue;
-                
-                try
-                {
+
                     // Decrypt the filename to get the original name
                     string decryptedName = _vault.DecryptFilename(fileName, directoryMetadata);
                     var fileInfo = new FileInfo(filePath);
@@ -147,12 +145,8 @@ namespace UvfLib.Vault.VaultHelpers
                         Size = CalculateDecryptedFileSize(fileInfo.Length),
                         LastModified = fileInfo.LastWriteTime
                     });
-                }
-                catch (Exception ex)
-                {
-                    // Skip files that can't be decrypted (might be corrupted or not belonging to this directory)
-                    Console.WriteLine($"Warning: Could not decrypt filename '{fileName}': {ex.Message}");
-                }
+                
+
             }
             
             // 4. Process all subdirectories
@@ -163,9 +157,7 @@ namespace UvfLib.Vault.VaultHelpers
                 // For Cryptomator v8, only process .c9r directories
                 if (_vault!.IsCryptomatorV8() && !dirName.EndsWith(".c9r"))
                     continue;
-                
-                try
-                {
+
                     // Decrypt the directory name to get the original name
                     string decryptedName = _vault.DecryptFilename(dirName, directoryMetadata);
                     var dirInfo = new DirectoryInfo(dirPath);
@@ -178,12 +170,7 @@ namespace UvfLib.Vault.VaultHelpers
                         Size = 0, // Directories don't have a meaningful size
                         LastModified = dirInfo.LastWriteTime
                     });
-                }
-                catch (Exception ex)
-                {
-                    // Skip directories that can't be decrypted
-                    Console.WriteLine($"Warning: Could not decrypt directory name '{dirName}': {ex.Message}");
-                }
+
             }
             
             return entries.OrderBy(e => e.IsDirectory ? 0 : 1).ThenBy(e => e.Name);

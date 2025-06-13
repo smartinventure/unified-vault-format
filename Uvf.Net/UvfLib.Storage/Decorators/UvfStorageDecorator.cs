@@ -107,9 +107,6 @@ namespace UvfLib.Storage.Decorators
                 // Create content directory where files will be stored
                 string contentDirectory = Path.Combine(_vaultBasePath, _vault.GetDirectoryPath(newDirMetadata));
                 await _underlyingStorage.CreateDirectoryAsync(contentDirectory, cancellationToken);
-                
-                _logger?.LogDebug("Created UVF directory: {VirtualPath} -> Reference: {ReferenceDir}, Content: {ContentDir}", 
-                    directoryPath, referenceDirectory, contentDirectory);
             }
             catch (Exception ex)
             {
@@ -156,9 +153,7 @@ namespace UvfLib.Storage.Decorators
                 {
                     await _underlyingStorage.DeleteDirectoryAsync(referenceDirectory, cancellationToken);
                 }
-                
-                _logger?.LogDebug("Deleted UVF directory: {VirtualPath} -> Reference: {ReferenceDir}, Content: {ContentDir}", 
-                    path, referenceDirectory, contentDirectory);
+
             }
             catch (Exception ex)
             {
@@ -271,7 +266,6 @@ namespace UvfLib.Storage.Decorators
                 // Delete the encrypted file
                 await _underlyingStorage.DeleteAsync(encryptedFilePath, cancellationToken);
                 
-                _logger?.LogDebug("Deleted UVF file: {VirtualPath} -> {EncryptedPath}", filePath, encryptedFilePath);
             }
             catch (Exception ex) when (!(ex is FileNotFoundException || ex is ArgumentException))
             {
@@ -313,9 +307,7 @@ namespace UvfLib.Storage.Decorators
                     LastAccessTime = encryptedFileInfo.LastAccessTime,
                     SC = this
                 };
-                
-                _logger?.LogDebug("Retrieved UVF file info: {VirtualPath} -> Size: {DecryptedSize} (encrypted: {EncryptedSize})", 
-                    filePath, decryptedSize, encryptedFileInfo.Size);
+
                 
                 return virtualFileInfo;
             }
@@ -370,7 +362,6 @@ namespace UvfLib.Storage.Decorators
                     await MoveDirectoryAsync(sourceFilePath, destinationFilePath, overwrite, cancellationToken);
                 }
                 
-                _logger?.LogDebug("Moved UVF item: {SourcePath} -> {DestinationPath}", sourceFilePath, destinationFilePath);
             }
             catch (Exception ex) when (!(ex is ArgumentException || ex is FileNotFoundException || ex is IOException))
             {
@@ -507,7 +498,6 @@ namespace UvfLib.Storage.Decorators
                     }
                 }
                 
-                _logger?.LogDebug("Enumerated {Count} entries in UVF directory: {Path}", fileObjects.Count, realPath);
                 return fileObjects.AsEnumerable();
             }
             catch (Exception ex)

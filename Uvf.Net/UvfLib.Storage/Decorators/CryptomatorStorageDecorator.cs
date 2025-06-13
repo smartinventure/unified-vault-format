@@ -61,11 +61,9 @@ namespace UvfLib.Storage.Decorators
             try
             {
                 await _cryptomatorTranslator.CreateDirectoryAsync(directoryPath, cancellationToken);
-                _logger?.LogDebug("Created Cryptomator directory: {DirectoryPath}", directoryPath);
             }
             catch (Exception ex)
             {
-                _logger?.LogError(ex, "Error creating Cryptomator directory: {DirectoryPath}", directoryPath);
                 throw new IOException($"Failed to create directory '{directoryPath}': {ex.Message}", ex);
             }
         }
@@ -85,7 +83,6 @@ namespace UvfLib.Storage.Decorators
             try
             {
                 await _cryptomatorTranslator.DeleteDirectoryAsync(directoryPath, cancellationToken);
-                _logger?.LogDebug("Deleted Cryptomator directory: {DirectoryPath}", directoryPath);
             }
             catch (Exception ex)
             {
@@ -188,44 +185,30 @@ namespace UvfLib.Storage.Decorators
                     contentDirectoryPath = PathNormalizer.CombineWithMountPoint(_vaultBasePath, normalizedVaultDirPath);
                 }
 
-                _logger?.LogDebug("Reading directory: Virtual='{VirtualPath}' -> Content='{ContentPath}'", virtualPath, contentDirectoryPath);
-
                 // Check if the content directory exists
                 if (!await _underlyingStorage.DirectoryExistsAsync(contentDirectoryPath, cancellationToken))
                 {
-                    Console.WriteLine($"DEBUG: Content directory does not exist: {contentDirectoryPath}");
                     throw new DirectoryNotFoundException($"Content directory not found: {contentDirectoryPath}");
                 }
 
-                Console.WriteLine($"DEBUG: Reading directory contents from: {contentDirectoryPath}");
-                
                 // Read the encrypted directory contents using IStorage
                 var encryptedItems = await _underlyingStorage.ReadDirAsync(contentDirectoryPath, readOnly, cancellationToken);
-                
-                Console.WriteLine($"DEBUG: Found {encryptedItems.Count()} items in directory");
-                foreach (var item in encryptedItems)
-                {
-                    Console.WriteLine($"DEBUG: Item: {item.Filename} (IsDirectory: {item.IsDirectory})");
-                }
                 
                 var fileObjects = new List<FileObject>();
 
                 // Process each encrypted item
                 foreach (var encryptedItem in encryptedItems)
                 {
-                    try
-                    {
+
                         // Skip metadata files
                         if (IsMetadataFile(encryptedItem.Filename))
                         {
-                            _logger?.LogTrace("Skipping metadata file: {Filename}", encryptedItem.Filename);
                             continue;
                         }
 
                         // For Cryptomator V8, process .c9r files/directories and .c9r.c9r encrypted files
                         if (!encryptedItem.Filename.EndsWith(".c9r") && !encryptedItem.Filename.EndsWith(".c9r.c9r"))
                         {
-                            _logger?.LogTrace("Skipping non-encrypted item: {Filename}", encryptedItem.Filename);
                             continue;
                         }
 
@@ -251,10 +234,6 @@ namespace UvfLib.Storage.Decorators
                         
                         string decryptedVirtualPath = PathNormalizer.JoinVirtualPath(virtualPath, decryptedName);
 
-                        Console.WriteLine($"DEBUG: Processing item: {encryptedItem.Filename}");
-                        Console.WriteLine($"DEBUG: Decrypted name: {decryptedName}");
-                        Console.WriteLine($"DEBUG: Is directory: {encryptedItem.IsDirectory}");
-
                         if (encryptedItem.IsDirectory)
                         {
                             // This is an encrypted subdirectory (reference directory)
@@ -272,8 +251,7 @@ namespace UvfLib.Storage.Decorators
                             };
                             
                             fileObjects.Add(dirObject);
-                            Console.WriteLine($"DEBUG: Added directory: {decryptedName}");
-                            _logger?.LogTrace("Added directory: {DecryptedName} (from {EncryptedName})", decryptedName, encryptedItem.Filename);
+                            
                         }
                         else
                         {
@@ -295,24 +273,11 @@ namespace UvfLib.Storage.Decorators
                             };
                             
                             fileObjects.Add(fileObject);
-                            Console.WriteLine($"DEBUG: Added file: {decryptedName} (size: {expectedDecryptedSize})");
-                            _logger?.LogTrace("Added file: {DecryptedName} (from {EncryptedName}, size: {EncryptedSize} -> {DecryptedSize})", 
-                                decryptedName, encryptedItem.Filename, encryptedItem.Size, expectedDecryptedSize);
+                            
                         }
-                    }
-                    catch (Exception ex)
-                    {
-                        Console.WriteLine($"DEBUG: Exception processing item {encryptedItem.Filename}: {ex.Message}");
-                        Console.WriteLine($"DEBUG: Exception stack trace: {ex.StackTrace}");
-                        _logger?.LogWarning(ex, "Failed to decrypt item: {Filename}", encryptedItem.Filename);
-                        // Continue with other items
-                    }
+
                 }
 
-                _logger?.LogDebug("Successfully read directory '{VirtualPath}': {FileCount} files, {DirCount} directories", 
-                    virtualPath, 
-                    fileObjects.Count(f => !f.IsDirectory), 
-                    fileObjects.Count(f => f.IsDirectory));
 
                 return fileObjects;
             }
@@ -376,7 +341,6 @@ namespace UvfLib.Storage.Decorators
                 // Delete the encrypted .c9r file
                 await _underlyingStorage.DeleteAsync(encryptedFilePath, cancellationToken);
                 
-                _logger?.LogDebug("Deleted Cryptomator file: {VirtualPath} -> {EncryptedPath}", filePath, encryptedFilePath);
             }
             catch (Exception ex) when (!(ex is FileNotFoundException || ex is ArgumentException))
             {
@@ -415,11 +379,7 @@ namespace UvfLib.Storage.Decorators
                     LastAccessTime = encryptedFileInfo.LastAccessTime,
                     SC = this
                 };
-                
-                _logger?.LogDebug("Retrieved Cryptomator file info: {VirtualPath} -> Size: {DecryptedSize} (encrypted: {EncryptedSize})", 
-                    filePath, decryptedSize, encryptedFileInfo.Size);
-                
-                return virtualFileInfo;
+               return virtualFileInfo;
             }
             catch (Exception ex) when (!(ex is ArgumentException))
             {
@@ -472,7 +432,6 @@ namespace UvfLib.Storage.Decorators
                     await MoveDirectoryAsync(sourceFilePath, destinationFilePath, overwrite, cancellationToken);
                 }
                 
-                _logger?.LogDebug("Moved Cryptomator item: {SourcePath} -> {DestinationPath}", sourceFilePath, destinationFilePath);
             }
             catch (Exception ex) when (!(ex is ArgumentException || ex is FileNotFoundException || ex is IOException))
             {
