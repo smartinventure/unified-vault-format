@@ -1,0 +1,20 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="FolderMagic.StorageLib" Version="1.0.250612.1256-dev" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\UvfLib.Core\UvfLib.Core.csproj" />
+    <ProjectReference Include="..\UvfLib.Vault\UvfLib.Vault.csproj" />
+    <ProjectReference Include="..\UvfLib.Storage\UvfLib.Storage.csproj" />
+  </ItemGroup>
+
+</Project>

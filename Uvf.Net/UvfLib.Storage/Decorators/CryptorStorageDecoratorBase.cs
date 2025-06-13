@@ -171,12 +171,12 @@ namespace UvfLib.Storage.Decorators
         // Path-based read/write - not implemented as we use handle-based operations
         public Task ReadAsync(string path, long offset, long size, IntPtr buffer, CancellationToken cancellationToken = default)
         {
-            throw new NotSupportedException("Use handle-based ReadAsync method instead");
+            throw new NotImplementedException("Path-based ReadAsync is not supported - use handle-based operations");
         }
 
         public Task WriteAsync(string path, long offset, long size, IntPtr buffer, CancellationToken cancellationToken = default)
         {
-            throw new NotSupportedException("Use handle-based WriteAsync method instead");
+            throw new NotImplementedException("Path-based WriteAsync is not supported - use handle-based operations");
         }
 
         #endregion
@@ -185,12 +185,12 @@ namespace UvfLib.Storage.Decorators
 
         public Task<bool> TestReadAsync(CancellationToken cancellationToken = default)
         {
-            return _underlyingStorage.TestReadAsync(cancellationToken);
+            throw new NotImplementedException("TestReadAsync is not implemented for vault storage");
         }
 
         public Task<bool> TestWriteAsync(CancellationToken cancellationToken = default)
         {
-            return _underlyingStorage.TestWriteAsync(cancellationToken);
+            throw new NotImplementedException("TestWriteAsync is not implemented for vault storage");
         }
 
         public async Task ShutdownAsync(CancellationToken cancellationToken = default)
@@ -272,26 +272,21 @@ namespace UvfLib.Storage.Decorators
         public abstract Task CreateDirectoryAsync(string directoryPath, CancellationToken cancellationToken = default);
         public abstract Task DeleteDirectoryAsync(string path, CancellationToken cancellationToken = default);
         public abstract Task<bool> DirectoryExistsAsync(string directoryPath, CancellationToken cancellationToken = default);
-        public abstract Task<IEnumerable<string>> GetDirectoriesAsync(string directoryPath, string searchPattern, SearchOption searchOption, CancellationToken cancellationToken = default);
-        public abstract Task<IEnumerable<string>> GetDirectoriesAsync(string directoryPath, CancellationToken cancellationToken = default);
 
         // File operations - format specific
         public abstract Task<bool> FileExistsAsync(string filePath, CancellationToken cancellationToken = default);
         public abstract Task DeleteAsync(string filePath, CancellationToken cancellationToken = default);
-        public abstract Task<IEnumerable<string>> GetFilesAsync(string directoryPath, string searchPattern, SearchOption searchOption, CancellationToken cancellationToken = default);
-        public abstract Task<IEnumerable<string>> GetFilesAsync(string directoryPath, CancellationToken cancellationToken = default);
         public abstract Task<FileObject> GetFileInfoAsync(string filePath, CancellationToken cancellationToken = default);
         public abstract Task MoveAsync(string sourceFilePath, string destinationFilePath, bool overwrite, CancellationToken cancellationToken = default);
 
         // Enumeration operations - format specific
         public abstract Task<IEnumerable<FileObject>> ReadDirAsync(string directoryPath, bool readOnly = true, CancellationToken cancellationToken = default);
-        public abstract Task<IEnumerable<string>> EnumerateFileSystemEntriesAsync(string path, CancellationToken cancellationToken = default);
 
         #endregion
 
         #region Helper Methods
 
-        protected async Task<Stream> CreateCryptoStreamAsync(IntPtr underlyingHandle, FileAccess fileAccess, string virtualPath, string physicalPath, CancellationToken cancellationToken)
+        internal async Task<Stream> CreateCryptoStreamAsync(IntPtr underlyingHandle, FileAccess fileAccess, string virtualPath, string physicalPath, CancellationToken cancellationToken)
         {
             // Get the actual stream from the underlying storage handle
             Stream underlyingStream = GetStreamFromUnderlyingHandle(underlyingHandle);
@@ -378,75 +373,6 @@ namespace UvfLib.Storage.Decorators
 
         #endregion
 
-        /// <summary>
-        /// Wrapper for encrypted file handles that combines virtual/physical paths with crypto streams.
-        /// Supports lazy creation of both encrypting and decrypting streams for ReadWrite access.
-        /// </summary>
-        protected class CryptoHandle : IDisposable
-        {
-            public string VirtualPath { get; }
-            public string PhysicalPath { get; }
-            public IntPtr UnderlyingHandle { get; }
-            public OpenFlags Flags { get; }
-            
-            private readonly VaultHandler _vault;
-            private readonly CryptorStorageDecoratorBase _parent;
-            private Stream? _encryptingStream;
-            private Stream? _decryptingStream;
-            
-            private GCHandle _gcHandle;
-            private bool _disposed = false;
 
-            public CryptoHandle(string virtualPath, string physicalPath, IntPtr underlyingHandle, VaultHandler vault, OpenFlags flags, CryptorStorageDecoratorBase parent)
-            {
-                VirtualPath = virtualPath;
-                PhysicalPath = physicalPath;
-                UnderlyingHandle = underlyingHandle;
-                _vault = vault;
-                Flags = flags;
-                _parent = parent;
-            }
-
-            public IntPtr CreateContext()
-            {
-                _gcHandle = GCHandle.Alloc(this);
-                return GCHandle.ToIntPtr(_gcHandle);
-            }
-
-            public async Task<Stream> GetDecryptingStreamAsync(CancellationToken cancellationToken)
-            {
-                if (_decryptingStream == null)
-                {
-                    // Lazy creation of decrypting stream
-                    _decryptingStream = await _parent.CreateCryptoStreamAsync(UnderlyingHandle, FileAccess.Read, VirtualPath, PhysicalPath, cancellationToken);
-                }
-                return _decryptingStream;
-            }
-
-            public async Task<Stream> GetEncryptingStreamAsync(CancellationToken cancellationToken)
-            {
-                if (_encryptingStream == null)
-                {
-                    // Lazy creation of encrypting stream
-                    _encryptingStream = await _parent.CreateCryptoStreamAsync(UnderlyingHandle, FileAccess.Write, VirtualPath, PhysicalPath, cancellationToken);
-                }
-                return _encryptingStream;
-            }
-
-            public void Dispose()
-            {
-                if (!_disposed)
-                {
-                    // Dispose both crypto streams if they exist
-                    _encryptingStream?.Dispose();
-                    _decryptingStream?.Dispose();
-                    
-                    if (_gcHandle.IsAllocated)
-                        _gcHandle.Free();
-                        
-                    _disposed = true;
-                }
-            }
-        }
     }
 } 

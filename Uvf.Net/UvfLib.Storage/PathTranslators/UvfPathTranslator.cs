@@ -1,5 +1,6 @@
 using StorageLib.Abstractions;
 using UvfLib.Storage.Abstractions;
+using UvfLib.Storage.Common;
 using UvfLib.Vault;
 
 namespace UvfLib.Storage.PathTranslators
@@ -45,7 +46,10 @@ namespace UvfLib.Storage.PathTranslators
 
         public async Task<VaultPathResult> TranslateToStoragePathAsync(string virtualPath)
         {
-            if (string.IsNullOrEmpty(virtualPath) || virtualPath == "/")
+            // Normalize the virtual path first
+            virtualPath = PathNormalizer.NormalizeVirtualPath(virtualPath);
+            
+            if (virtualPath == PathNormalizer.VirtualRoot)
             {
                 throw new ArgumentException("Invalid virtual path", nameof(virtualPath));
             }
@@ -53,24 +57,27 @@ namespace UvfLib.Storage.PathTranslators
             if (!_encryptFilenames)
             {
                 // Simple mode: just use path directly with .uvf extension for files
-                string simplePath = Path.Combine(_vaultBasePath, virtualPath.TrimStart('/'));
+                string physicalPath = PathNormalizer.VirtualToPhysicalPath(virtualPath);
+                
                 if (IsDirectory(virtualPath))
                 {
+                    string simpleDirPath = PathNormalizer.CombineWithMountPoint(_vaultBasePath, physicalPath);
                     return new VaultPathResult
                     {
-                        StoragePath = simplePath,
-                        ContentDirectoryPath = simplePath,
+                        StoragePath = simpleDirPath,
+                        ContentDirectoryPath = simpleDirPath,
                         IsEncrypted = false,
                         RequiresDirectoryCreation = false
                     };
                 }
                 else
                 {
+                    string simpleFilePath = PathNormalizer.CombineWithMountPoint(_vaultBasePath, physicalPath + GetEncryptedFileExtension());
                     return new VaultPathResult
                     {
-                        StoragePath = simplePath + GetEncryptedFileExtension(),
-                        ContentDirectoryPath = Path.GetDirectoryName(simplePath) ?? "",
-                        EncryptedFilename = Path.GetFileName(simplePath) + GetEncryptedFileExtension(),
+                        StoragePath = simpleFilePath,
+                        ContentDirectoryPath = Path.GetDirectoryName(simpleFilePath) ?? _vaultBasePath,
+                        EncryptedFilename = Path.GetFileName(simpleFilePath),
                         IsEncrypted = false,
                         RequiresDirectoryCreation = false
                     };

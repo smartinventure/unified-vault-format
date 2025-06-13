@@ -1,5 +1,6 @@
 using StorageLib.Abstractions;
 using UvfLib.Storage.PathTranslators;
+using UvfLib.Storage.Common;
 using UvfLib.Vault;
 using Microsoft.Extensions.Logging;
 using System.IO;
@@ -54,7 +55,19 @@ namespace UvfLib.Storage.Decorators
         /// </summary>
         public override async Task CreateDirectoryAsync(string directoryPath, CancellationToken cancellationToken = default)
         {
-            await _cryptomatorTranslator.CreateDirectoryAsync(directoryPath, cancellationToken);
+            // Normalize virtual path
+            directoryPath = PathNormalizer.NormalizeVirtualPath(directoryPath);
+            
+            try
+            {
+                await _cryptomatorTranslator.CreateDirectoryAsync(directoryPath, cancellationToken);
+                _logger?.LogDebug("Created Cryptomator directory: {DirectoryPath}", directoryPath);
+            }
+            catch (Exception ex)
+            {
+                _logger?.LogError(ex, "Error creating Cryptomator directory: {DirectoryPath}", directoryPath);
+                throw new IOException($"Failed to create directory '{directoryPath}': {ex.Message}", ex);
+            }
         }
 
         /// <summary>
@@ -64,19 +77,35 @@ namespace UvfLib.Storage.Decorators
         /// 3. Delete dir.c9r file
         /// 4. Delete reference directory
         /// </summary>
-        public override async Task DeleteDirectoryAsync(string path, CancellationToken cancellationToken = default)
+        public override async Task DeleteDirectoryAsync(string directoryPath, CancellationToken cancellationToken = default)
         {
-            await _cryptomatorTranslator.DeleteDirectoryAsync(path, cancellationToken);
+            // Normalize virtual path
+            directoryPath = PathNormalizer.NormalizeVirtualPath(directoryPath);
+            
+            try
+            {
+                await _cryptomatorTranslator.DeleteDirectoryAsync(directoryPath, cancellationToken);
+                _logger?.LogDebug("Deleted Cryptomator directory: {DirectoryPath}", directoryPath);
+            }
+            catch (Exception ex)
+            {
+                _logger?.LogError(ex, "Error deleting Cryptomator directory: {DirectoryPath}", directoryPath);
+                throw new IOException($"Failed to delete directory '{directoryPath}': {ex.Message}", ex);
+            }
         }
 
         public override async Task<bool> DirectoryExistsAsync(string directoryPath, CancellationToken cancellationToken = default)
         {
+            // Normalize virtual path
+            directoryPath = PathNormalizer.NormalizeVirtualPath(directoryPath);
+            
             try
             {
                 // Handle root directory - it should always exist if vault is initialized
-                if (string.IsNullOrEmpty(directoryPath) || directoryPath == "/")
+                if (directoryPath == PathNormalizer.VirtualRoot)
                 {
-                    string rootDirectory = Path.Combine(_vaultBasePath, _vault.GetRootDirectoryPath());
+                    string rootDirPath = PathNormalizer.NormalizeVaultDirectoryPath(_vault.GetRootDirectoryPath());
+                    string rootDirectory = PathNormalizer.CombineWithMountPoint(_vaultBasePath, rootDirPath);
                     return await _underlyingStorage.DirectoryExistsAsync(rootDirectory, cancellationToken);
                 }
 
@@ -101,35 +130,205 @@ namespace UvfLib.Storage.Decorators
                 try
                 {
                     var directoryMetadata = await _cryptomatorTranslator.LoadDirectoryMetadataFromDirC9rAsync(referenceDirectory, cancellationToken);
-                    string contentDirectory = Path.Combine(_vaultBasePath, _vault.GetDirectoryPath(directoryMetadata));
+                    string vaultDirPath = _vault.GetDirectoryPath(directoryMetadata);
+                    string normalizedVaultDirPath = PathNormalizer.NormalizeVaultDirectoryPath(vaultDirPath);
+                    string contentDirectory = PathNormalizer.CombineWithMountPoint(_vaultBasePath, normalizedVaultDirPath);
+                    
                     return await _underlyingStorage.DirectoryExistsAsync(contentDirectory, cancellationToken);
                 }
                 catch
                 {
-                    // If we can't load the directory metadata, the directory is invalid
+                    // If we can't load metadata, assume directory doesn't exist properly
                     return false;
                 }
             }
-            catch (Exception ex)
+            catch (Exception ex) when (!(ex is ArgumentException))
             {
-                _logger?.LogWarning(ex, "Error checking directory existence for: {DirectoryPath}", directoryPath);
+                _logger?.LogError(ex, "Error checking Cryptomator directory existence: {DirectoryPath}", directoryPath);
                 return false;
             }
         }
 
-        public override Task<IEnumerable<string>> GetDirectoriesAsync(string directoryPath, string searchPattern, SearchOption searchOption, CancellationToken cancellationToken = default)
+        /// <summary>
+        /// Reads directory contents and returns decrypted file/directory names.
+        /// This method translates virtual vault paths to storage paths and decrypts the contents.
+        /// </summary>
+        public override async Task<IEnumerable<FileObject>> ReadDirAsync(string virtualPath, bool readOnly = true, CancellationToken cancellationToken = default)
         {
-            throw new NotImplementedException("GetDirectoriesAsync - will enumerate reference directories and decrypt names");
+            // Normalize the virtual path
+            virtualPath = PathNormalizer.NormalizeVirtualPath(virtualPath);
+            
+            try
+            {
+                // Translate virtual path to storage path
+                var pathResult = await _pathTranslator.TranslateToStoragePathAsync(virtualPath);
+                
+                // For directories, we need to read from the content directory, not the reference directory
+                // The pathResult.StoragePath for directories points to the reference directory
+                // But we need to read the actual content from the content directory
+                string contentDirectoryPath;
+                UvfLib.Core.Api.DirectoryMetadata directoryMetadata;
+                
+                if (virtualPath == PathNormalizer.VirtualRoot)
+                {
+                    // Root directory - use the root content directory directly
+                    contentDirectoryPath = pathResult.ContentDirectoryPath;
+                    directoryMetadata = _vault.GetRootDirectoryMetadata();
+                }
+                else
+                {
+                    // For subdirectories, we need to load the directory metadata from dir.c9r
+                    // and then get the actual content directory
+                    string referenceDirectory = pathResult.StoragePath;
+                    directoryMetadata = await _cryptomatorTranslator.LoadDirectoryMetadataFromDirC9rAsync(referenceDirectory, cancellationToken);
+                    
+                    // Get the actual content directory where files are stored
+                    string vaultDirPath = _vault.GetDirectoryPath(directoryMetadata);
+                    string normalizedVaultDirPath = PathNormalizer.NormalizeVaultDirectoryPath(vaultDirPath);
+                    contentDirectoryPath = PathNormalizer.CombineWithMountPoint(_vaultBasePath, normalizedVaultDirPath);
+                }
+
+                _logger?.LogDebug("Reading directory: Virtual='{VirtualPath}' -> Content='{ContentPath}'", virtualPath, contentDirectoryPath);
+
+                // Check if the content directory exists
+                if (!await _underlyingStorage.DirectoryExistsAsync(contentDirectoryPath, cancellationToken))
+                {
+                    Console.WriteLine($"DEBUG: Content directory does not exist: {contentDirectoryPath}");
+                    throw new DirectoryNotFoundException($"Content directory not found: {contentDirectoryPath}");
+                }
+
+                Console.WriteLine($"DEBUG: Reading directory contents from: {contentDirectoryPath}");
+                
+                // Read the encrypted directory contents using IStorage
+                var encryptedItems = await _underlyingStorage.ReadDirAsync(contentDirectoryPath, readOnly, cancellationToken);
+                
+                Console.WriteLine($"DEBUG: Found {encryptedItems.Count()} items in directory");
+                foreach (var item in encryptedItems)
+                {
+                    Console.WriteLine($"DEBUG: Item: {item.Filename} (IsDirectory: {item.IsDirectory})");
+                }
+                
+                var fileObjects = new List<FileObject>();
+
+                // Process each encrypted item
+                foreach (var encryptedItem in encryptedItems)
+                {
+                    try
+                    {
+                        // Skip metadata files
+                        if (IsMetadataFile(encryptedItem.Filename))
+                        {
+                            _logger?.LogTrace("Skipping metadata file: {Filename}", encryptedItem.Filename);
+                            continue;
+                        }
+
+                        // For Cryptomator V8, process .c9r files/directories and .c9r.c9r encrypted files
+                        if (!encryptedItem.Filename.EndsWith(".c9r") && !encryptedItem.Filename.EndsWith(".c9r.c9r"))
+                        {
+                            _logger?.LogTrace("Skipping non-encrypted item: {Filename}", encryptedItem.Filename);
+                            continue;
+                        }
+
+                        // Decrypt the filename - pass the full encrypted filename with extension
+                        // The DecryptFilename method expects and handles the .c9r extension internally
+                        string decryptedName;
+                        if (encryptedItem.Filename.EndsWith(".c9r.c9r"))
+                        {
+                            // This is an encrypted file - remove only the outer .c9r extension
+                            string encryptedFilenameForDecryption = encryptedItem.Filename.Substring(0, encryptedItem.Filename.Length - 4);
+                            decryptedName = _vault.DecryptFilename(encryptedFilenameForDecryption, directoryMetadata);
+                        }
+                        else if (encryptedItem.Filename.EndsWith(".c9r"))
+                        {
+                            // This is an encrypted directory - pass the full filename
+                            decryptedName = _vault.DecryptFilename(encryptedItem.Filename, directoryMetadata);
+                        }
+                        else
+                        {
+                            // Should not happen due to the filter above, but safety check
+                            continue;
+                        }
+                        
+                        string decryptedVirtualPath = PathNormalizer.JoinVirtualPath(virtualPath, decryptedName);
+
+                        Console.WriteLine($"DEBUG: Processing item: {encryptedItem.Filename}");
+                        Console.WriteLine($"DEBUG: Decrypted name: {decryptedName}");
+                        Console.WriteLine($"DEBUG: Is directory: {encryptedItem.IsDirectory}");
+
+                        if (encryptedItem.IsDirectory)
+                        {
+                            // This is an encrypted subdirectory (reference directory)
+                            var dirObject = new FileObject(decryptedVirtualPath)
+                            {
+                                IsDirectory = true,
+                                Filename = decryptedName,
+                                RealPath = decryptedVirtualPath,
+                                VirtualPath = decryptedVirtualPath,
+                                Size = 0,
+                                CreationTime = encryptedItem.CreationTime,
+                                LastModified = encryptedItem.LastModified,
+                                LastAccessTime = encryptedItem.LastAccessTime,
+                                SC = this
+                            };
+                            
+                            fileObjects.Add(dirObject);
+                            Console.WriteLine($"DEBUG: Added directory: {decryptedName}");
+                            _logger?.LogTrace("Added directory: {DecryptedName} (from {EncryptedName})", decryptedName, encryptedItem.Filename);
+                        }
+                        else
+                        {
+                            // This is an encrypted file
+                            // Calculate expected decrypted size
+                            long expectedDecryptedSize = VaultHandler.CalculateExpectedDecryptedSize(encryptedItem.Size);
+                            
+                            var fileObject = new FileObject(decryptedVirtualPath)
+                            {
+                                IsDirectory = false,
+                                Filename = decryptedName,
+                                RealPath = decryptedVirtualPath,
+                                VirtualPath = decryptedVirtualPath,
+                                Size = expectedDecryptedSize, // Show decrypted size to user
+                                CreationTime = encryptedItem.CreationTime,
+                                LastModified = encryptedItem.LastModified,
+                                LastAccessTime = encryptedItem.LastAccessTime,
+                                SC = this
+                            };
+                            
+                            fileObjects.Add(fileObject);
+                            Console.WriteLine($"DEBUG: Added file: {decryptedName} (size: {expectedDecryptedSize})");
+                            _logger?.LogTrace("Added file: {DecryptedName} (from {EncryptedName}, size: {EncryptedSize} -> {DecryptedSize})", 
+                                decryptedName, encryptedItem.Filename, encryptedItem.Size, expectedDecryptedSize);
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        Console.WriteLine($"DEBUG: Exception processing item {encryptedItem.Filename}: {ex.Message}");
+                        Console.WriteLine($"DEBUG: Exception stack trace: {ex.StackTrace}");
+                        _logger?.LogWarning(ex, "Failed to decrypt item: {Filename}", encryptedItem.Filename);
+                        // Continue with other items
+                    }
+                }
+
+                _logger?.LogDebug("Successfully read directory '{VirtualPath}': {FileCount} files, {DirCount} directories", 
+                    virtualPath, 
+                    fileObjects.Count(f => !f.IsDirectory), 
+                    fileObjects.Count(f => f.IsDirectory));
+
+                return fileObjects;
+            }
+            catch (Exception ex)
+            {
+                _logger?.LogError(ex, "Failed to read directory: {VirtualPath}", virtualPath);
+                throw;
+            }
         }
 
-        public override Task<IEnumerable<string>> GetDirectoriesAsync(string directoryPath, CancellationToken cancellationToken = default)
+        /// <summary>
+        /// Checks if a filename is a metadata file that should be skipped during directory enumeration.
+        /// </summary>
+        private bool IsMetadataFile(string filename)
         {
-            throw new NotImplementedException("GetDirectoriesAsync - will call overload with default parameters");
-        }
-
-        public override async Task<IEnumerable<StorageLib.Abstractions.FileObject>> ReadDirAsync(string directoryPath, bool readOnly = true, CancellationToken cancellationToken = default)
-        {
-            return await ReadDirInternalAsync(directoryPath, readOnly, cancellationToken);
+            return filename == "dirid.c9r" || filename == "dir.c9r" || filename == _vault.GetDirectoryMetadataFilename();
         }
 
         #endregion
@@ -138,210 +337,174 @@ namespace UvfLib.Storage.Decorators
 
         public override async Task<bool> FileExistsAsync(string filePath, CancellationToken cancellationToken = default)
         {
+            // Normalize virtual path
+            filePath = PathNormalizer.NormalizeVirtualPath(filePath);
+            
             try
             {
-                // Handle empty or root path - files can't exist at root level
-                if (string.IsNullOrEmpty(filePath) || filePath == "/")
-                {
-                    return false;
-                }
-
                 // Translate the virtual file path to the physical encrypted file path
                 var pathResult = await _cryptomatorTranslator.TranslateToStoragePathAsync(filePath);
                 string encryptedFilePath = pathResult.StoragePath;
                 
-                // Check if the encrypted .c9r file exists in the content directory
+                // Check if the encrypted file exists in underlying storage
                 return await _underlyingStorage.FileExistsAsync(encryptedFilePath, cancellationToken);
             }
-            catch (Exception ex)
+            catch (Exception ex) when (!(ex is ArgumentException))
             {
-                _logger?.LogWarning(ex, "Error checking file existence for: {FilePath}", filePath);
+                _logger?.LogError(ex, "Error checking Cryptomator file existence: {FilePath}", filePath);
                 return false;
             }
         }
 
-        public override Task DeleteAsync(string filePath, CancellationToken cancellationToken = default)
+        public override async Task DeleteAsync(string filePath, CancellationToken cancellationToken = default)
         {
-            throw new NotImplementedException("DeleteAsync - will translate to content directory and delete .c9r file");
-        }
-
-        public override Task<IEnumerable<string>> GetFilesAsync(string directoryPath, string searchPattern, SearchOption searchOption, CancellationToken cancellationToken = default)
-        {
-            throw new NotImplementedException("GetFilesAsync - will enumerate .c9r files in content directory and decrypt names");
-        }
-
-        public override Task<IEnumerable<string>> GetFilesAsync(string directoryPath, CancellationToken cancellationToken = default)
-        {
-            throw new NotImplementedException("GetFilesAsync - will call overload with default parameters");
-        }
-
-        public override Task<FileObject> GetFileInfoAsync(string filePath, CancellationToken cancellationToken = default)
-        {
-            throw new NotImplementedException("GetFileInfoAsync - will get info from .c9r file and calculate decrypted size");
-        }
-
-        public override Task MoveAsync(string sourceFilePath, string destinationFilePath, bool overwrite, CancellationToken cancellationToken = default)
-        {
-            throw new NotImplementedException("MoveAsync - will handle moving between encrypted locations");
-        }
-
-        #endregion
-
-        #region Directory Enumeration
-
-        private async Task<IEnumerable<StorageLib.Abstractions.FileObject>> ReadDirInternalAsync(string realPath, bool readOnly = true, CancellationToken cancellationToken = default)
-        {
-            var fileObjects = new List<StorageLib.Abstractions.FileObject>();
+            // Normalize virtual path
+            filePath = PathNormalizer.NormalizeVirtualPath(filePath);
             
             try
             {
-                // Get directory metadata for the virtual path
-                var directoryMetadata = await GetDirectoryMetadataAsync(realPath);
+                // Translate the virtual file path to the physical encrypted file path
+                var pathResult = await _cryptomatorTranslator.TranslateToStoragePathAsync(filePath);
+                string encryptedFilePath = pathResult.StoragePath;
                 
-                // Get the paths for this directory
-                var pathResult = await _cryptomatorTranslator.TranslateToStoragePathAsync(realPath);
-                string referenceDirectory = pathResult.ContentDirectoryPath; // For Cryptomator, this is the reference directory for subdirs
-                string contentDirectory = Path.Combine(_vaultBasePath, _vault.GetDirectoryPath(directoryMetadata)); // Content directory for files
-                
-                                 // Enumerate subdirectories (these are in the reference directory)
-                 if (await _underlyingStorage.DirectoryExistsAsync(referenceDirectory, cancellationToken))
-                 {
-                     var allItems = await _underlyingStorage.ReadDirAsync(referenceDirectory, true, cancellationToken);
-                     var encryptedDirs = allItems.Where(item => item.IsDirectory).Select(item => item.RealPath);
-                    foreach (string encryptedDir in encryptedDirs)
-                    {
-                        try
-                        {
-                            string encryptedDirName = Path.GetFileName(encryptedDir);
-                            
-                            // Skip if this is not an encrypted directory (Cryptomator dirs don't have extensions)
-                            if (Path.HasExtension(encryptedDirName))
-                                continue;
-                                
-                            string decryptedDirName = _vault.DecryptFilename(encryptedDirName, directoryMetadata);
-                            
-                            var dirObject = new StorageLib.Abstractions.FileObject(Path.Combine(realPath, decryptedDirName).Replace('\\', '/'))
-                            {
-                                IsDirectory = true,
-                                Filename = decryptedDirName,
-                                RealPath = Path.Combine(realPath, decryptedDirName).Replace('\\', '/'),
-                                VirtualPath = Path.Combine(realPath, decryptedDirName).Replace('\\', '/'),
-                                Size = 0,
-                                SC = this
-                            };
-                            
-                            // Try to get directory timestamps from the reference directory
-                            try
-                            {
-                                var dirInfo = await _underlyingStorage.GetFileInfoAsync(encryptedDir, cancellationToken);
-                                dirObject.CreationTime = dirInfo.CreationTime;
-                                dirObject.LastModified = dirInfo.LastModified;
-                                dirObject.LastAccessTime = dirInfo.LastAccessTime;
-                            }
-                            catch
-                            {
-                                // Use current time if can't get timestamps
-                                dirObject.CreationTime = DateTime.Now;
-                                dirObject.LastModified = DateTime.Now;
-                                dirObject.LastAccessTime = DateTime.Now;
-                            }
-                            
-                            fileObjects.Add(dirObject);
-                        }
-                        catch (Exception)
-                        {
-                            // Skip directories that can't be decrypted
-                            continue;
-                        }
-                    }
-                }
-                
-                // Enumerate files (these are in the content directory as .c9r files)
-                if (await _underlyingStorage.DirectoryExistsAsync(contentDirectory, cancellationToken))
+                // Verify the file exists before attempting deletion
+                if (!await _underlyingStorage.FileExistsAsync(encryptedFilePath, cancellationToken))
                 {
-                                         var allContentItems = await _underlyingStorage.ReadDirAsync(contentDirectory, true, cancellationToken);
-                     var encryptedFiles = allContentItems.Where(item => !item.IsDirectory && item.Filename.EndsWith(".c9r")).Select(item => item.RealPath);
-                    foreach (string encryptedFile in encryptedFiles)
-                    {
-                        try
-                        {
-                            string encryptedFileName = Path.GetFileNameWithoutExtension(encryptedFile); // Remove .c9r extension
-                            
-                            // Skip metadata files (dirid.c9r)
-                            if (encryptedFileName == "dirid")
-                                continue;
-                                
-                            string decryptedFileName = _vault.DecryptFilename(encryptedFileName, directoryMetadata);
-                            
-                            var fileInfo = await _underlyingStorage.GetFileInfoAsync(encryptedFile, cancellationToken);
-                            
-                            var fileObject = new StorageLib.Abstractions.FileObject(Path.Combine(realPath, decryptedFileName).Replace('\\', '/'))
-                            {
-                                IsDirectory = false,
-                                Filename = decryptedFileName,
-                                RealPath = Path.Combine(realPath, decryptedFileName).Replace('\\', '/'),
-                                VirtualPath = Path.Combine(realPath, decryptedFileName).Replace('\\', '/'),
-                                Size = UvfLib.Vault.VaultHandler.CalculateExpectedDecryptedSize(fileInfo.Size), // Calculate decrypted size
-                                CreationTime = fileInfo.CreationTime,
-                                LastModified = fileInfo.LastModified,
-                                LastAccessTime = fileInfo.LastAccessTime,
-                                SC = this
-                            };
-                            
-                            fileObjects.Add(fileObject);
-                        }
-                        catch (Exception)
-                        {
-                            // Skip files that can't be decrypted
-                            continue;
-                        }
-                    }
+                    throw new FileNotFoundException($"File not found: {filePath}");
                 }
                 
-                _logger?.LogDebug("Enumerated {Count} entries in Cryptomator directory: {Path}", fileObjects.Count, realPath);
-                return fileObjects.AsEnumerable();
+                // Delete the encrypted .c9r file
+                await _underlyingStorage.DeleteAsync(encryptedFilePath, cancellationToken);
+                
+                _logger?.LogDebug("Deleted Cryptomator file: {VirtualPath} -> {EncryptedPath}", filePath, encryptedFilePath);
             }
-            catch (Exception ex)
+            catch (Exception ex) when (!(ex is FileNotFoundException || ex is ArgumentException))
             {
-                _logger?.LogError(ex, "Error enumerating Cryptomator directory: {Path}", realPath);
-                // Return empty list if directory can't be read
-                return new List<StorageLib.Abstractions.FileObject>();
+                _logger?.LogError(ex, "Error deleting Cryptomator file: {FilePath}", filePath);
+                throw new IOException($"Failed to delete file '{filePath}': {ex.Message}", ex);
             }
         }
 
-        /// <summary>
-        /// Gets directory metadata for a virtual path by navigating the Cryptomator directory structure
-        /// </summary>
-        private async Task<UvfLib.Core.Api.DirectoryMetadata> GetDirectoryMetadataAsync(string virtualPath)
+        public override async Task<FileObject> GetFileInfoAsync(string filePath, CancellationToken cancellationToken = default)
         {
-            if (string.IsNullOrEmpty(virtualPath) || virtualPath == "/")
-            {
-                return _vault.GetRootDirectoryMetadata();
-            }
-
-            // Navigate through the directory hierarchy to get metadata
-            string[] pathParts = virtualPath.Trim('/').Split('/', StringSplitOptions.RemoveEmptyEntries);
-            UvfLib.Core.Api.DirectoryMetadata currentMetadata = _vault.GetRootDirectoryMetadata();
-            string currentReferenceDir = Path.Combine(_vaultBasePath, _vault.GetRootDirectoryPath());
+            // Normalize virtual path
+            filePath = PathNormalizer.NormalizeVirtualPath(filePath);
             
-            foreach (string pathPart in pathParts)
+            try
             {
-                // Encrypt the directory name using current metadata
-                string encryptedDirName = _vault.EncryptFilename(pathPart, currentMetadata);
+                // Translate the virtual file path to the physical encrypted file path
+                var pathResult = await _cryptomatorTranslator.TranslateToStoragePathAsync(filePath);
+                string encryptedFilePath = pathResult.StoragePath;
                 
-                // Move to the reference directory
-                currentReferenceDir = Path.Combine(currentReferenceDir, encryptedDirName);
+                // Get the encrypted file info from underlying storage
+                var encryptedFileInfo = await _underlyingStorage.GetFileInfoAsync(encryptedFilePath, cancellationToken);
                 
-                // Load directory metadata from dir.c9r file
-                currentMetadata = await _cryptomatorTranslator.LoadDirectoryMetadataFromDirC9rAsync(currentReferenceDir, CancellationToken.None);
+                // Calculate the decrypted size using VaultHandler
+                long decryptedSize = VaultHandler.CalculateExpectedDecryptedSize(encryptedFileInfo.Size);
+                
+                // Create virtual file object with decrypted information
+                var virtualFileInfo = new FileObject(filePath)
+                {
+                    IsDirectory = false,
+                    Filename = Path.GetFileName(filePath),
+                    RealPath = filePath,
+                    VirtualPath = filePath,
+                    Size = decryptedSize,
+                    CreationTime = encryptedFileInfo.CreationTime,
+                    LastModified = encryptedFileInfo.LastModified,
+                    LastAccessTime = encryptedFileInfo.LastAccessTime,
+                    SC = this
+                };
+                
+                _logger?.LogDebug("Retrieved Cryptomator file info: {VirtualPath} -> Size: {DecryptedSize} (encrypted: {EncryptedSize})", 
+                    filePath, decryptedSize, encryptedFileInfo.Size);
+                
+                return virtualFileInfo;
             }
-            
-            return currentMetadata;
+            catch (Exception ex) when (!(ex is ArgumentException))
+            {
+                _logger?.LogError(ex, "Error getting Cryptomator file info: {FilePath}", filePath);
+                throw new IOException($"Failed to get file info for '{filePath}': {ex.Message}", ex);
+            }
         }
 
-        public override Task<IEnumerable<string>> EnumerateFileSystemEntriesAsync(string path, CancellationToken cancellationToken = default)
+        public override async Task MoveAsync(string sourceFilePath, string destinationFilePath, bool overwrite, CancellationToken cancellationToken = default)
         {
-            throw new NotImplementedException("EnumerateFileSystemEntriesAsync - will enumerate all entries");
+            try
+            {
+                // Validate input paths
+                if (string.IsNullOrEmpty(sourceFilePath) || sourceFilePath == "/")
+                {
+                    throw new ArgumentException("Cannot move root directory or empty source path", nameof(sourceFilePath));
+                }
+                
+                if (string.IsNullOrEmpty(destinationFilePath) || destinationFilePath == "/")
+                {
+                    throw new ArgumentException("Cannot move to root directory or empty destination path", nameof(destinationFilePath));
+                }
+
+                // Check if source exists (could be file or directory)
+                bool sourceIsFile = await FileExistsAsync(sourceFilePath, cancellationToken);
+                bool sourceIsDirectory = !sourceIsFile && await DirectoryExistsAsync(sourceFilePath, cancellationToken);
+                
+                if (!sourceIsFile && !sourceIsDirectory)
+                {
+                    throw new FileNotFoundException($"Source not found: {sourceFilePath}");
+                }
+
+                // Check if destination already exists
+                bool destIsFile = await FileExistsAsync(destinationFilePath, cancellationToken);
+                bool destIsDirectory = !destIsFile && await DirectoryExistsAsync(destinationFilePath, cancellationToken);
+                
+                if ((destIsFile || destIsDirectory) && !overwrite)
+                {
+                    throw new IOException($"Destination already exists and overwrite is false: {destinationFilePath}");
+                }
+
+                if (sourceIsFile)
+                {
+                    // Moving a file
+                    await MoveFileAsync(sourceFilePath, destinationFilePath, overwrite, cancellationToken);
+                }
+                else
+                {
+                    // Moving a directory - this is complex for Cryptomator due to the 4-component structure
+                    await MoveDirectoryAsync(sourceFilePath, destinationFilePath, overwrite, cancellationToken);
+                }
+                
+                _logger?.LogDebug("Moved Cryptomator item: {SourcePath} -> {DestinationPath}", sourceFilePath, destinationFilePath);
+            }
+            catch (Exception ex) when (!(ex is ArgumentException || ex is FileNotFoundException || ex is IOException))
+            {
+                _logger?.LogError(ex, "Error moving Cryptomator item: {SourcePath} -> {DestinationPath}", sourceFilePath, destinationFilePath);
+                throw new IOException($"Failed to move '{sourceFilePath}' to '{destinationFilePath}': {ex.Message}", ex);
+            }
+        }
+
+        private async Task MoveFileAsync(string sourceFilePath, string destinationFilePath, bool overwrite, CancellationToken cancellationToken)
+        {
+            // Translate both paths to encrypted storage paths
+            var sourcePathResult = await _cryptomatorTranslator.TranslateToStoragePathAsync(sourceFilePath);
+            var destPathResult = await _cryptomatorTranslator.TranslateToStoragePathAsync(destinationFilePath);
+            
+            string sourceEncryptedPath = sourcePathResult.StoragePath;
+            string destEncryptedPath = destPathResult.StoragePath;
+            
+            // Use underlying storage to move the encrypted file
+            await _underlyingStorage.MoveAsync(sourceEncryptedPath, destEncryptedPath, overwrite, cancellationToken);
+        }
+
+        private async Task MoveDirectoryAsync(string sourceDirectoryPath, string destinationDirectoryPath, bool overwrite, CancellationToken cancellationToken)
+        {
+            // Moving directories in Cryptomator is complex because of the 4-component structure:
+            // 1. Reference directory (with encrypted name)
+            // 2. dir.c9r file (contains UUID)
+            // 3. Content directory (d/XX/XXXXXXXX/)
+            // 4. dirid.c9r file (in content directory)
+            
+            // For now, throw NotImplementedException as this requires careful handling
+            // to avoid breaking the vault structure
+            throw new NotImplementedException("Directory moving in Cryptomator vaults requires careful implementation to maintain vault integrity. Use file-level operations instead.");
         }
 
         #endregion
