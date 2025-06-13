@@ -20,6 +20,7 @@ namespace ExampleVaultApp
                 Console.WriteLine();
                 Console.WriteLine("Commands:");
                 Console.WriteLine("  testrun       : Full encrypt + decrypt + verify cycle using UvfLib.Storage");
+                Console.WriteLine("  simpletest    : Same test as testrun but using simple VaultManager API");
                 Console.WriteLine();
                 Console.WriteLine("Options:");
                 Console.WriteLine("  --cryptomator : Use Cryptomator V8 format (default: UVF)");
@@ -48,6 +49,26 @@ namespace ExampleVaultApp
                     Console.WriteLine("   (Will be implemented after Cryptomator test is working)");
                 }
             }
+            else if (command == "simpletest")
+            {
+                if (useCryptomator)
+                {
+                    Console.WriteLine("🔧 Running Cryptomator V8 test using VaultManager API...");
+                    var simpleCryptomatorTest = new SimpleCryptomatorTest(
+                        SourceFolderPath, 
+                        VaultFolderPath, 
+                        DecryptedFolderPath, 
+                        Password);
+                    
+                    await simpleCryptomatorTest.RunTestAsync();
+                }
+                else
+                {
+                    Console.WriteLine("🔧 UVF format test not implemented yet - use --cryptomator for now");
+                    Console.WriteLine("   (Will be implemented after Cryptomator test is working)");
+                }
+            }
+
             else
             {
                 Console.WriteLine($"Unknown command: {command}");

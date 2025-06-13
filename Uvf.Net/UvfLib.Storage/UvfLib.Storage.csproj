@@ -8,7 +8,7 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="FolderMagic.StorageLib" Version="1.0.250612.1256-dev" />
+    <PackageReference Include="FolderMagic.StorageLib" Version="1.0.250613.1337-dev" />
   </ItemGroup>
 
   <ItemGroup>

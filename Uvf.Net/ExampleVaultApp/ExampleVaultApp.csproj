@@ -7,9 +7,7 @@
     <Nullable>enable</Nullable>
   </PropertyGroup>
 
-  <ItemGroup>
-    <PackageReference Include="FolderMagic.StorageLib" Version="1.0.250612.1256-dev" />
-  </ItemGroup>
+  <!-- StorageLib dependency removed - now accessed through UvfLib.Storage -->
 
   <ItemGroup>
     <ProjectReference Include="..\UvfLib.Core\UvfLib.Core.csproj" />

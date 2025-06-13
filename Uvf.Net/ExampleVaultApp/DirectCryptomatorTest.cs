@@ -1,5 +1,5 @@
 using StorageLib.Abstractions;
-using StorageLib.Connectors;
+using UvfLib.Storage;
 using UvfLib.Storage.Decorators;
 using UvfLib.Vault;
 using System.Diagnostics;
@@ -80,21 +80,18 @@ namespace ExampleVaultApp
             Console.WriteLine("🔧 Setting up storage interfaces...");
             
             // Create source storage (plain LocalStorage for reading source files)
-            var sourceStorage = new LocalStorage();
-            await sourceStorage.InitializeAsync("file://", _sourceFolderPath);
+            var sourceStorage = await StorageFactory.CreateInitializedLocalStorageAsync(_sourceFolderPath);
             Console.WriteLine($"✅ Source storage initialized: {_sourceFolderPath}");
             
             // Create decrypted storage (plain LocalStorage for writing decrypted files)
-            var decryptedStorage = new LocalStorage();
-            await decryptedStorage.InitializeAsync("file://", _decryptedFolderPath);
+            var decryptedStorage = await StorageFactory.CreateInitializedLocalStorageAsync(_decryptedFolderPath);
             Console.WriteLine($"✅ Decrypted storage initialized: {_decryptedFolderPath}");
             
             // Create vault storage (CryptomatorStorageDecorator)
             await SetupVaultDirectoryAsync(); // Ensure vault directory exists
             var vault = await CreateOrLoadVaultAsync();
             
-            var vaultLocalStorage = new LocalStorage();
-            await vaultLocalStorage.InitializeAsync("file://", "/");
+            var vaultLocalStorage = await StorageFactory.CreateInitializedLocalStorageAsync("/");
             
             var vaultStorage = new CryptomatorStorageDecorator(
                 vaultLocalStorage, 
