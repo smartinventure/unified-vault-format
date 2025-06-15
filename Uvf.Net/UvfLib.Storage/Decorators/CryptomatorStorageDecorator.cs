@@ -4,6 +4,8 @@ using UvfLib.Storage.Common;
 using UvfLib.Vault;
 using Microsoft.Extensions.Logging;
 using System.IO;
+using UvfLib.Core.CryptomatorV8;
+using System.Text;
 
 namespace UvfLib.Storage.Decorators
 {
@@ -206,25 +208,60 @@ namespace UvfLib.Storage.Decorators
                             continue;
                         }
 
-                        // For Cryptomator V8, process .c9r files/directories and .c9r.c9r encrypted files
-                        if (!encryptedItem.Filename.EndsWith(".c9r") && !encryptedItem.Filename.EndsWith(".c9r.c9r"))
+                        // For Cryptomator V8, process .c9r files/directories and .c9s shortened directories
+                        if (!encryptedItem.Filename.EndsWith(".c9r") && 
+                            !encryptedItem.Filename.EndsWith(".c9s"))
                         {
                             continue;
                         }
 
-                        // Decrypt the filename - pass the full encrypted filename with extension
-                        // The DecryptFilename method expects and handles the .c9r extension internally
+                        // Decrypt the filename based on filesystem type and extension
                         string decryptedName;
-                        if (encryptedItem.Filename.EndsWith(".c9r.c9r"))
+                        bool isDirectory = false;
+                        
+                        if (encryptedItem.IsDirectory && encryptedItem.Filename.EndsWith(".c9s"))
                         {
-                            // This is an encrypted file - remove only the outer .c9r extension
-                            string encryptedFilenameForDecryption = encryptedItem.Filename.Substring(0, encryptedItem.Filename.Length - 4);
-                            decryptedName = _vault.DecryptFilename(encryptedFilenameForDecryption, directoryMetadata);
+                            // This is a shortened item - need to determine if it's a file or directory
+                            // by checking what's inside the .c9s directory
+                            try
+                            {
+                                string originalEncryptedFilename = await ReadOriginalFilenameFromShortenedDirectoryAsync(
+                                    contentDirectoryPath, encryptedItem.Filename, cancellationToken);
+                                decryptedName = await DecryptShortenedFilenameAsync(
+                                    encryptedItem.Filename, originalEncryptedFilename, directoryMetadata, cancellationToken);
+                                
+                                // Determine if this shortened item is a file or directory
+                                string shortenedDirPath = Path.Combine(contentDirectoryPath, encryptedItem.Filename);
+                                string contentsFilePath = Path.Combine(shortenedDirPath, "contents.c9r");
+                                string dirFilePath = Path.Combine(shortenedDirPath, "dir.c9r");
+                                
+                                if (await _underlyingStorage.FileExistsAsync(contentsFilePath, cancellationToken))
+                                {
+                                    // Contains contents.c9r -> it's a shortened file
+                                    isDirectory = false;
+                                }
+                                else if (await _underlyingStorage.FileExistsAsync(dirFilePath, cancellationToken))
+                                {
+                                    // Contains dir.c9r -> it's a shortened directory
+                                    isDirectory = true;
+                                }
+                                else
+                                {
+                                    _logger?.LogWarning("Shortened directory {ShortenedName} contains neither contents.c9r nor dir.c9r", encryptedItem.Filename);
+                                    continue; // Skip malformed shortened item
+                                }
+                            }
+                            catch (Exception ex)
+                            {
+                                _logger?.LogWarning(ex, "Failed to decrypt shortened item name: {ShortenedName}", encryptedItem.Filename);
+                                continue; // Skip this item if we can't decrypt it
+                            }
                         }
                         else if (encryptedItem.Filename.EndsWith(".c9r"))
                         {
-                            // This is an encrypted directory - pass the full filename
+                            // This is a regular encrypted item - decrypt normally
                             decryptedName = _vault.DecryptFilename(encryptedItem.Filename, directoryMetadata);
+                            isDirectory = encryptedItem.IsDirectory;
                         }
                         else
                         {
@@ -234,9 +271,9 @@ namespace UvfLib.Storage.Decorators
                         
                         string decryptedVirtualPath = PathNormalizer.JoinVirtualPath(virtualPath, decryptedName);
 
-                        if (encryptedItem.IsDirectory)
+                        if (isDirectory)
                         {
-                            // This is an encrypted subdirectory (reference directory)
+                            // This is an encrypted subdirectory (reference directory or shortened directory)
                             var dirObject = new FileObject(decryptedVirtualPath)
                             {
                                 IsDirectory = true,
@@ -255,9 +292,22 @@ namespace UvfLib.Storage.Decorators
                         }
                         else
                         {
-                            // This is an encrypted file
-                            // Calculate expected decrypted size
-                            long expectedDecryptedSize = VaultHandler.CalculateExpectedDecryptedSize(encryptedItem.Size);
+                            // This is an encrypted file (regular or shortened)
+                            long expectedDecryptedSize;
+                            
+                            if (encryptedItem.Filename.EndsWith(".c9s"))
+                            {
+                                // For shortened files, get size from contents.c9r
+                                string shortenedDirPath = Path.Combine(contentDirectoryPath, encryptedItem.Filename);
+                                string contentsFilePath = Path.Combine(shortenedDirPath, "contents.c9r");
+                                var contentsFileInfo = await _underlyingStorage.GetFileInfoAsync(contentsFilePath, cancellationToken);
+                                expectedDecryptedSize = VaultHandler.CalculateExpectedDecryptedSize(contentsFileInfo.Size);
+                            }
+                            else
+                            {
+                                // Regular file
+                                expectedDecryptedSize = VaultHandler.CalculateExpectedDecryptedSize(encryptedItem.Size);
+                            }
                             
                             var fileObject = new FileObject(decryptedVirtualPath)
                             {
@@ -311,8 +361,23 @@ namespace UvfLib.Storage.Decorators
                 var pathResult = await _cryptomatorTranslator.TranslateToStoragePathAsync(filePath);
                 string encryptedFilePath = pathResult.StoragePath;
                 
-                // Check if the encrypted file exists in underlying storage
-                return await _underlyingStorage.FileExistsAsync(encryptedFilePath, cancellationToken);
+                // Check if this is a shortened file (stored as directory with contents.c9r)
+                if (encryptedFilePath.EndsWith(".c9s"))
+                {
+                    // For shortened files, check if the .c9s directory exists and contains contents.c9r
+                    if (!await _underlyingStorage.DirectoryExistsAsync(encryptedFilePath, cancellationToken))
+                    {
+                        return false;
+                    }
+                    
+                    string contentsFilePath = Path.Combine(encryptedFilePath, "contents.c9r");
+                    return await _underlyingStorage.FileExistsAsync(contentsFilePath, cancellationToken);
+                }
+                else
+                {
+                    // Regular file - check if the encrypted file exists in underlying storage
+                    return await _underlyingStorage.FileExistsAsync(encryptedFilePath, cancellationToken);
+                }
             }
             catch (Exception ex) when (!(ex is ArgumentException))
             {
@@ -332,14 +397,29 @@ namespace UvfLib.Storage.Decorators
                 var pathResult = await _cryptomatorTranslator.TranslateToStoragePathAsync(filePath);
                 string encryptedFilePath = pathResult.StoragePath;
                 
-                // Verify the file exists before attempting deletion
-                if (!await _underlyingStorage.FileExistsAsync(encryptedFilePath, cancellationToken))
+                // Check if this is a shortened file
+                if (encryptedFilePath.EndsWith(".c9s"))
                 {
-                    throw new FileNotFoundException($"File not found: {filePath}");
+                    // For shortened files, delete the entire .c9s directory
+                    if (!await _underlyingStorage.DirectoryExistsAsync(encryptedFilePath, cancellationToken))
+                    {
+                        throw new FileNotFoundException($"File not found: {filePath}");
+                    }
+                    
+                    // Delete the entire shortened directory structure
+                    await _underlyingStorage.DeleteDirectoryAsync(encryptedFilePath, cancellationToken);
                 }
-                
-                // Delete the encrypted .c9r file
-                await _underlyingStorage.DeleteAsync(encryptedFilePath, cancellationToken);
+                else
+                {
+                    // Regular file - verify the file exists before attempting deletion
+                    if (!await _underlyingStorage.FileExistsAsync(encryptedFilePath, cancellationToken))
+                    {
+                        throw new FileNotFoundException($"File not found: {filePath}");
+                    }
+                    
+                    // Delete the encrypted .c9r file
+                    await _underlyingStorage.DeleteAsync(encryptedFilePath, cancellationToken);
+                }
                 
             }
             catch (Exception ex) when (!(ex is FileNotFoundException || ex is ArgumentException))
@@ -360,8 +440,20 @@ namespace UvfLib.Storage.Decorators
                 var pathResult = await _cryptomatorTranslator.TranslateToStoragePathAsync(filePath);
                 string encryptedFilePath = pathResult.StoragePath;
                 
-                // Get the encrypted file info from underlying storage
-                var encryptedFileInfo = await _underlyingStorage.GetFileInfoAsync(encryptedFilePath, cancellationToken);
+                FileObject encryptedFileInfo;
+                
+                // Check if this is a shortened file
+                if (encryptedFilePath.EndsWith(".c9s"))
+                {
+                    // For shortened files, get info from the contents.c9r file
+                    string contentsFilePath = Path.Combine(encryptedFilePath, "contents.c9r");
+                    encryptedFileInfo = await _underlyingStorage.GetFileInfoAsync(contentsFilePath, cancellationToken);
+                }
+                else
+                {
+                    // Regular file - get the encrypted file info from underlying storage
+                    encryptedFileInfo = await _underlyingStorage.GetFileInfoAsync(encryptedFilePath, cancellationToken);
+                }
                 
                 // Calculate the decrypted size using VaultHandler
                 long decryptedSize = VaultHandler.CalculateExpectedDecryptedSize(encryptedFileInfo.Size);
@@ -464,6 +556,168 @@ namespace UvfLib.Storage.Decorators
             // For now, throw NotImplementedException as this requires careful handling
             // to avoid breaking the vault structure
             throw new NotImplementedException("Directory moving in Cryptomator vaults requires careful implementation to maintain vault integrity. Use file-level operations instead.");
+        }
+
+        #endregion
+
+        #region Name Shortening Support
+
+        /// <summary>
+        /// Reads the original encrypted filename from a shortened directory's name.c9s file.
+        /// </summary>
+        /// <param name="contentDirectoryPath">The content directory path where the shortened directory is located</param>
+        /// <param name="shortenedDirectoryName">The shortened directory name (e.g., "ABC123.c9s")</param>
+        /// <param name="cancellationToken">Cancellation token</param>
+        /// <returns>The original long encrypted filename</returns>
+        private async Task<string> ReadOriginalFilenameFromShortenedDirectoryAsync(
+            string contentDirectoryPath, 
+            string shortenedDirectoryName, 
+            CancellationToken cancellationToken)
+        {
+            string shortenedDirectoryPath = Path.Combine(contentDirectoryPath, shortenedDirectoryName);
+            string nameFilePath = NameShorteningHelper.GetInflatedNameFilePath(shortenedDirectoryName);
+            string fullNameFilePath = Path.Combine(contentDirectoryPath, nameFilePath);
+
+            if (!await _underlyingStorage.FileExistsAsync(fullNameFilePath, cancellationToken))
+            {
+                throw new FileNotFoundException($"Name file not found in shortened directory: {fullNameFilePath}");
+            }
+
+            // Read the original filename from the name.c9s file
+            IntPtr fileHandle = await _underlyingStorage.OpenAsync(fullNameFilePath, OpenFlags.ReadOnly, cancellationToken);
+            try
+            {
+                var fileInfo = await _underlyingStorage.GetFileInfoAsync(fullNameFilePath, cancellationToken);
+                long fileSize = fileInfo.Size;
+
+                if (fileSize <= 0)
+                {
+                    throw new InvalidDataException($"Name file is empty: {fullNameFilePath}");
+                }
+
+                // Read file content
+                IntPtr dataPtr = System.Runtime.InteropServices.Marshal.AllocHGlobal((int)fileSize);
+                try
+                {
+                    await _underlyingStorage.ReadAsync(fileHandle, 0, fileSize, dataPtr, cancellationToken);
+                    
+                    // Copy to managed array
+                    byte[] fileBytes = new byte[fileSize];
+                    System.Runtime.InteropServices.Marshal.Copy(dataPtr, fileBytes, 0, (int)fileSize);
+                    
+                    // Convert to string and trim
+                    string originalFilename = Encoding.UTF8.GetString(fileBytes).Trim();
+                    
+                    if (string.IsNullOrEmpty(originalFilename))
+                    {
+                        throw new InvalidDataException($"Name file contains empty filename: {fullNameFilePath}");
+                    }
+
+                    return originalFilename;
+                }
+                finally
+                {
+                    System.Runtime.InteropServices.Marshal.FreeHGlobal(dataPtr);
+                }
+            }
+            finally
+            {
+                await _underlyingStorage.CloseAsync(fileHandle, cancellationToken);
+            }
+        }
+
+        /// <summary>
+        /// Decrypts a shortened filename using the original encrypted filename.
+        /// </summary>
+        /// <param name="shortenedDirectoryName">The shortened directory name</param>
+        /// <param name="originalEncryptedFilename">The original long encrypted filename</param>
+        /// <param name="directoryMetadata">The directory metadata for decryption context</param>
+        /// <param name="cancellationToken">Cancellation token</param>
+        /// <returns>The decrypted filename</returns>
+        private async Task<string> DecryptShortenedFilenameAsync(
+            string shortenedDirectoryName,
+            string originalEncryptedFilename,
+            UvfLib.Core.Api.DirectoryMetadata directoryMetadata,
+            CancellationToken cancellationToken)
+        {
+            // Validate that the shortened name matches the original filename
+            if (!NameShorteningHelper.ValidateShortenedName(shortenedDirectoryName, originalEncryptedFilename))
+            {
+                throw new InvalidDataException(
+                    $"Shortened directory name '{shortenedDirectoryName}' does not match " +
+                    $"original encrypted filename '{originalEncryptedFilename}'");
+            }
+
+            // For now, just decrypt the original filename normally
+            // The DirectoryContentCryptor's DecryptShortenedFilename method will handle validation internally
+            return _vault.DecryptFilename(originalEncryptedFilename, directoryMetadata);
+        }
+
+        /// <summary>
+        /// Writes the original encrypted filename to a shortened directory's name.c9s file.
+        /// </summary>
+        /// <param name="contentDirectoryPath">The content directory path</param>
+        /// <param name="shortenedDirectoryName">The shortened directory name</param>
+        /// <param name="originalEncryptedFilename">The original long encrypted filename to store</param>
+        /// <param name="cancellationToken">Cancellation token</param>
+        private async Task WriteOriginalFilenameToShortenedDirectoryAsync(
+            string contentDirectoryPath,
+            string shortenedDirectoryName,
+            string originalEncryptedFilename,
+            CancellationToken cancellationToken)
+        {
+            string shortenedDirectoryPath = Path.Combine(contentDirectoryPath, shortenedDirectoryName);
+            
+            // Ensure the shortened directory exists
+            if (!await _underlyingStorage.DirectoryExistsAsync(shortenedDirectoryPath, cancellationToken))
+            {
+                await _underlyingStorage.CreateDirectoryAsync(shortenedDirectoryPath, cancellationToken);
+            }
+
+            string nameFilePath = NameShorteningHelper.GetInflatedNameFilePath(shortenedDirectoryName);
+            string fullNameFilePath = Path.Combine(contentDirectoryPath, nameFilePath);
+
+            // Write the original filename to the name.c9s file
+            byte[] filenameBytes = Encoding.UTF8.GetBytes(originalEncryptedFilename);
+            
+            IntPtr fileHandle = await _underlyingStorage.OpenAsync(fullNameFilePath, OpenFlags.Create | OpenFlags.WriteOnly, cancellationToken);
+            try
+            {
+                IntPtr dataPtr = System.Runtime.InteropServices.Marshal.AllocHGlobal(filenameBytes.Length);
+                try
+                {
+                    System.Runtime.InteropServices.Marshal.Copy(filenameBytes, 0, dataPtr, filenameBytes.Length);
+                    await _underlyingStorage.WriteAsync(fileHandle, 0, filenameBytes.Length, dataPtr, cancellationToken);
+                }
+                finally
+                {
+                    System.Runtime.InteropServices.Marshal.FreeHGlobal(dataPtr);
+                }
+            }
+            finally
+            {
+                await _underlyingStorage.CloseAsync(fileHandle, cancellationToken);
+            }
+        }
+
+        /// <summary>
+        /// Extracts the directory ID from directory metadata for use with DirectoryContentCryptor methods.
+        /// </summary>
+        /// <param name="directoryMetadata">The directory metadata</param>
+        /// <returns>The Base64Url encoded directory ID</returns>
+        private string GetDirectoryIdFromMetadata(UvfLib.Core.Api.DirectoryMetadata directoryMetadata)
+        {
+            // For Cryptomator V8, we need to extract the directory ID
+            // This is implementation-specific and may need adjustment based on the actual metadata structure
+            if (directoryMetadata is UvfLib.Core.CryptomatorV8.DirectoryMetadataImpl cryptomatorMetadata)
+            {
+                return Convert.ToBase64String(cryptomatorMetadata.DirIdBytes())
+                    .Replace('+', '-')
+                    .Replace('/', '_')
+                    .TrimEnd('=');
+            }
+            
+            throw new NotSupportedException("Directory metadata type not supported for name shortening");
         }
 
         #endregion

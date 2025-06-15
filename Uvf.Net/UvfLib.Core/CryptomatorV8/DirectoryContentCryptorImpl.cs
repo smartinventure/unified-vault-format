@@ -150,16 +150,25 @@ namespace UvfLib.Core.CryptomatorV8
 
         /// <summary>
         /// Encrypts a filename in the context of a directory.
+        /// Automatically applies name shortening if the encrypted filename exceeds the threshold.
         /// </summary>
         /// <param name="cleartextName">The cleartext filename</param>
         /// <param name="directoryId">The Base64Url encoded directory ID</param>
-        /// <returns>The encrypted filename (including .c9r extension)</returns>
+        /// <returns>The encrypted filename (including .c9r extension) or shortened directory name</returns>
         public string EncryptFilename(string cleartextName, string directoryId)
         {
             byte[] dirIdBytes = Base64Url.Decode(directoryId);
             var fileNameCryptor = _cryptor.FileNameCryptorInternal();
             string ciphertext = fileNameCryptor.EncryptFilename(cleartextName, dirIdBytes);
-            return ciphertext + Constants.C9R_FILE_EXT;
+            string fullEncryptedName = ciphertext + Constants.C9R_FILE_EXT;
+            
+            // Apply name shortening if needed
+            if (NameShorteningHelper.NeedsShortening(fullEncryptedName))
+            {
+                return NameShorteningHelper.CreateShortenedDirectoryName(fullEncryptedName);
+            }
+            
+            return fullEncryptedName;
         }
 
         /// <summary>
@@ -177,14 +186,25 @@ namespace UvfLib.Core.CryptomatorV8
 
         /// <summary>
         /// Decrypts a filename in the context of a directory.
+        /// Handles both normal encrypted filenames and shortened directory names.
         /// </summary>
-        /// <param name="ciphertextName">The encrypted filename (including .c9r extension)</param>
+        /// <param name="ciphertextName">The encrypted filename (including .c9r extension) or shortened directory name</param>
         /// <param name="directoryId">The Base64Url encoded directory ID</param>
         /// <returns>The decrypted filename</returns>
         /// <exception cref="AuthenticationFailedException">If decryption fails</exception>
         /// <exception cref="ArgumentException">If filename format is invalid</exception>
+        /// <exception cref="NotSupportedException">If trying to decrypt a shortened name without the original</exception>
         public string DecryptFilename(string ciphertextName, string directoryId)
         {
+            // Check if this is a shortened directory name
+            if (NameShorteningHelper.IsShortenedDirectory(ciphertextName))
+            {
+                throw new NotSupportedException(
+                    $"Cannot decrypt shortened directory name '{ciphertextName}' directly. " +
+                    "The original long encrypted filename must be read from the name.c9s file first. " +
+                    "Use DecryptShortenedFilename() method instead.");
+            }
+            
             // Remove the .c9r extension
             if (!ciphertextName.EndsWith(Constants.C9R_FILE_EXT))
             {
@@ -195,6 +215,30 @@ namespace UvfLib.Core.CryptomatorV8
             byte[] dirIdBytes = Base64Url.Decode(directoryId);
             var fileNameCryptor = _cryptor.FileNameCryptorInternal();
             return fileNameCryptor.DecryptFilename(ciphertextWithoutExt, dirIdBytes);
+        }
+
+        /// <summary>
+        /// Decrypts a shortened filename by reading the original encrypted filename from the name.c9s file.
+        /// This method requires access to the storage layer to read the inflated name file.
+        /// </summary>
+        /// <param name="shortenedDirectoryName">The shortened directory name (e.g., "ABC123.c9s")</param>
+        /// <param name="originalEncryptedFilename">The original long encrypted filename read from name.c9s file</param>
+        /// <param name="directoryId">The Base64Url encoded directory ID</param>
+        /// <returns>The decrypted filename</returns>
+        /// <exception cref="ArgumentException">If the shortened name doesn't match the original filename</exception>
+        /// <exception cref="AuthenticationFailedException">If decryption fails</exception>
+        public string DecryptShortenedFilename(string shortenedDirectoryName, string originalEncryptedFilename, string directoryId)
+        {
+            // Validate that the shortened name matches the original filename
+            if (!NameShorteningHelper.ValidateShortenedName(shortenedDirectoryName, originalEncryptedFilename))
+            {
+                throw new ArgumentException(
+                    $"Shortened directory name '{shortenedDirectoryName}' does not match " +
+                    $"original encrypted filename '{originalEncryptedFilename}'");
+            }
+
+            // Now decrypt the original filename normally
+            return DecryptFilename(originalEncryptedFilename, directoryId);
         }
 
         /// <summary>
@@ -228,13 +272,24 @@ namespace UvfLib.Core.CryptomatorV8
 
             /// <summary>
             /// Decrypts a filename.
+            /// Handles both normal encrypted filenames and shortened directory names.
             /// </summary>
-            /// <param name="ciphertext">The encrypted filename (including .c9r extension)</param>
+            /// <param name="ciphertext">The encrypted filename (including .c9r extension) or shortened directory name</param>
             /// <returns>The decrypted filename</returns>
             /// <exception cref="AuthenticationFailedException">If decryption fails</exception>
             /// <exception cref="ArgumentException">If filename format is invalid</exception>
+            /// <exception cref="NotSupportedException">If trying to decrypt a shortened name without the original</exception>
             public string Decrypt(string ciphertext)
             {
+                // Check if this is a shortened directory name
+                if (NameShorteningHelper.IsShortenedDirectory(ciphertext))
+                {
+                    throw new NotSupportedException(
+                        $"Cannot decrypt shortened directory name '{ciphertext}' directly. " +
+                        "The original long encrypted filename must be read from the name.c9s file first. " +
+                        "Use the parent DirectoryContentCryptor.DecryptShortenedFilename() method instead.");
+                }
+                
                 // Remove the .c9r extension
                 if (!ciphertext.EndsWith(Constants.C9R_FILE_EXT))
                 {
@@ -262,13 +317,22 @@ namespace UvfLib.Core.CryptomatorV8
 
             /// <summary>
             /// Encrypts a filename.
+            /// Automatically applies name shortening if the encrypted filename exceeds the threshold.
             /// </summary>
             /// <param name="plaintext">The cleartext filename</param>
-            /// <returns>The encrypted filename (including .c9r extension)</returns>
+            /// <returns>The encrypted filename (including .c9r extension) or shortened directory name</returns>
             public string Encrypt(string plaintext)
             {
                 string ciphertext = _fileNameCryptor.EncryptFilename(plaintext, _dirId);
-                return ciphertext + Constants.C9R_FILE_EXT;
+                string fullEncryptedName = ciphertext + Constants.C9R_FILE_EXT;
+                
+                // Apply name shortening if needed
+                if (NameShorteningHelper.NeedsShortening(fullEncryptedName))
+                {
+                    return NameShorteningHelper.CreateShortenedDirectoryName(fullEncryptedName);
+                }
+                
+                return fullEncryptedName;
             }
         }
     }

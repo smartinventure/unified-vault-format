@@ -5,6 +5,8 @@ using UvfLib.Storage.Common;
 using UvfLib.Vault;
 using System.Runtime.InteropServices;
 using DirectoryMetadata = UvfLib.Core.Api.DirectoryMetadata;
+using UvfLib.Core.CryptomatorV8;
+using System.Text;
 
 namespace UvfLib.Storage.PathTranslators
 {
@@ -84,8 +86,19 @@ namespace UvfLib.Storage.PathTranslators
                 // Encrypt directory name using current directory's metadata
                 string encryptedDirName = _vault.EncryptFilename(dirName, currentDirMetadata);
                 
+                // Check if name shortening is needed and get the actual directory name
+                string actualDirectoryName;
+                if (NameShorteningHelper.NeedsShortening(encryptedDirName))
+                {
+                    actualDirectoryName = NameShorteningHelper.CreateShortenedDirectoryName(encryptedDirName);
+                }
+                else
+                {
+                    actualDirectoryName = encryptedDirName;
+                }
+                
                 // Move to the reference directory (this contains dir.c9r)
-                currentReferenceDir = Path.Combine(currentReferenceDir, encryptedDirName);
+                currentReferenceDir = Path.Combine(currentReferenceDir, actualDirectoryName);
                 
                 // Load the subdirectory metadata from dir.c9r in the REFERENCE directory
                 currentDirMetadata = await LoadDirectoryMetadataFromDirC9rAsync(currentReferenceDir, CancellationToken.None);
@@ -97,12 +110,23 @@ namespace UvfLib.Storage.PathTranslators
             
             if (IsDirectory(virtualPath))
             {
+                // Check if the final directory name needs shortening
+                string actualFinalDirectoryName;
+                if (NameShorteningHelper.NeedsShortening(encryptedFinalName))
+                {
+                    actualFinalDirectoryName = NameShorteningHelper.CreateShortenedDirectoryName(encryptedFinalName);
+                }
+                else
+                {
+                    actualFinalDirectoryName = encryptedFinalName;
+                }
+                
                 // It's a directory - return the reference directory path
                 return new VaultPathResult
                 {
-                    StoragePath = Path.Combine(currentReferenceDir, encryptedFinalName),
-                    ContentDirectoryPath = Path.Combine(currentReferenceDir, encryptedFinalName),
-                    EncryptedFilename = encryptedFinalName,
+                    StoragePath = Path.Combine(currentReferenceDir, actualFinalDirectoryName),
+                    ContentDirectoryPath = Path.Combine(currentReferenceDir, actualFinalDirectoryName),
+                    EncryptedFilename = actualFinalDirectoryName,
                     ParentMetadata = currentDirMetadata,
                     IsEncrypted = true,
                     RequiresDirectoryCreation = true
@@ -116,11 +140,25 @@ namespace UvfLib.Storage.PathTranslators
                 string normalizedVaultDirPath = PathNormalizer.NormalizeVaultDirectoryPath(vaultDirectoryPath);
                 string contentDir = PathNormalizer.CombineWithMountPoint(_vaultBasePath, normalizedVaultDirPath);
                 
+                // Check if the file name needs shortening (files get .c9r extension)
+                string encryptedFileNameWithExtension = encryptedFinalName + GetEncryptedFileExtension();
+                string actualFileName;
+                
+                if (NameShorteningHelper.NeedsShortening(encryptedFileNameWithExtension))
+                {
+                    // For files, we create a shortened directory structure with contents.c9r
+                    actualFileName = NameShorteningHelper.CreateShortenedDirectoryName(encryptedFileNameWithExtension);
+                }
+                else
+                {
+                    actualFileName = encryptedFileNameWithExtension;
+                }
+                
                 return new VaultPathResult
                 {
-                    StoragePath = Path.Combine(contentDir, encryptedFinalName + GetEncryptedFileExtension()),
+                    StoragePath = Path.Combine(contentDir, actualFileName),
                     ContentDirectoryPath = contentDir,
-                    EncryptedFilename = encryptedFinalName + GetEncryptedFileExtension(),
+                    EncryptedFilename = actualFileName,
                     ParentMetadata = currentDirMetadata,
                     IsEncrypted = true,
                     RequiresDirectoryCreation = false
@@ -244,9 +282,30 @@ namespace UvfLib.Storage.PathTranslators
                 // 2. Encrypt directory name
                 string encryptedSubDirName = _vault.EncryptFilename(dirName, currentDirMetadata);
                 
-                // 3. Create reference directory
-                string subDirReferenceDir = Path.Combine(currentReferenceDir, encryptedSubDirName);
+                // 3. Check if name shortening is needed
+                string actualDirectoryName;
+                bool needsShortening = NameShorteningHelper.NeedsShortening(encryptedSubDirName);
+                
+                if (needsShortening)
+                {
+                    // Create shortened directory name
+                    actualDirectoryName = NameShorteningHelper.CreateShortenedDirectoryName(encryptedSubDirName);
+                }
+                else
+                {
+                    actualDirectoryName = encryptedSubDirName;
+                }
+                
+                // 4. Create reference directory
+                string subDirReferenceDir = Path.Combine(currentReferenceDir, actualDirectoryName);
                 await _underlyingStorage.CreateDirectoryAsync(subDirReferenceDir, cancellationToken);
+                
+                // 5. If name shortening was used, create the name.c9s file
+                if (needsShortening)
+                {
+                    await CreateNameFileForShortenedDirectoryAsync(
+                        currentReferenceDir, actualDirectoryName, encryptedSubDirName, cancellationToken);
+                }
                 
                 // 4. Create dir.c9r file (plaintext UUID) using IStorage interface
                 byte[] decodedDirIdBytes = Convert.FromBase64String(subDirMetadata.DirId);
@@ -432,6 +491,75 @@ namespace UvfLib.Storage.PathTranslators
             {
                 throw new IOException($"Failed to delete directory {virtualDirPath}: {ex.Message}", ex);
             }
+        }
+
+        #endregion
+
+        #region Name Shortening Support
+
+        /// <summary>
+        /// Creates the name.c9s file for a shortened directory containing the original encrypted filename.
+        /// </summary>
+        /// <param name="parentDirectoryPath">The parent directory path where the shortened directory is located</param>
+        /// <param name="shortenedDirectoryName">The shortened directory name (e.g., "ABC123.c9s")</param>
+        /// <param name="originalEncryptedFilename">The original long encrypted filename to store</param>
+        /// <param name="cancellationToken">Cancellation token</param>
+        private async Task CreateNameFileForShortenedDirectoryAsync(
+            string parentDirectoryPath,
+            string shortenedDirectoryName,
+            string originalEncryptedFilename,
+            CancellationToken cancellationToken)
+        {
+            // Get the path for the name.c9s file
+            string nameFilePath = NameShorteningHelper.GetInflatedNameFilePath(shortenedDirectoryName);
+            string fullNameFilePath = Path.Combine(parentDirectoryPath, nameFilePath);
+
+            // Write the original filename to the name.c9s file
+            byte[] filenameBytes = Encoding.UTF8.GetBytes(originalEncryptedFilename);
+            
+            IntPtr fileHandle = await _underlyingStorage.OpenAsync(fullNameFilePath, OpenFlags.Create | OpenFlags.WriteOnly, cancellationToken);
+            try
+            {
+                IntPtr dataPtr = Marshal.AllocHGlobal(filenameBytes.Length);
+                try
+                {
+                    Marshal.Copy(filenameBytes, 0, dataPtr, filenameBytes.Length);
+                    await _underlyingStorage.WriteAsync(fileHandle, 0, filenameBytes.Length, dataPtr, cancellationToken);
+                }
+                finally
+                {
+                    Marshal.FreeHGlobal(dataPtr);
+                }
+            }
+            finally
+            {
+                await _underlyingStorage.CloseAsync(fileHandle, cancellationToken);
+            }
+        }
+
+        /// <summary>
+        /// Creates the shortened file structure for files that exceed the length threshold.
+        /// This creates a .c9s directory with name.c9s and prepares for contents.c9r.
+        /// </summary>
+        /// <param name="contentDirectoryPath">The content directory path</param>
+        /// <param name="shortenedFileName">The shortened file name (e.g., "ABC123.c9s")</param>
+        /// <param name="originalEncryptedFilename">The original long encrypted filename</param>
+        /// <param name="cancellationToken">Cancellation token</param>
+        public async Task CreateShortenedFileStructureAsync(
+            string contentDirectoryPath,
+            string shortenedFileName,
+            string originalEncryptedFilename,
+            CancellationToken cancellationToken)
+        {
+            string shortenedDirectoryPath = Path.Combine(contentDirectoryPath, shortenedFileName);
+            
+            // Create the .c9s directory
+            await _underlyingStorage.CreateDirectoryAsync(shortenedDirectoryPath, cancellationToken);
+            
+            // Create the name.c9s file with the original filename
+            await CreateNameFileForShortenedDirectoryAsync(contentDirectoryPath, shortenedFileName, originalEncryptedFilename, cancellationToken);
+            
+            // Note: contents.c9r will be created when the file content is written
         }
 
         #endregion

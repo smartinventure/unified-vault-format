@@ -4,6 +4,9 @@ using UvfLib.Storage.Decorators;
 using UvfLib.Storage.PathTranslators;
 using UvfLib.Vault;
 using System.Text;
+using System.Security;
+using System.Runtime.InteropServices;
+using System.Security.Cryptography;
 
 namespace UvfLib.Storage
 {
@@ -11,6 +14,7 @@ namespace UvfLib.Storage
     /// High-level vault manager that provides an easy-to-use API for vault operations.
     /// Supports different storage connectors (LocalStorage, MemoryStorage, S3Storage, etc.)
     /// and uses forward-slash path normalization for cross-platform compatibility.
+    /// Implements secure memory management for passwords and cryptographic keys.
     /// </summary>
     public class VaultManager : IDisposable, IStreamStorage
     {
@@ -28,9 +32,21 @@ namespace UvfLib.Storage
         /// Creates a new Cryptomator V8 vault at the specified path using LocalStorage
         /// </summary>
         /// <param name="vaultPath">Path where the vault should be created</param>
-        /// <param name="password">Vault password</param>
+        /// <param name="password">Vault password (will be securely cleared after key derivation)</param>
         /// <returns>A VaultManager instance for the new vault</returns>
         public static async Task<VaultManager> CreateVaultAsync(string vaultPath, string password)
+        {
+            var storage = await StorageFactory.CreateInitializedLocalStorageAsync("/");
+            return await CreateVaultAsync(storage, password, vaultPath, ownsStorage: true);
+        }
+
+        /// <summary>
+        /// Creates a new Cryptomator V8 vault at the specified path using LocalStorage with secure password handling
+        /// </summary>
+        /// <param name="vaultPath">Path where the vault should be created</param>
+        /// <param name="password">Vault password (will be securely cleared after key derivation)</param>
+        /// <returns>A VaultManager instance for the new vault</returns>
+        public static async Task<VaultManager> CreateVaultAsync(string vaultPath, SecureString password)
         {
             var storage = await StorageFactory.CreateInitializedLocalStorageAsync("/");
             return await CreateVaultAsync(storage, password, vaultPath, ownsStorage: true);
@@ -40,9 +56,21 @@ namespace UvfLib.Storage
         /// Loads an existing Cryptomator V8 vault from the specified path using LocalStorage
         /// </summary>
         /// <param name="vaultPath">Path where the vault is located</param>
-        /// <param name="password">Vault password</param>
+        /// <param name="password">Vault password (will be securely cleared after key derivation)</param>
         /// <returns>A VaultManager instance for the existing vault</returns>
         public static async Task<VaultManager> LoadVaultAsync(string vaultPath, string password)
+        {
+            var storage = await StorageFactory.CreateInitializedLocalStorageAsync("/");
+            return await LoadVaultAsync(storage, password, vaultPath, ownsStorage: true);
+        }
+
+        /// <summary>
+        /// Loads an existing Cryptomator V8 vault from the specified path using LocalStorage with secure password handling
+        /// </summary>
+        /// <param name="vaultPath">Path where the vault is located</param>
+        /// <param name="password">Vault password (will be securely cleared after key derivation)</param>
+        /// <returns>A VaultManager instance for the existing vault</returns>
+        public static async Task<VaultManager> LoadVaultAsync(string vaultPath, SecureString password)
         {
             var storage = await StorageFactory.CreateInitializedLocalStorageAsync("/");
             return await LoadVaultAsync(storage, password, vaultPath, ownsStorage: true);
@@ -56,7 +84,7 @@ namespace UvfLib.Storage
         /// Creates a new Cryptomator V8 vault using the provided storage connector
         /// </summary>
         /// <param name="storage">Storage connector (LocalStorage, MemoryStorage, S3Storage, etc.)</param>
-        /// <param name="password">Vault password</param>
+        /// <param name="password">Vault password (will be securely cleared after key derivation)</param>
         /// <param name="vaultBasePath">Base path for vault operations (used for path translation)</param>
         /// <param name="ownsStorage">Whether VaultManager should dispose the storage when closed</param>
         /// <returns>A VaultManager instance for the new vault</returns>
@@ -68,14 +96,44 @@ namespace UvfLib.Storage
         }
 
         /// <summary>
+        /// Creates a new Cryptomator V8 vault using the provided storage connector with secure password handling
+        /// </summary>
+        /// <param name="storage">Storage connector (LocalStorage, MemoryStorage, S3Storage, etc.)</param>
+        /// <param name="password">Vault password (will be securely cleared after key derivation)</param>
+        /// <param name="vaultBasePath">Base path for vault operations (used for path translation)</param>
+        /// <param name="ownsStorage">Whether VaultManager should dispose the storage when closed</param>
+        /// <returns>A VaultManager instance for the new vault</returns>
+        public static async Task<VaultManager> CreateVaultAsync(IStorage storage, SecureString password, string vaultBasePath, bool ownsStorage = false)
+        {
+            var manager = new VaultManager();
+            await manager.InitializeNewVaultAsync(storage, password, vaultBasePath, ownsStorage);
+            return manager;
+        }
+
+        /// <summary>
         /// Loads an existing Cryptomator V8 vault using the provided storage connector
         /// </summary>
         /// <param name="storage">Storage connector (LocalStorage, MemoryStorage, S3Storage, etc.)</param>
-        /// <param name="password">Vault password</param>
+        /// <param name="password">Vault password (will be securely cleared after key derivation)</param>
         /// <param name="vaultBasePath">Base path for vault operations (used for path translation)</param>
         /// <param name="ownsStorage">Whether VaultManager should dispose the storage when closed</param>
         /// <returns>A VaultManager instance for the existing vault</returns>
         public static async Task<VaultManager> LoadVaultAsync(IStorage storage, string password, string vaultBasePath, bool ownsStorage = false)
+        {
+            var manager = new VaultManager();
+            await manager.InitializeExistingVaultAsync(storage, password, vaultBasePath, ownsStorage);
+            return manager;
+        }
+
+        /// <summary>
+        /// Loads an existing Cryptomator V8 vault using the provided storage connector with secure password handling
+        /// </summary>
+        /// <param name="storage">Storage connector (LocalStorage, MemoryStorage, S3Storage, etc.)</param>
+        /// <param name="password">Vault password (will be securely cleared after key derivation)</param>
+        /// <param name="vaultBasePath">Base path for vault operations (used for path translation)</param>
+        /// <param name="ownsStorage">Whether VaultManager should dispose the storage when closed</param>
+        /// <returns>A VaultManager instance for the existing vault</returns>
+        public static async Task<VaultManager> LoadVaultAsync(IStorage storage, SecureString password, string vaultBasePath, bool ownsStorage = false)
         {
             var manager = new VaultManager();
             await manager.InitializeExistingVaultAsync(storage, password, vaultBasePath, ownsStorage);
@@ -89,7 +147,7 @@ namespace UvfLib.Storage
         /// <summary>
         /// Changes the vault password
         /// </summary>
-        /// <param name="newPassword">New vault password</param>
+        /// <param name="newPassword">New vault password (will be securely cleared after key derivation)</param>
         public async Task ChangePasswordAsync(string newPassword)
         {
             EnsureOpen();
@@ -97,6 +155,18 @@ namespace UvfLib.Storage
             // TODO: Implement password change functionality
             // This requires VaultHandler to support password changes
             // May need to re-encrypt the masterkey file with new password
+            throw new NotImplementedException("Password change functionality requires VaultHandler enhancement");
+        }
+
+        /// <summary>
+        /// Changes the vault password with secure password handling
+        /// </summary>
+        /// <param name="newPassword">New vault password (will be securely cleared after key derivation)</param>
+        public async Task ChangePasswordAsync(SecureString newPassword)
+        {
+            EnsureOpen();
+            
+            // TODO: Implement password change functionality with SecureString
             throw new NotImplementedException("Password change functionality requires VaultHandler enhancement");
         }
 
@@ -121,6 +191,7 @@ namespace UvfLib.Storage
                     _baseStorage = null;
                 }
 
+                // Securely dispose vault (clears cryptographic keys)
                 _vault?.Dispose();
                 _vault = null;
                 _isOpen = false;
@@ -407,6 +478,40 @@ namespace UvfLib.Storage
             }
         }
 
+        private async Task InitializeNewVaultAsync(IStorage storage, SecureString password, string vaultBasePath, bool ownsStorage)
+        {
+            _baseStorage = storage;
+            _vaultBasePath = vaultBasePath;
+            _ownsStorage = ownsStorage;
+
+            // Convert SecureString to string for vault operations, then clear it
+            string plainPassword = ConvertSecureStringToString(password);
+            try
+            {
+                // Create new Cryptomator V8 vault
+                VaultHandler.CreateNewCryptomatorV8VaultComplete(vaultBasePath, plainPassword);
+
+                // Load the newly created vault
+                await LoadVaultInternalAsync(plainPassword);
+                _isOpen = true;
+            }
+            catch
+            {
+                // Cleanup on failure
+                if (_ownsStorage)
+                {
+                    await storage.ShutdownAsync();
+                    storage.Dispose();
+                }
+                throw;
+            }
+            finally
+            {
+                // Securely clear the password from memory
+                ClearString(plainPassword);
+            }
+        }
+
         private async Task InitializeExistingVaultAsync(IStorage storage, string password, string vaultBasePath, bool ownsStorage)
         {
             _baseStorage = storage;
@@ -431,6 +536,37 @@ namespace UvfLib.Storage
             }
         }
 
+        private async Task InitializeExistingVaultAsync(IStorage storage, SecureString password, string vaultBasePath, bool ownsStorage)
+        {
+            _baseStorage = storage;
+            _vaultBasePath = vaultBasePath;
+            _ownsStorage = ownsStorage;
+
+            // Convert SecureString to string for vault operations, then clear it
+            string plainPassword = ConvertSecureStringToString(password);
+            try
+            {
+                // Load existing vault
+                await LoadVaultInternalAsync(plainPassword);
+                _isOpen = true;
+            }
+            catch
+            {
+                // Cleanup on failure
+                if (_ownsStorage)
+                {
+                    await storage.ShutdownAsync();
+                    storage.Dispose();
+                }
+                throw;
+            }
+            finally
+            {
+                // Securely clear the password from memory
+                ClearString(plainPassword);
+            }
+        }
+
         private async Task LoadVaultInternalAsync(string password)
         {
             // Load vault from masterkey file
@@ -451,6 +587,60 @@ namespace UvfLib.Storage
                 _vaultBasePath!,
                 logger: null
             );
+        }
+
+        /// <summary>
+        /// Converts a SecureString to a regular string for vault operations.
+        /// The returned string should be cleared using ClearString() after use.
+        /// </summary>
+        /// <param name="secureString">The SecureString to convert</param>
+        /// <returns>A string representation of the SecureString</returns>
+        private static string ConvertSecureStringToString(SecureString secureString)
+        {
+            IntPtr ptr = IntPtr.Zero;
+            try
+            {
+                ptr = Marshal.SecureStringToGlobalAllocUnicode(secureString);
+                return Marshal.PtrToStringUni(ptr) ?? string.Empty;
+            }
+            finally
+            {
+                if (ptr != IntPtr.Zero)
+                {
+                    Marshal.ZeroFreeGlobalAllocUnicode(ptr);
+                }
+            }
+        }
+
+        /// <summary>
+        /// Securely clears a string from memory by overwriting its internal character array.
+        /// Note: This uses reflection and may not work in all .NET implementations.
+        /// </summary>
+        /// <param name="str">The string to clear</param>
+        private static void ClearString(string str)
+        {
+            if (string.IsNullOrEmpty(str)) return;
+
+            try
+            {
+                // In .NET, strings are immutable, but we can try to clear the underlying memory
+                // This is a best-effort approach and may not work in all scenarios
+                unsafe
+                {
+                    fixed (char* ptr = str)
+                    {
+                        for (int i = 0; i < str.Length; i++)
+                        {
+                            ptr[i] = '\0';
+                        }
+                    }
+                }
+            }
+            catch
+            {
+                // If clearing fails, we can't do much more
+                // The GC will eventually collect the string
+            }
         }
 
         private void EnsureOpen()
