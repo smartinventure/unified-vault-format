@@ -140,28 +140,32 @@ namespace UvfLib.Storage.PathTranslators
                 string normalizedVaultDirPath = PathNormalizer.NormalizeVaultDirectoryPath(vaultDirectoryPath);
                 string contentDir = PathNormalizer.CombineWithMountPoint(_vaultBasePath, normalizedVaultDirPath);
                 
-                // Check if the file name needs shortening (files get .c9r extension)
-                string encryptedFileNameWithExtension = encryptedFinalName + GetEncryptedFileExtension();
+                // The encryptedFinalName already includes the .c9r extension from VaultHandler.EncryptFilename
+                // Check if the file name needs shortening
                 string actualFileName;
+                bool isShortened = false;
                 
-                if (NameShorteningHelper.NeedsShortening(encryptedFileNameWithExtension))
+                if (NameShorteningHelper.NeedsShortening(encryptedFinalName))
                 {
                     // For files, we create a shortened directory structure with contents.c9r
-                    actualFileName = NameShorteningHelper.CreateShortenedDirectoryName(encryptedFileNameWithExtension);
+                    actualFileName = NameShorteningHelper.CreateShortenedDirectoryName(encryptedFinalName);
+                    isShortened = true;
                 }
                 else
                 {
-                    actualFileName = encryptedFileNameWithExtension;
+                    actualFileName = encryptedFinalName;
                 }
                 
                 return new VaultPathResult
                 {
+                    // For shortened files, StoragePath points to the .c9s directory, not the contents.c9r file
+                    // The OpenWriteAsync/OpenReadAsync methods will handle accessing contents.c9r inside this directory
                     StoragePath = Path.Combine(contentDir, actualFileName),
                     ContentDirectoryPath = contentDir,
                     EncryptedFilename = actualFileName,
                     ParentMetadata = currentDirMetadata,
                     IsEncrypted = true,
-                    RequiresDirectoryCreation = false
+                    RequiresDirectoryCreation = isShortened // Shortened files need directory creation
                 };
             }
         }

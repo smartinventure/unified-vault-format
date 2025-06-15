@@ -150,11 +150,11 @@ namespace UvfLib.Core.CryptomatorV8
 
         /// <summary>
         /// Encrypts a filename in the context of a directory.
-        /// Automatically applies name shortening if the encrypted filename exceeds the threshold.
+        /// Returns the full encrypted filename with .c9r extension (no automatic shortening).
         /// </summary>
         /// <param name="cleartextName">The cleartext filename</param>
         /// <param name="directoryId">The Base64Url encoded directory ID</param>
-        /// <returns>The encrypted filename (including .c9r extension) or shortened directory name</returns>
+        /// <returns>The encrypted filename (including .c9r extension)</returns>
         public string EncryptFilename(string cleartextName, string directoryId)
         {
             byte[] dirIdBytes = Base64Url.Decode(directoryId);
@@ -162,12 +162,7 @@ namespace UvfLib.Core.CryptomatorV8
             string ciphertext = fileNameCryptor.EncryptFilename(cleartextName, dirIdBytes);
             string fullEncryptedName = ciphertext + Constants.C9R_FILE_EXT;
             
-            // Apply name shortening if needed
-            if (NameShorteningHelper.NeedsShortening(fullEncryptedName))
-            {
-                return NameShorteningHelper.CreateShortenedDirectoryName(fullEncryptedName);
-            }
-            
+            // Return the full encrypted filename - shortening should be handled at the storage layer
             return fullEncryptedName;
         }
 
@@ -297,7 +292,23 @@ namespace UvfLib.Core.CryptomatorV8
                 }
                 
                 string ciphertextWithoutExt = ciphertext.Substring(0, ciphertext.Length - Constants.C9R_FILE_EXT.Length);
-                return _fileNameCryptor.DecryptFilename(ciphertextWithoutExt, _dirId);
+                
+                // Add debugging information to help diagnose Base64 format issues
+                try
+                {
+                    return _fileNameCryptor.DecryptFilename(ciphertextWithoutExt, _dirId);
+                }
+                catch (System.FormatException ex) when (ex.Message.Contains("Base-64"))
+                {
+                    throw new ArgumentException(
+                        $"Base64 format error in filename decryption. " +
+                        $"Original ciphertext: '{ciphertext}' " +
+                        $"After extension removal: '{ciphertextWithoutExt}' " +
+                        $"Extension constant: '{Constants.C9R_FILE_EXT}' " +
+                        $"Ciphertext length: {ciphertext.Length} " +
+                        $"Extension length: {Constants.C9R_FILE_EXT.Length} " +
+                        $"Result length: {ciphertextWithoutExt.Length}", ex);
+                }
             }
         }
 
@@ -317,21 +328,16 @@ namespace UvfLib.Core.CryptomatorV8
 
             /// <summary>
             /// Encrypts a filename.
-            /// Automatically applies name shortening if the encrypted filename exceeds the threshold.
+            /// Returns the full encrypted filename with .c9r extension (no automatic shortening).
             /// </summary>
             /// <param name="plaintext">The cleartext filename</param>
-            /// <returns>The encrypted filename (including .c9r extension) or shortened directory name</returns>
+            /// <returns>The encrypted filename (including .c9r extension)</returns>
             public string Encrypt(string plaintext)
             {
                 string ciphertext = _fileNameCryptor.EncryptFilename(plaintext, _dirId);
                 string fullEncryptedName = ciphertext + Constants.C9R_FILE_EXT;
                 
-                // Apply name shortening if needed
-                if (NameShorteningHelper.NeedsShortening(fullEncryptedName))
-                {
-                    return NameShorteningHelper.CreateShortenedDirectoryName(fullEncryptedName);
-                }
-                
+                // Return the full encrypted filename - shortening should be handled at the storage layer
                 return fullEncryptedName;
             }
         }
