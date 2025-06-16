@@ -21,6 +21,7 @@ namespace ExampleVaultApp
                 Console.WriteLine("Commands:");
                 Console.WriteLine("  testrun       : Full encrypt + decrypt + verify cycle using UvfLib.Storage");
                 Console.WriteLine("  simpletest    : Same test as testrun but using simple VaultManager API");
+                Console.WriteLine("  changepw      : Test password change functionality for Cryptomator vaults");
                 Console.WriteLine();
                 Console.WriteLine("Options:");
                 Console.WriteLine("  --cryptomator : Use Cryptomator V8 format (default: UVF)");
@@ -68,7 +69,12 @@ namespace ExampleVaultApp
                     Console.WriteLine("   (Will be implemented after Cryptomator test is working)");
                 }
             }
-
+            else if (command == "changepw")
+            {
+                Console.WriteLine("🔧 Running password change test...");
+                var changePwTest = new ChangePwCryptomatorTest();
+                await changePwTest.RunPasswordChangeTestAsync();
+            }
             else
             {
                 Console.WriteLine($"Unknown command: {command}");
