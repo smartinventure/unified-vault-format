@@ -296,7 +296,7 @@ namespace UvfLib.Core.CryptomatorV8
                 // Add debugging information to help diagnose Base64 format issues
                 try
                 {
-                    return _fileNameCryptor.DecryptFilename(ciphertextWithoutExt, _dirId);
+                return _fileNameCryptor.DecryptFilename(ciphertextWithoutExt, _dirId);
                 }
                 catch (System.FormatException ex) when (ex.Message.Contains("Base-64"))
                 {

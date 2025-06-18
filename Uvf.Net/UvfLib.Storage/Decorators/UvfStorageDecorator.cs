@@ -21,11 +21,12 @@ namespace UvfLib.Storage.Decorators
     {
         private readonly UvfPathTranslator _uvfTranslator;
         private readonly Microsoft.Extensions.Logging.ILogger? _logger;
+        private readonly bool _encryptFilenames;
 
         public UvfStorageDecorator(
             IStorage underlyingStorage, 
             VaultHandler vault, 
-            bool encryptFilenames = true,
+            bool encryptFilenames = false,  // TODO: Implement full encrypted path translation, using simple mode for now
             string? vaultBasePath = null,
             ILogger? logger = null)
             : base(underlyingStorage, vault, 
@@ -40,6 +41,7 @@ namespace UvfLib.Storage.Decorators
             
             _uvfTranslator = (UvfPathTranslator)_pathTranslator;
             _logger = logger;
+            _encryptFilenames = encryptFilenames;
         }
 
         #region Directory Operations
@@ -65,6 +67,19 @@ namespace UvfLib.Storage.Decorators
                     return;
                 }
 
+                // Additional safety check - if Path.GetFileName returns empty, treat as root
+                string dirName = Path.GetFileName(directoryPath);
+                if (string.IsNullOrEmpty(dirName))
+                {
+                    // This is effectively the root directory
+                    string rootDirectory = Path.Combine(_vaultBasePath, _vault.GetRootDirectoryPath());
+                    if (!await _underlyingStorage.DirectoryExistsAsync(rootDirectory, cancellationToken))
+                    {
+                        await _underlyingStorage.CreateDirectoryAsync(rootDirectory, cancellationToken);
+                    }
+                    return;
+                }
+
                 // Get parent directory metadata to encrypt the new directory name
                 string parentPath = Path.GetDirectoryName(directoryPath)?.Replace('\\', '/') ?? "/";
                 var parentMetadata = await GetDirectoryMetadataAsync(parentPath);
@@ -72,9 +87,17 @@ namespace UvfLib.Storage.Decorators
                 // Create new metadata for this directory
                 var newDirMetadata = _vault.CreateNewDirectoryMetadata();
                 
-                // Encrypt the directory name using parent metadata
-                string dirName = Path.GetFileName(directoryPath);
-                string encryptedDirName = _vault.EncryptFilename(dirName, parentMetadata);
+                // Encrypt the directory name using parent metadata (dirName already extracted above)
+                string encryptedDirName;
+                if (_encryptFilenames)
+                {
+                    encryptedDirName = _vault.EncryptFilename(dirName, parentMetadata);
+                }
+                else
+                {
+                    // Simple mode: directory names are not encrypted
+                    encryptedDirName = dirName;
+                }
                 
                 // Determine parent content directory
                 string parentContentDir;
@@ -107,6 +130,22 @@ namespace UvfLib.Storage.Decorators
                 // Create content directory where files will be stored
                 string contentDirectory = Path.Combine(_vaultBasePath, _vault.GetDirectoryPath(newDirMetadata));
                 await _underlyingStorage.CreateDirectoryAsync(contentDirectory, cancellationToken);
+                
+                // CRITICAL: Create second dir.uvf file in content directory for disaster recovery
+                // This allows recovery even if the parent directory is lost
+                string contentDirUvfPath = Path.Combine(contentDirectory, _vault.GetDirectoryMetadataFilename());
+                IntPtr contentFileHandle = await _underlyingStorage.OpenAsync(contentDirUvfPath, OpenFlags.Create | OpenFlags.WriteOnly, cancellationToken);
+                try
+                {
+                    // IMPORTANT: Both dir.uvf files must be encrypted independently (different ciphertexts)
+                    // Even though they contain the same dirId, they must be encrypted separately
+                    byte[] contentEncryptedMetadata = _vault.EncryptDirectoryMetadata(newDirMetadata);
+                    await _underlyingStorage.WriteAsync(contentFileHandle, 0, contentEncryptedMetadata.Length, Marshal.UnsafeAddrOfPinnedArrayElement(contentEncryptedMetadata, 0), cancellationToken);
+                }
+                finally
+                {
+                    await _underlyingStorage.CloseAsync(contentFileHandle, cancellationToken);
+                }
             }
             catch (Exception ex)
             {
@@ -173,34 +212,52 @@ namespace UvfLib.Storage.Decorators
                     return await _underlyingStorage.DirectoryExistsAsync(rootDirectory, cancellationToken);
                 }
 
-                // For other directories, check if the reference directory exists and contains dir.uvf
-                var pathResult = await _uvfTranslator.TranslateToStoragePathAsync(directoryPath);
-                string referenceDirectory = pathResult.StoragePath;
-                
-                // Check if reference directory exists
-                if (!await _underlyingStorage.DirectoryExistsAsync(referenceDirectory, cancellationToken))
+                if (_encryptFilenames)
                 {
-                    return false;
+                    // Encrypted mode: use path translator and check reference directory structure
+                    var pathResult = await _uvfTranslator.TranslateToStoragePathAsync(directoryPath);
+                    string referenceDirectory = pathResult.StoragePath;
+                    
+                    // Check if reference directory exists
+                    if (!await _underlyingStorage.DirectoryExistsAsync(referenceDirectory, cancellationToken))
+                    {
+                        return false;
+                    }
+                    
+                    // Check if dir.uvf file exists in the reference directory
+                    string dirUvfPath = Path.Combine(referenceDirectory, _vault.GetDirectoryMetadataFilename());
+                    if (!await _underlyingStorage.FileExistsAsync(dirUvfPath, cancellationToken))
+                    {
+                        return false;
+                    }
+                    
+                    // Optionally verify that the content directory also exists
+                    try
+                    {
+                        var directoryMetadata = await LoadDirectoryMetadataFromDirUvfAsync(referenceDirectory, cancellationToken);
+                        string contentDirectory = Path.Combine(_vaultBasePath, _vault.GetDirectoryPath(directoryMetadata));
+                        return await _underlyingStorage.DirectoryExistsAsync(contentDirectory, cancellationToken);
+                    }
+                    catch
+                    {
+                        // If we can't load the directory metadata, the directory is invalid
+                        return false;
+                    }
                 }
-                
-                // Check if dir.uvf file exists in the reference directory
-                string dirUvfPath = Path.Combine(referenceDirectory, _vault.GetDirectoryMetadataFilename());
-                if (!await _underlyingStorage.FileExistsAsync(dirUvfPath, cancellationToken))
+                else
                 {
-                    return false;
-                }
-                
-                // Optionally verify that the content directory also exists
-                try
-                {
-                    var directoryMetadata = await LoadDirectoryMetadataFromDirUvfAsync(referenceDirectory, cancellationToken);
-                    string contentDirectory = Path.Combine(_vaultBasePath, _vault.GetDirectoryPath(directoryMetadata));
-                    return await _underlyingStorage.DirectoryExistsAsync(contentDirectory, cancellationToken);
-                }
-                catch
-                {
-                    // If we can't load the directory metadata, the directory is invalid
-                    return false;
+                    // Simple mode: directories exist directly in the vault content structure
+                    try
+                    {
+                        var directoryMetadata = await GetDirectoryMetadataAsync(directoryPath);
+                        string contentDirectory = Path.Combine(_vaultBasePath, _vault.GetDirectoryPath(directoryMetadata));
+                        return await _underlyingStorage.DirectoryExistsAsync(contentDirectory, cancellationToken);
+                    }
+                    catch
+                    {
+                        // If we can't get directory metadata, the directory doesn't exist
+                        return false;
+                    }
                 }
             }
             catch (Exception ex)
@@ -404,96 +461,156 @@ namespace UvfLib.Storage.Decorators
             
             try
             {
-                // Get directory metadata for the virtual path
-                var directoryMetadata = await GetDirectoryMetadataAsync(realPath);
-                
-                // Get the content directory where files are stored
-                string contentDirectory = Path.Combine(_vaultBasePath, _vault.GetDirectoryPath(directoryMetadata));
-                
-                // Enumerate content directory
-                if (await _underlyingStorage.DirectoryExistsAsync(contentDirectory, cancellationToken))
+                if (_encryptFilenames)
                 {
-                    var allContentItems = await _underlyingStorage.ReadDirAsync(contentDirectory, true, cancellationToken);
+                    // Complex encrypted mode: use directory metadata system
+                    var directoryMetadata = await GetDirectoryMetadataAsync(realPath);
+                    string contentDirectory = Path.Combine(_vaultBasePath, _vault.GetDirectoryPath(directoryMetadata));
                     
-                    // Process subdirectories (these are reference directories with encrypted names)
-                    var encryptedDirs = allContentItems.Where(item => item.IsDirectory).Select(item => item.RealPath);
-                    foreach (string encryptedDir in encryptedDirs)
+                    if (await _underlyingStorage.DirectoryExistsAsync(contentDirectory, cancellationToken))
                     {
-                        try
+                        var allContentItems = await _underlyingStorage.ReadDirAsync(contentDirectory, true, cancellationToken);
+                        
+                        // Process subdirectories and files using encrypted approach
+                        foreach (var item in allContentItems)
                         {
-                            string encryptedDirName = Path.GetFileName(encryptedDir);
+                            // Skip the dir.uvf metadata file itself
+                            if (item.Filename.Equals(_vault.GetDirectoryMetadataFilename(), StringComparison.OrdinalIgnoreCase))
+                            {
+                                continue;
+                            }
                             
-                            // Decrypt the directory name
-                            string decryptedDirName = _vault.DecryptFilename(encryptedDirName, directoryMetadata);
+                            if (item.IsDirectory)
+                            {
+                                // This is a subdirectory reference - decrypt the directory name
+                                try
+                                {
+                                    string decryptedDirName = _vault.DecryptFilename(item.Filename, directoryMetadata);
+                                    string virtualDirPath = string.IsNullOrEmpty(realPath) || realPath == "/" 
+                                        ? $"/{decryptedDirName}" 
+                                        : $"{realPath}/{decryptedDirName}";
+                                    
+                                    var dirObject = new FileObject(virtualDirPath)
+                                    {
+                                        IsDirectory = true,
+                                        Filename = decryptedDirName,
+                                        RealPath = virtualDirPath,
+                                        VirtualPath = virtualDirPath,
+                                        Size = 0,
+                                        CreationTime = item.CreationTime,
+                                        LastModified = item.LastModified,
+                                        LastAccessTime = item.LastAccessTime,
+                                        SC = this
+                                    };
+                                    
+                                    fileObjects.Add(dirObject);
+                                }
+                                catch (Exception ex)
+                                {
+                                    _logger?.LogWarning(ex, "Could not decrypt directory name: {EncryptedName}", item.Filename);
+                                }
+                            }
+                            else
+                            {
+                                // This is an encrypted file - decrypt the filename
+                                // Files in UVF have .uvf extension, but directories can also have .uvf extensions
+                                // We need to check if this is actually a file or a directory reference
+                                try
+                                {
+                                    string decryptedFileName = _vault.DecryptFilename(item.Filename, directoryMetadata);
+                                    string virtualFilePath = string.IsNullOrEmpty(realPath) || realPath == "/" 
+                                        ? $"/{decryptedFileName}" 
+                                        : $"{realPath}/{decryptedFileName}";
+                                    
+                                    var fileObject = new FileObject(virtualFilePath)
+                                    {
+                                        IsDirectory = false,
+                                        Filename = decryptedFileName,
+                                        RealPath = virtualFilePath,
+                                        VirtualPath = virtualFilePath,
+                                        Size = VaultHandler.CalculateExpectedDecryptedSize(item.Size),
+                                        CreationTime = item.CreationTime,
+                                        LastModified = item.LastModified,
+                                        LastAccessTime = item.LastAccessTime,
+                                        SC = this
+                                    };
+                                    
+                                    fileObjects.Add(fileObject);
+                                }
+                                catch (Exception ex)
+                                {
+                                    _logger?.LogWarning(ex, "Could not decrypt file name: {EncryptedName}", item.Filename);
+                                }
+                            }
+                        }
+                    }
+                }
+                else
+                {
+                    // Simple mode: files are stored directly with .uvf extensions
+                    string physicalPath = string.IsNullOrEmpty(realPath) || realPath == "/" 
+                        ? _vaultBasePath 
+                        : Path.Combine(_vaultBasePath, realPath.TrimStart('/').Replace('/', Path.DirectorySeparatorChar));
+                    
+                    if (await _underlyingStorage.DirectoryExistsAsync(physicalPath, cancellationToken))
+                    {
+                        var allItems = await _underlyingStorage.ReadDirAsync(physicalPath, true, cancellationToken);
+                        
+                        // Process subdirectories (these are normal directories)
+                        var dirs = allItems.Where(item => item.IsDirectory && 
+                            !item.Filename.Equals("d", StringComparison.OrdinalIgnoreCase) && // Skip UVF internal directory
+                            !item.Filename.EndsWith(".uvf", StringComparison.OrdinalIgnoreCase)); // Skip .uvf files
+                        
+                        foreach (var dir in dirs)
+                        {
+                            string dirName = dir.Filename;
+                            string virtualPath = string.IsNullOrEmpty(realPath) || realPath == "/" 
+                                ? $"/{dirName}" 
+                                : $"{realPath}/{dirName}";
                             
-                            var dirObject = new FileObject(Path.Combine(realPath, decryptedDirName).Replace('\\', '/'))
+                            var dirObject = new FileObject(virtualPath)
                             {
                                 IsDirectory = true,
-                                Filename = decryptedDirName,
-                                RealPath = Path.Combine(realPath, decryptedDirName).Replace('\\', '/'),
-                                VirtualPath = Path.Combine(realPath, decryptedDirName).Replace('\\', '/'),
+                                Filename = dirName,
+                                RealPath = virtualPath,
+                                VirtualPath = virtualPath,
                                 Size = 0,
+                                CreationTime = dir.CreationTime,
+                                LastModified = dir.LastModified,
+                                LastAccessTime = dir.LastAccessTime,
                                 SC = this
                             };
                             
-                            // Try to get directory timestamps from the reference directory
-                            try
-                            {
-                                var dirInfo = await _underlyingStorage.GetFileInfoAsync(encryptedDir, cancellationToken);
-                                dirObject.CreationTime = dirInfo.CreationTime;
-                                dirObject.LastModified = dirInfo.LastModified;
-                                dirObject.LastAccessTime = dirInfo.LastAccessTime;
-                            }
-                            catch
-                            {
-                                // Use current time if can't get timestamps
-                                dirObject.CreationTime = DateTime.Now;
-                                dirObject.LastModified = DateTime.Now;
-                                dirObject.LastAccessTime = DateTime.Now;
-                            }
-                            
                             fileObjects.Add(dirObject);
                         }
-                        catch (Exception)
+                        
+                        // Process files (these have .uvf extensions)
+                        var files = allItems.Where(item => !item.IsDirectory && 
+                            item.Filename.EndsWith(".uvf", StringComparison.OrdinalIgnoreCase) &&
+                            !item.Filename.Equals("vault.uvf", StringComparison.OrdinalIgnoreCase)); // Skip vault file
+                        
+                        foreach (var file in files)
                         {
-                            // Skip directories that can't be decrypted
-                            continue;
-                        }
-                    }
-                    
-                    // Process files (these are encrypted files with encrypted names, no extension)
-                    var encryptedFiles = allContentItems.Where(item => !item.IsDirectory && 
-                        item.Filename != _vault.GetDirectoryMetadataFilename()).Select(item => item.RealPath);
-                    foreach (string encryptedFile in encryptedFiles)
-                    {
-                        try
-                        {
-                            string encryptedFileName = Path.GetFileName(encryptedFile);
+                            string encryptedFileName = file.Filename;
+                            string decryptedFileName = encryptedFileName.Substring(0, encryptedFileName.Length - 4); // Remove .uvf extension
+                            string virtualPath = string.IsNullOrEmpty(realPath) || realPath == "/" 
+                                ? $"/{decryptedFileName}" 
+                                : $"{realPath}/{decryptedFileName}";
                             
-                            // Decrypt the filename
-                            string decryptedFileName = _vault.DecryptFilename(encryptedFileName, directoryMetadata);
-                            
-                            var fileInfo = await _underlyingStorage.GetFileInfoAsync(encryptedFile, cancellationToken);
-                            
-                            var fileObject = new FileObject(Path.Combine(realPath, decryptedFileName).Replace('\\', '/'))
+                            var fileObject = new FileObject(virtualPath)
                             {
                                 IsDirectory = false,
                                 Filename = decryptedFileName,
-                                RealPath = Path.Combine(realPath, decryptedFileName).Replace('\\', '/'),
-                                VirtualPath = Path.Combine(realPath, decryptedFileName).Replace('\\', '/'),
-                                Size = VaultHandler.CalculateExpectedDecryptedSize(fileInfo.Size), // Calculate decrypted size
-                                CreationTime = fileInfo.CreationTime,
-                                LastModified = fileInfo.LastModified,
-                                LastAccessTime = fileInfo.LastAccessTime,
+                                RealPath = virtualPath,
+                                VirtualPath = virtualPath,
+                                Size = VaultHandler.CalculateExpectedDecryptedSize(file.Size), // Calculate decrypted size
+                                CreationTime = file.CreationTime,
+                                LastModified = file.LastModified,
+                                LastAccessTime = file.LastAccessTime,
                                 SC = this
                             };
                             
                             fileObjects.Add(fileObject);
-                        }
-                        catch (Exception)
-                        {
-                            // Skip files that can't be decrypted
-                            continue;
                         }
                     }
                 }
@@ -525,8 +642,17 @@ namespace UvfLib.Storage.Decorators
             
             foreach (string pathPart in pathParts)
             {
-                // Encrypt the directory name using current metadata
-                string encryptedDirName = _vault.EncryptFilename(pathPart, currentMetadata);
+                string encryptedDirName;
+                if (_encryptFilenames)
+                {
+                    // Encrypt the directory name using current metadata
+                    encryptedDirName = _vault.EncryptFilename(pathPart, currentMetadata);
+                }
+                else
+                {
+                    // Simple mode: directory names are not encrypted
+                    encryptedDirName = pathPart;
+                }
                 
                 // Move to the reference directory in current content directory
                 string referenceDirectory = Path.Combine(currentContentDir, encryptedDirName);

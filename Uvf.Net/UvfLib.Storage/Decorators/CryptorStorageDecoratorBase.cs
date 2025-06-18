@@ -331,7 +331,12 @@ namespace UvfLib.Storage.Decorators
             {
                 // 1. Ensure parent directory exists for the virtual path
                 string? parentDir = Path.GetDirectoryName(virtualPath);
-                if (!string.IsNullOrEmpty(parentDir) && parentDir != "/" && !await DirectoryExistsAsync(parentDir, cancellationToken))
+                // Normalize empty parent directory to root "/"
+                if (string.IsNullOrEmpty(parentDir))
+                {
+                    parentDir = "/";
+                }
+                if (parentDir != "/" && !await DirectoryExistsAsync(parentDir, cancellationToken))
                 {
                     await CreateDirectoryAsync(parentDir, cancellationToken);
                 }

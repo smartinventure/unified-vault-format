@@ -129,7 +129,7 @@ namespace UvfConsole
                 // Create properly signed vault.cryptomator file
                 Console.WriteLine("\n🔧 Creating properly signed vault.cryptomator...");
                 byte[] masterkeyContent = File.ReadAllBytes(testMasterkeyPath);
-                var createConfigMethod = typeof(Vault).GetMethod("CreateNewCryptomatorV8VaultConfigContentSigned",
+                var createConfigMethod = typeof(VaultHandler).GetMethod("CreateNewCryptomatorV8VaultConfigContentSigned",
                     System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
 
                 if (createConfigMethod != null)

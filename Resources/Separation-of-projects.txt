@@ -1,4 +1,8 @@
 
+
+
+
+
 Excellent strategic thinking! You're absolutely right to separate the open-source cryptographic core from the proprietary user-friendly API. This approach builds trust while protecting your commercial value. Let me suggest a clean directory structure that supports both goals.
 
 ## 🏗️ **Recommended Directory Structure**

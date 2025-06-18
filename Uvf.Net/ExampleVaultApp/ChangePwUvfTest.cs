@@ -9,18 +9,20 @@ using StorageLib.Abstractions;
 namespace ExampleVaultApp
 {
     /// <summary>
-    /// Test class for demonstrating Cryptomator vault password change functionality.
+    /// Test class for demonstrating UVF vault password change functionality.
     /// This class helps understand how password changes work and tests the implementation.
     /// </summary>
-    public class ChangePwCryptomatorTest
+    public class ChangePwUvfTest
     {
         private string _testVaultPath;
-        private readonly string _originalPassword = "test123";
-        private readonly string _newPassword = "newtest456";
+        private readonly string _originalPassword = "uvf-test123";
+        private readonly string _newPassword = "uvf-newtest456";
+        private readonly bool _encryptFilenames;
 
-        public ChangePwCryptomatorTest()
+        public ChangePwUvfTest(bool encryptFilenames)
         {
-            _testVaultPath = Path.Combine(Path.GetTempPath(), "ChangePwTest_" + Guid.NewGuid().ToString("N")[..8]);
+            _testVaultPath = Path.Combine(Path.GetTempPath(), "ChangePwUvfTest_" + Guid.NewGuid().ToString("N")[..8]);
+            _encryptFilenames = encryptFilenames;
         }
 
         /// <summary>
@@ -30,12 +32,12 @@ namespace ExampleVaultApp
         {
             try
             {
-                Console.WriteLine("=== Cryptomator Password Change Test ===");
-                _testVaultPath = Path.Combine(Path.GetTempPath(), $"ChangePwTest_{Path.GetRandomFileName().Substring(0, 8)}");
+                Console.WriteLine("=== UVF Password Change Test ===");
+                _testVaultPath = Path.Combine(Path.GetTempPath(), $"ChangePwUvfTest_{Path.GetRandomFileName().Substring(0, 8)}");
                 Console.WriteLine($"Test vault path: {_testVaultPath}");
 
                 // Step 1: Create a new vault with original password
-                Console.WriteLine("\n1. Creating vault with original password...");
+                Console.WriteLine("\n1. Creating UVF vault with original password...");
                 await CreateTestVaultAsync();
                 
                 // Step 2: Verify we can open with original password
@@ -54,11 +56,11 @@ namespace ExampleVaultApp
                 Console.WriteLine("\n5. Verifying vault opens with new password...");
                 await VerifyVaultAccessAsync(_newPassword, "new");
                 
-                Console.WriteLine("\n✅ Password change test completed successfully!");
+                Console.WriteLine("\n✅ UVF password change test completed successfully!");
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"❌ Password change test failed: {ex.Message}");
+                Console.WriteLine($"❌ UVF password change test failed: {ex.Message}");
                 Console.WriteLine(ex.ToString());
             }
             finally
@@ -77,12 +79,12 @@ namespace ExampleVaultApp
             Directory.CreateDirectory(_testVaultPath);
 
             // Create vault using VaultManager
-            using var vault = await VaultManager.CreateCryptomatorVaultAsync(_testVaultPath, _originalPassword);
+            using var vault = await VaultManager.CreateUvfVaultAsync(_testVaultPath, _originalPassword, _encryptFilenames);
             
             // Write a test file to verify the vault works
-            await vault.WriteAllBytesAsync("test.txt", Encoding.UTF8.GetBytes("Hello, World!"));
+            await vault.WriteAllBytesAsync("test.txt", Encoding.UTF8.GetBytes("Hello, UVF World!"));
             
-            Console.WriteLine($"✅ Vault created successfully at: {_testVaultPath}");
+            Console.WriteLine($"✅ UVF vault created successfully at: {_testVaultPath}");
             
             // Display the created files
             var files = Directory.GetFiles(_testVaultPath);
@@ -94,19 +96,19 @@ namespace ExampleVaultApp
         /// </summary>
         private async Task VerifyVaultAccessAsync(string password, string passwordType)
         {
-            using var vault = await VaultManager.LoadCryptomatorVaultAsync(_testVaultPath, password);
+            using var vault = await VaultManager.LoadUvfVaultAsync(_testVaultPath, password, _encryptFilenames);
             
             // Try to read the test file
             var data = await vault.ReadAllBytesAsync("test.txt");
             var content = Encoding.UTF8.GetString(data);
             
-            if (content == "Hello, World!")
+            if (content == "Hello, UVF World!")
             {
-                Console.WriteLine($"✅ Vault successfully opened with {passwordType} password");
+                Console.WriteLine($"✅ UVF vault successfully opened with {passwordType} password");
             }
             else
             {
-                throw new Exception($"Vault opened but content mismatch. Expected 'Hello, World!', got '{content}'");
+                throw new Exception($"UVF vault opened but content mismatch. Expected 'Hello, UVF World!', got '{content}'");
             }
         }
 
@@ -115,29 +117,29 @@ namespace ExampleVaultApp
         /// </summary>
         private async Task ChangeVaultPasswordAsync()
         {
-            Console.WriteLine("Using VaultManager.ChangeVaultPasswordAsync() static method...");
+            Console.WriteLine("Using VaultManager.ChangeUvfPasswordAsync() static method...");
             
             try
             {
-                // First, let's analyze the masterkey file before attempting to change the password
-                string masterkeyPath = Path.Combine(_testVaultPath, "masterkey.cryptomator");
-                if (File.Exists(masterkeyPath))
+                // First, let's analyze the vault file before attempting to change the password
+                string vaultFilePath = Path.Combine(_testVaultPath, "vault.uvf");
+                if (File.Exists(vaultFilePath))
                 {
-                    byte[] masterkeyContent = await File.ReadAllBytesAsync(masterkeyPath);
-                    Console.WriteLine($"Masterkey file size: {masterkeyContent.Length} bytes");
-                    await AnalyzeMasterkeyFileAsync(masterkeyContent, "Before Password Change");
+                    byte[] vaultContent = await File.ReadAllBytesAsync(vaultFilePath);
+                    Console.WriteLine($"UVF vault file size: {vaultContent.Length} bytes");
+                    await AnalyzeUvfVaultFileAsync(vaultContent, "Before Password Change");
                 }
                 
                 // Use the static method to change the password
-                await VaultManager.ChangeCryptomatorVaultPasswordAsync(_testVaultPath, _originalPassword, _newPassword);
+                await VaultManager.ChangeUvfPasswordAsync(_testVaultPath, _originalPassword, _newPassword);
                 Console.WriteLine("✅ Password changed successfully using VaultManager static API");
                 
-                // Analyze the masterkey file after the change
-                if (File.Exists(masterkeyPath))
+                // Analyze the vault file after the change
+                if (File.Exists(vaultFilePath))
                 {
-                    byte[] masterkeyContent = await File.ReadAllBytesAsync(masterkeyPath);
-                    Console.WriteLine($"Masterkey file size after change: {masterkeyContent.Length} bytes");
-                    await AnalyzeMasterkeyFileAsync(masterkeyContent, "After Password Change");
+                    byte[] vaultContent = await File.ReadAllBytesAsync(vaultFilePath);
+                    Console.WriteLine($"UVF vault file size after change: {vaultContent.Length} bytes");
+                    await AnalyzeUvfVaultFileAsync(vaultContent, "After Password Change");
                 }
             }
             catch (Exception ex)
@@ -161,8 +163,8 @@ namespace ExampleVaultApp
         {
             try
             {
-                using var vault = await VaultManager.LoadCryptomatorVaultAsync(_testVaultPath, password);
-                throw new Exception("Expected password to be rejected, but vault opened successfully");
+                using var vault = await VaultManager.LoadUvfVaultAsync(_testVaultPath, password, _encryptFilenames);
+                throw new Exception("Expected password to be rejected, but UVF vault opened successfully");
             }
             catch (UnauthorizedAccessException ex)
             {
@@ -171,46 +173,50 @@ namespace ExampleVaultApp
         }
 
         /// <summary>
-        /// Analyzes and displays the structure of a masterkey file
+        /// Analyzes and displays the structure of a UVF vault file
         /// </summary>
-        private async Task AnalyzeMasterkeyFileAsync(byte[] masterkeyContent, string label)
+        private async Task AnalyzeUvfVaultFileAsync(byte[] vaultContent, string label)
         {
             try
             {
-                string jsonContent = Encoding.UTF8.GetString(masterkeyContent);
-                Console.WriteLine($"\n--- {label} Masterkey File Analysis ---");
+                Console.WriteLine($"\n--- {label} UVF Vault File Analysis ---");
                 
-                // Parse as JSON to analyze structure
-                using var doc = JsonDocument.Parse(jsonContent);
-                var root = doc.RootElement;
+                // UVF files are binary, so we can't parse them as JSON like Cryptomator
+                // Instead, we'll analyze the basic structure
+                Console.WriteLine($"File size: {vaultContent.Length} bytes");
                 
-                Console.WriteLine($"Version: {root.GetProperty("version").GetInt32()}");
-                Console.WriteLine($"Scrypt Cost Param: {root.GetProperty("scryptCostParam").GetInt32()}");
-                Console.WriteLine($"Scrypt Block Size: {root.GetProperty("scryptBlockSize").GetInt32()}");
-                
-                if (root.TryGetProperty("scryptSalt", out var saltProp))
+                // Check for UVF magic bytes at the beginning
+                if (vaultContent.Length >= 4)
                 {
-                    string saltBase64 = saltProp.GetString() ?? "";
-                    Console.WriteLine($"Scrypt Salt: {saltBase64[..Math.Min(20, saltBase64.Length)]}... ({saltBase64.Length} chars)");
+                    var magicBytes = vaultContent.Take(4).ToArray();
+                    string magicString = string.Join(" ", magicBytes.Select(b => $"0x{b:X2}"));
+                    Console.WriteLine($"Magic bytes: {magicString}");
+                    
+                    // Check if it matches expected UVF magic bytes (u, v, f, 0x00)
+                    if (magicBytes[0] == (byte)'u' && magicBytes[1] == (byte)'v' && 
+                        magicBytes[2] == (byte)'f' && magicBytes[3] == 0x00)
+                    {
+                        Console.WriteLine("✅ Valid UVF magic bytes detected");
+                    }
+                    else
+                    {
+                        Console.WriteLine("⚠️ UVF magic bytes not found or invalid");
+                    }
                 }
                 
-                if (root.TryGetProperty("primaryMasterKey", out var encKeyProp))
+                // Show first few bytes for analysis
+                if (vaultContent.Length > 0)
                 {
-                    string encKeyBase64 = encKeyProp.GetString() ?? "";
-                    Console.WriteLine($"Primary Master Key: {encKeyBase64[..Math.Min(20, encKeyBase64.Length)]}... ({encKeyBase64.Length} chars)");
-                }
-                
-                if (root.TryGetProperty("hmacMasterKey", out var macKeyProp))
-                {
-                    string macKeyBase64 = macKeyProp.GetString() ?? "";
-                    Console.WriteLine($"HMAC Master Key: {macKeyBase64[..Math.Min(20, macKeyBase64.Length)]}... ({macKeyBase64.Length} chars)");
+                    int previewLength = Math.Min(32, vaultContent.Length);
+                    string hexPreview = string.Join(" ", vaultContent.Take(previewLength).Select(b => $"{b:X2}"));
+                    Console.WriteLine($"First {previewLength} bytes (hex): {hexPreview}");
                 }
                 
                 Console.WriteLine($"--- End {label} Analysis ---\n");
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"⚠️ Could not analyze {label.ToLower()} masterkey file: {ex.Message}");
+                Console.WriteLine($"⚠️ Could not analyze {label.ToLower()} UVF vault file: {ex.Message}");
             }
         }
 

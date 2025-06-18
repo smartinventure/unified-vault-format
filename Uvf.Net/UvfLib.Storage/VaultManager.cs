@@ -12,131 +12,109 @@ namespace UvfLib.Storage
 {
     /// <summary>
     /// High-level vault manager that provides an easy-to-use API for vault operations.
-    /// Supports different storage connectors (LocalStorage, MemoryStorage, S3Storage, etc.)
-    /// and uses forward-slash path normalization for cross-platform compatibility.
+    /// Supports different storage connectors and vault formats (Cryptomator V8, UVF V3).
+    /// Uses forward-slash path normalization for cross-platform compatibility.
     /// Implements secure memory management for passwords and cryptographic keys.
     /// </summary>
     public class VaultManager : IDisposable, IStreamStorage
     {
         private IStorage? _baseStorage;
         private VaultHandler? _vault;
-        private CryptomatorStorageDecorator? _vaultStorage;
+        private IStreamStorage? _vaultStorage; // GENERALIZED: From CryptomatorStorageDecorator to support multiple vault formats
         private string? _vaultBasePath;
+        private VaultFormat _vaultFormat; // NEW: To track the current vault format
         private bool _isOpen;
         private bool _ownsStorage; // Track if we created the storage
         private bool _disposed;
 
-        #region Factory Methods - Path-based (Convenience)
+        /// <summary>
+        /// Defines the vault format being used.
+        /// </summary>
+        public enum VaultFormat
+        {
+            CryptomatorV8,
+            UvfV3
+        }
+
+        #region Factory Methods - Cryptomator
 
         /// <summary>
         /// Creates a new Cryptomator V8 vault at the specified path using LocalStorage
         /// </summary>
-        /// <param name="vaultPath">Path where the vault should be created</param>
-        /// <param name="password">Vault password (will be securely cleared after key derivation)</param>
-        /// <returns>A VaultManager instance for the new vault</returns>
-        public static async Task<VaultManager> CreateVaultAsync(string vaultPath, string password)
+        public static async Task<VaultManager> CreateCryptomatorVaultAsync(string vaultPath, string password)
         {
             var storage = await StorageFactory.CreateInitializedLocalStorageAsync("/");
-            return await CreateVaultAsync(storage, password, vaultPath, ownsStorage: true);
-        }
-
-        /// <summary>
-        /// Creates a new Cryptomator V8 vault at the specified path using LocalStorage with secure password handling
-        /// </summary>
-        /// <param name="vaultPath">Path where the vault should be created</param>
-        /// <param name="password">Vault password (will be securely cleared after key derivation)</param>
-        /// <returns>A VaultManager instance for the new vault</returns>
-        public static async Task<VaultManager> CreateVaultAsync(string vaultPath, SecureString password)
-        {
-            var storage = await StorageFactory.CreateInitializedLocalStorageAsync("/");
-            return await CreateVaultAsync(storage, password, vaultPath, ownsStorage: true);
+            return await CreateCryptomatorVaultAsync(storage, password, vaultPath, ownsStorage: true);
         }
 
         /// <summary>
         /// Loads an existing Cryptomator V8 vault from the specified path using LocalStorage
         /// </summary>
-        /// <param name="vaultPath">Path where the vault is located</param>
-        /// <param name="password">Vault password (will be securely cleared after key derivation)</param>
-        /// <returns>A VaultManager instance for the existing vault</returns>
-        public static async Task<VaultManager> LoadVaultAsync(string vaultPath, string password)
+        public static async Task<VaultManager> LoadCryptomatorVaultAsync(string vaultPath, string password)
         {
             var storage = await StorageFactory.CreateInitializedLocalStorageAsync("/");
-            return await LoadVaultAsync(storage, password, vaultPath, ownsStorage: true);
+            return await LoadCryptomatorVaultAsync(storage, password, vaultPath, ownsStorage: true);
         }
-
-        /// <summary>
-        /// Loads an existing Cryptomator V8 vault from the specified path using LocalStorage with secure password handling
-        /// </summary>
-        /// <param name="vaultPath">Path where the vault is located</param>
-        /// <param name="password">Vault password (will be securely cleared after key derivation)</param>
-        /// <returns>A VaultManager instance for the existing vault</returns>
-        public static async Task<VaultManager> LoadVaultAsync(string vaultPath, SecureString password)
-        {
-            var storage = await StorageFactory.CreateInitializedLocalStorageAsync("/");
-            return await LoadVaultAsync(storage, password, vaultPath, ownsStorage: true);
-        }
-
-        #endregion
-
-        #region Factory Methods - Storage-based (Flexible)
 
         /// <summary>
         /// Creates a new Cryptomator V8 vault using the provided storage connector
         /// </summary>
-        /// <param name="storage">Storage connector (LocalStorage, MemoryStorage, S3Storage, etc.)</param>
-        /// <param name="password">Vault password (will be securely cleared after key derivation)</param>
-        /// <param name="vaultBasePath">Base path for vault operations (used for path translation)</param>
-        /// <param name="ownsStorage">Whether VaultManager should dispose the storage when closed</param>
-        /// <returns>A VaultManager instance for the new vault</returns>
-        public static async Task<VaultManager> CreateVaultAsync(IStorage storage, string password, string vaultBasePath, bool ownsStorage = false)
+        public static async Task<VaultManager> CreateCryptomatorVaultAsync(IStorage storage, string password, string vaultBasePath, bool ownsStorage = false)
         {
             var manager = new VaultManager();
-            await manager.InitializeNewVaultAsync(storage, password, vaultBasePath, ownsStorage);
-            return manager;
-        }
-
-        /// <summary>
-        /// Creates a new Cryptomator V8 vault using the provided storage connector with secure password handling
-        /// </summary>
-        /// <param name="storage">Storage connector (LocalStorage, MemoryStorage, S3Storage, etc.)</param>
-        /// <param name="password">Vault password (will be securely cleared after key derivation)</param>
-        /// <param name="vaultBasePath">Base path for vault operations (used for path translation)</param>
-        /// <param name="ownsStorage">Whether VaultManager should dispose the storage when closed</param>
-        /// <returns>A VaultManager instance for the new vault</returns>
-        public static async Task<VaultManager> CreateVaultAsync(IStorage storage, SecureString password, string vaultBasePath, bool ownsStorage = false)
-        {
-            var manager = new VaultManager();
-            await manager.InitializeNewVaultAsync(storage, password, vaultBasePath, ownsStorage);
+            await manager.InitializeNewCryptomatorVaultAsync(storage, password, vaultBasePath, ownsStorage);
             return manager;
         }
 
         /// <summary>
         /// Loads an existing Cryptomator V8 vault using the provided storage connector
         /// </summary>
-        /// <param name="storage">Storage connector (LocalStorage, MemoryStorage, S3Storage, etc.)</param>
-        /// <param name="password">Vault password (will be securely cleared after key derivation)</param>
-        /// <param name="vaultBasePath">Base path for vault operations (used for path translation)</param>
-        /// <param name="ownsStorage">Whether VaultManager should dispose the storage when closed</param>
-        /// <returns>A VaultManager instance for the existing vault</returns>
-        public static async Task<VaultManager> LoadVaultAsync(IStorage storage, string password, string vaultBasePath, bool ownsStorage = false)
+        public static async Task<VaultManager> LoadCryptomatorVaultAsync(IStorage storage, string password, string vaultBasePath, bool ownsStorage = false)
         {
             var manager = new VaultManager();
-            await manager.InitializeExistingVaultAsync(storage, password, vaultBasePath, ownsStorage);
+            await manager.InitializeExistingCryptomatorVaultAsync(storage, password, vaultBasePath, ownsStorage);
+            return manager;
+        }
+
+        #endregion
+
+        #region Factory Methods - UVF
+
+        /// <summary>
+        /// Creates a new UVF vault at the specified path using LocalStorage.
+        /// </summary>
+        public static async Task<VaultManager> CreateUvfVaultAsync(string vaultPath, string password, bool encryptFilenames = true)
+        {
+            var storage = await StorageFactory.CreateInitializedLocalStorageAsync("/");
+            return await CreateUvfVaultAsync(storage, password, vaultPath, encryptFilenames, ownsStorage: true);
+        }
+
+        /// <summary>
+        /// Loads an existing UVF vault from the specified path using LocalStorage.
+        /// </summary>
+        public static async Task<VaultManager> LoadUvfVaultAsync(string vaultPath, string password, bool encryptFilenames = true)
+        {
+            var storage = await StorageFactory.CreateInitializedLocalStorageAsync("/");
+            return await LoadUvfVaultAsync(storage, password, vaultPath, encryptFilenames, ownsStorage: true);
+        }
+
+        /// <summary>
+        /// Creates a new UVF vault using the provided storage connector.
+        /// </summary>
+        public static async Task<VaultManager> CreateUvfVaultAsync(IStorage storage, string password, string vaultBasePath, bool encryptFilenames = true, bool ownsStorage = false)
+        {
+            var manager = new VaultManager();
+            await manager.InitializeNewUvfVaultAsync(storage, password, vaultBasePath, encryptFilenames, ownsStorage);
             return manager;
         }
 
         /// <summary>
-        /// Loads an existing Cryptomator V8 vault using the provided storage connector with secure password handling
+        /// Loads an existing UVF vault using the provided storage connector.
         /// </summary>
-        /// <param name="storage">Storage connector (LocalStorage, MemoryStorage, S3Storage, etc.)</param>
-        /// <param name="password">Vault password (will be securely cleared after key derivation)</param>
-        /// <param name="vaultBasePath">Base path for vault operations (used for path translation)</param>
-        /// <param name="ownsStorage">Whether VaultManager should dispose the storage when closed</param>
-        /// <returns>A VaultManager instance for the existing vault</returns>
-        public static async Task<VaultManager> LoadVaultAsync(IStorage storage, SecureString password, string vaultBasePath, bool ownsStorage = false)
+        public static async Task<VaultManager> LoadUvfVaultAsync(IStorage storage, string password, string vaultBasePath, bool encryptFilenames = true, bool ownsStorage = false)
         {
             var manager = new VaultManager();
-            await manager.InitializeExistingVaultAsync(storage, password, vaultBasePath, ownsStorage);
+            await manager.InitializeExistingUvfVaultAsync(storage, password, vaultBasePath, encryptFilenames, ownsStorage);
             return manager;
         }
 
@@ -145,49 +123,26 @@ namespace UvfLib.Storage
         #region Vault Management
 
         /// <summary>
-        /// Changes the vault password
-        /// </summary>
-        /// <param name="newPassword">New vault password (will be securely cleared after key derivation)</param>
-        public async Task ChangePasswordAsync(string newPassword)
-        {
-            EnsureOpen();
-            
-            // TODO: Implement password change functionality
-            // This requires VaultHandler to support password changes
-            // May need to re-encrypt the masterkey file with new password
-            throw new NotImplementedException("Password change functionality requires VaultHandler enhancement");
-        }
-
-        /// <summary>
-        /// Changes the vault password with secure password handling
-        /// </summary>
-        /// <param name="newPassword">New vault password (will be securely cleared after key derivation)</param>
-        public async Task ChangePasswordAsync(SecureString newPassword)
-        {
-            EnsureOpen();
-            
-            // TODO: Implement password change functionality with SecureString
-            throw new NotImplementedException("Password change functionality requires VaultHandler enhancement");
-        }
-
-        /// <summary>
         /// Closes the vault and optionally disposes the underlying storage
         /// </summary>
         public async Task CloseVaultAsync()
         {
             if (_isOpen && !_disposed)
             {
-                if (_vaultStorage != null)
+                if (_vaultStorage is IDisposable disposableStorage)
                 {
-                    await _vaultStorage.ShutdownAsync();
-                    _vaultStorage.Dispose();
-                    _vaultStorage = null;
+                    disposableStorage.Dispose();
                 }
+                _vaultStorage = null;
+
 
                 if (_ownsStorage && _baseStorage != null)
                 {
-                    await _baseStorage.ShutdownAsync();
-                    _baseStorage.Dispose();
+                    if (_baseStorage is IAsyncDisposable asyncDisposableBase)
+                        await asyncDisposableBase.DisposeAsync();
+                    else if (_baseStorage is IDisposable disposableBase)
+                        disposableBase.Dispose();
+
                     _baseStorage = null;
                 }
 
@@ -402,7 +357,22 @@ namespace UvfLib.Storage
         /// <summary>
         /// Gets the underlying IStorage instance that this stream storage wraps
         /// </summary>
-        public IStorage UnderlyingStorage => _vaultStorage?.UnderlyingStorage ?? throw new InvalidOperationException("Vault is not open");
+        public IStorage UnderlyingStorage
+        {
+            get
+            {
+                EnsureOpen();
+                if (_vaultStorage is CryptomatorStorageDecorator csd)
+                {
+                    return csd.UnderlyingStorage;
+                }
+                if (_vaultStorage is UvfStorageDecorator usd)
+                {
+                    return usd.UnderlyingStorage;
+                }
+                throw new InvalidOperationException("The underlying storage cannot be accessed for the current vault type.");
+            }
+        }
 
         // Delegate remaining IStreamStorage methods to _vaultStorage
         Task<IEnumerable<FileObject>> IStreamStorage.ReadDirAsync(string directoryPath, bool readOnly, CancellationToken cancellationToken)
@@ -449,136 +419,71 @@ namespace UvfLib.Storage
 
         #endregion
 
-        #region Private Implementation
+        #region Private Implementation - Cryptomator
 
-        private async Task InitializeNewVaultAsync(IStorage storage, string password, string vaultBasePath, bool ownsStorage)
+        private async Task InitializeNewCryptomatorVaultAsync(IStorage storage, string password, string vaultBasePath, bool ownsStorage)
         {
             _baseStorage = storage;
             _vaultBasePath = vaultBasePath;
             _ownsStorage = ownsStorage;
+            _vaultFormat = VaultFormat.CryptomatorV8;
 
             try
             {
-                // Create new Cryptomator V8 vault
+                // Create new Cryptomator V8 vault files
                 VaultHandler.CreateNewCryptomatorV8VaultComplete(vaultBasePath, password);
 
                 // Load the newly created vault
-                await LoadVaultInternalAsync(password);
+                await LoadCryptomatorVaultInternalAsync(password);
                 _isOpen = true;
             }
             catch
             {
                 // Cleanup on failure
-                if (_ownsStorage)
+                if (_ownsStorage && storage is IDisposable disposable)
                 {
-                    await storage.ShutdownAsync();
-                    storage.Dispose();
+                    disposable.Dispose();
                 }
                 throw;
             }
         }
-
-        private async Task InitializeNewVaultAsync(IStorage storage, SecureString password, string vaultBasePath, bool ownsStorage)
+        
+        private async Task InitializeExistingCryptomatorVaultAsync(IStorage storage, string password, string vaultBasePath, bool ownsStorage)
         {
             _baseStorage = storage;
             _vaultBasePath = vaultBasePath;
             _ownsStorage = ownsStorage;
-
-            // Convert SecureString to string for vault operations, then clear it
-            string plainPassword = ConvertSecureStringToString(password);
-            try
-            {
-                // Create new Cryptomator V8 vault
-                VaultHandler.CreateNewCryptomatorV8VaultComplete(vaultBasePath, plainPassword);
-
-                // Load the newly created vault
-                await LoadVaultInternalAsync(plainPassword);
-                _isOpen = true;
-            }
-            catch
-            {
-                // Cleanup on failure
-                if (_ownsStorage)
-                {
-                    await storage.ShutdownAsync();
-                    storage.Dispose();
-                }
-                throw;
-            }
-            finally
-            {
-                // Securely clear the password from memory
-                ClearString(plainPassword);
-            }
-        }
-
-        private async Task InitializeExistingVaultAsync(IStorage storage, string password, string vaultBasePath, bool ownsStorage)
-        {
-            _baseStorage = storage;
-            _vaultBasePath = vaultBasePath;
-            _ownsStorage = ownsStorage;
+            _vaultFormat = VaultFormat.CryptomatorV8;
 
             try
             {
                 // Load existing vault
-                await LoadVaultInternalAsync(password);
+                await LoadCryptomatorVaultInternalAsync(password);
                 _isOpen = true;
             }
             catch
             {
                 // Cleanup on failure
-                if (_ownsStorage)
+                if (_ownsStorage && storage is IDisposable disposable)
                 {
-                    await storage.ShutdownAsync();
-                    storage.Dispose();
+                    disposable.Dispose();
                 }
                 throw;
             }
         }
 
-        private async Task InitializeExistingVaultAsync(IStorage storage, SecureString password, string vaultBasePath, bool ownsStorage)
-        {
-            _baseStorage = storage;
-            _vaultBasePath = vaultBasePath;
-            _ownsStorage = ownsStorage;
-
-            // Convert SecureString to string for vault operations, then clear it
-            string plainPassword = ConvertSecureStringToString(password);
-            try
-            {
-                // Load existing vault
-                await LoadVaultInternalAsync(plainPassword);
-                _isOpen = true;
-            }
-            catch
-            {
-                // Cleanup on failure
-                if (_ownsStorage)
-                {
-                    await storage.ShutdownAsync();
-                    storage.Dispose();
-                }
-                throw;
-            }
-            finally
-            {
-                // Securely clear the password from memory
-                ClearString(plainPassword);
-            }
-        }
-
-        private async Task LoadVaultInternalAsync(string password)
+        private async Task LoadCryptomatorVaultInternalAsync(string password)
         {
             // Load vault from masterkey file
             string masterkeyPath = Path.Combine(_vaultBasePath!, "masterkey.cryptomator");
-            
+
             if (!File.Exists(masterkeyPath))
             {
                 throw new FileNotFoundException($"Vault masterkey not found at: {masterkeyPath}");
             }
 
             byte[] masterkeyBytes = await File.ReadAllBytesAsync(masterkeyPath);
-            
+
             try
             {
                 _vault = VaultHandler.LoadCryptomatorV8Vault(masterkeyBytes, password);
@@ -601,59 +506,95 @@ namespace UvfLib.Storage
             );
         }
 
-        /// <summary>
-        /// Converts a SecureString to a regular string for vault operations.
-        /// The returned string should be cleared using ClearString() after use.
-        /// </summary>
-        /// <param name="secureString">The SecureString to convert</param>
-        /// <returns>A string representation of the SecureString</returns>
-        private static string ConvertSecureStringToString(SecureString secureString)
-        {
-            IntPtr ptr = IntPtr.Zero;
-            try
-            {
-                ptr = Marshal.SecureStringToGlobalAllocUnicode(secureString);
-                return Marshal.PtrToStringUni(ptr) ?? string.Empty;
-            }
-            finally
-            {
-                if (ptr != IntPtr.Zero)
-                {
-                    Marshal.ZeroFreeGlobalAllocUnicode(ptr);
-                }
-            }
-        }
+        #endregion
 
-        /// <summary>
-        /// Securely clears a string from memory by overwriting its internal character array.
-        /// Note: This uses reflection and may not work in all .NET implementations.
-        /// </summary>
-        /// <param name="str">The string to clear</param>
-        private static void ClearString(string str)
+        #region Private Implementation - UVF
+
+        private async Task InitializeNewUvfVaultAsync(IStorage storage, string password, string vaultBasePath, bool encryptFilenames, bool ownsStorage)
         {
-            if (string.IsNullOrEmpty(str)) return;
+            _baseStorage = storage;
+            _vaultBasePath = vaultBasePath;
+            _ownsStorage = ownsStorage;
+            _vaultFormat = VaultFormat.UvfV3;
 
             try
             {
-                // In .NET, strings are immutable, but we can try to clear the underlying memory
-                // This is a best-effort approach and may not work in all scenarios
-                unsafe
-                {
-                    fixed (char* ptr = str)
-                    {
-                        for (int i = 0; i < str.Length; i++)
-                        {
-                            ptr[i] = '\0';
-                        }
-                    }
-                }
+                // Create new UVF vault file
+                byte[] vaultFileContent = VaultHandler.CreateNewUvfVaultFileContent(password);
+                string vaultFilePath = Path.Combine(_vaultBasePath, "vault.uvf");
+                await File.WriteAllBytesAsync(vaultFilePath, vaultFileContent);
+
+                // Load the newly created vault
+                await LoadUvfVaultInternalAsync(password, encryptFilenames);
+                _isOpen = true;
             }
             catch
             {
-                // If clearing fails, we can't do much more
-                // The GC will eventually collect the string
+                // Cleanup on failure
+                if (_ownsStorage && storage is IDisposable disposable)
+                {
+                    disposable.Dispose();
+                }
+                throw;
             }
         }
+
+        private async Task InitializeExistingUvfVaultAsync(IStorage storage, string password, string vaultBasePath, bool encryptFilenames, bool ownsStorage)
+        {
+            _baseStorage = storage;
+            _vaultBasePath = vaultBasePath;
+            _ownsStorage = ownsStorage;
+            _vaultFormat = VaultFormat.UvfV3;
+
+            try
+            {
+                // Load existing vault
+                await LoadUvfVaultInternalAsync(password, encryptFilenames);
+                _isOpen = true;
+            }
+            catch
+            {
+                // Cleanup on failure
+                if (_ownsStorage && storage is IDisposable disposable)
+                {
+                    disposable.Dispose();
+                }
+                throw;
+            }
+        }
+
+        private async Task LoadUvfVaultInternalAsync(string password, bool encryptFilenames)
+        {
+            string vaultFilePath = Path.Combine(_vaultBasePath!, "vault.uvf");
+
+            if (!File.Exists(vaultFilePath))
+            {
+                throw new FileNotFoundException($"UVF vault file not found at: {vaultFilePath}");
+            }
+
+            byte[] vaultBytes = await File.ReadAllBytesAsync(vaultFilePath);
+
+            try
+            {
+                _vault = VaultHandler.LoadUvfVault(vaultBytes, password);
+            }
+            catch (Exception ex)
+            {
+                throw new UnauthorizedAccessException($"Failed to load UVF vault: {ex.Message}", ex);
+            }
+
+            // Create vault storage decorator for UVF
+            _vaultStorage = new UvfStorageDecorator(
+                _baseStorage!,
+                _vault,
+                encryptFilenames, // Use the provided encryptFilenames parameter
+                _vaultBasePath!
+            );
+        }
+
+        #endregion
+
+        #region Private Implementation - Common
 
         private void EnsureOpen()
         {
@@ -698,22 +639,179 @@ namespace UvfLib.Storage
 
         #endregion
 
+        #region Vault Backup Methods
+
+        /// <summary>
+        /// Backs up essential vault files to the specified backup directory.
+        /// For Cryptomator: backs up masterkey.cryptomator and vault.cryptomator (if exists)
+        /// For UVF: backs up vault.uvf
+        /// </summary>
+        /// <param name="backupPath">Directory where backup files will be stored</param>
+        /// <param name="overwriteExisting">Whether to overwrite existing backup files</param>
+        /// <returns>Array of backed up file paths</returns>
+        public async Task<string[]> BackupVaultFilesAsync(string backupPath, bool overwriteExisting = false)
+        {
+            if (string.IsNullOrEmpty(backupPath))
+                throw new ArgumentNullException(nameof(backupPath));
+            
+            if (string.IsNullOrEmpty(_vaultBasePath))
+                throw new InvalidOperationException("Vault is not initialized or has no base path");
+
+            return await BackupVaultFilesAsync(_vaultBasePath, backupPath, overwriteExisting);
+        }
+
+        /// <summary>
+        /// Backs up essential vault files from the specified vault path to the backup directory.
+        /// Automatically detects vault format (Cryptomator or UVF) and backs up appropriate files.
+        /// </summary>
+        /// <param name="vaultPath">Path to the vault directory</param>
+        /// <param name="backupPath">Directory where backup files will be stored</param>
+        /// <param name="overwriteExisting">Whether to overwrite existing backup files</param>
+        /// <returns>Array of backed up file paths</returns>
+        public static async Task<string[]> BackupVaultFilesAsync(string vaultPath, string backupPath, bool overwriteExisting = false)
+        {
+            if (string.IsNullOrEmpty(vaultPath))
+                throw new ArgumentNullException(nameof(vaultPath));
+            if (string.IsNullOrEmpty(backupPath))
+                throw new ArgumentNullException(nameof(backupPath));
+            if (!Directory.Exists(vaultPath))
+                throw new DirectoryNotFoundException($"Vault directory not found: {vaultPath}");
+
+            // Create backup directory if it doesn't exist
+            Directory.CreateDirectory(backupPath);
+
+            var backedUpFiles = new List<string>();
+
+            // Detect vault format and backup appropriate files
+            VaultFormat vaultFormat = DetectVaultFormat(vaultPath);
+
+            try
+            {
+                switch (vaultFormat)
+                {
+                    case VaultFormat.CryptomatorV8:
+                        backedUpFiles.AddRange(await BackupCryptomatorFilesAsync(vaultPath, backupPath, overwriteExisting));
+                        break;
+
+                    case VaultFormat.UvfV3:
+                        backedUpFiles.AddRange(await BackupUvfFilesAsync(vaultPath, backupPath, overwriteExisting));
+                        break;
+
+                    default:
+                        throw new InvalidOperationException($"Unknown or unsupported vault format detected in: {vaultPath}");
+                }
+
+                return backedUpFiles.ToArray();
+            }
+            catch (Exception ex)
+            {
+                throw new IOException($"Failed to backup vault files from '{vaultPath}' to '{backupPath}': {ex.Message}", ex);
+            }
+        }
+
+        /// <summary>
+        /// Detects the vault format based on the presence of specific files in the vault directory.
+        /// </summary>
+        /// <param name="vaultPath">Path to the vault directory</param>
+        /// <returns>The detected vault format</returns>
+        public static VaultFormat DetectVaultFormat(string vaultPath)
+        {
+            if (string.IsNullOrEmpty(vaultPath))
+                throw new ArgumentNullException(nameof(vaultPath));
+            if (!Directory.Exists(vaultPath))
+                throw new DirectoryNotFoundException($"Vault directory not found: {vaultPath}");
+
+            // Check for UVF vault file first
+            string uvfVaultPath = Path.Combine(vaultPath, "vault.uvf");
+            if (File.Exists(uvfVaultPath))
+            {
+                return VaultFormat.UvfV3;
+            }
+
+            // Check for Cryptomator masterkey file
+            string cryptomatorMasterkeyPath = Path.Combine(vaultPath, "masterkey.cryptomator");
+            if (File.Exists(cryptomatorMasterkeyPath))
+            {
+                return VaultFormat.CryptomatorV8;
+            }
+
+            throw new InvalidOperationException($"No recognizable vault files found in directory: {vaultPath}");
+        }
+
+        /// <summary>
+        /// Backs up Cryptomator vault files (masterkey.cryptomator and vault.cryptomator if exists)
+        /// </summary>
+        private static async Task<string[]> BackupCryptomatorFilesAsync(string vaultPath, string backupPath, bool overwriteExisting)
+        {
+            var backedUpFiles = new List<string>();
+
+            // Backup masterkey.cryptomator (essential file)
+            string masterkeyPath = Path.Combine(vaultPath, "masterkey.cryptomator");
+            if (!File.Exists(masterkeyPath))
+            {
+                throw new FileNotFoundException($"Essential Cryptomator masterkey file not found: {masterkeyPath}");
+            }
+
+            string masterkeyBackupPath = Path.Combine(backupPath, "masterkey.cryptomator");
+            await CopyFileWithOverwriteCheckAsync(masterkeyPath, masterkeyBackupPath, overwriteExisting);
+            backedUpFiles.Add(masterkeyBackupPath);
+
+            // Backup vault.cryptomator (optional config file)
+            string vaultConfigPath = Path.Combine(vaultPath, "vault.cryptomator");
+            if (File.Exists(vaultConfigPath))
+            {
+                string vaultConfigBackupPath = Path.Combine(backupPath, "vault.cryptomator");
+                await CopyFileWithOverwriteCheckAsync(vaultConfigPath, vaultConfigBackupPath, overwriteExisting);
+                backedUpFiles.Add(vaultConfigBackupPath);
+            }
+
+            return backedUpFiles.ToArray();
+        }
+
+        /// <summary>
+        /// Backs up UVF vault files (vault.uvf)
+        /// </summary>
+        private static async Task<string[]> BackupUvfFilesAsync(string vaultPath, string backupPath, bool overwriteExisting)
+        {
+            var backedUpFiles = new List<string>();
+
+            // Backup vault.uvf (essential file)
+            string uvfVaultPath = Path.Combine(vaultPath, "vault.uvf");
+            if (!File.Exists(uvfVaultPath))
+            {
+                throw new FileNotFoundException($"Essential UVF vault file not found: {uvfVaultPath}");
+            }
+
+            string uvfBackupPath = Path.Combine(backupPath, "vault.uvf");
+            await CopyFileWithOverwriteCheckAsync(uvfVaultPath, uvfBackupPath, overwriteExisting);
+            backedUpFiles.Add(uvfBackupPath);
+
+            return backedUpFiles.ToArray();
+        }
+
+        /// <summary>
+        /// Copies a file with overwrite checking
+        /// </summary>
+        private static async Task CopyFileWithOverwriteCheckAsync(string sourceFilePath, string destinationFilePath, bool overwriteExisting)
+        {
+            if (File.Exists(destinationFilePath) && !overwriteExisting)
+            {
+                throw new IOException($"Backup file already exists and overwrite is disabled: {destinationFilePath}");
+            }
+
+            // Create a backup copy
+            byte[] fileData = await File.ReadAllBytesAsync(sourceFilePath);
+            await File.WriteAllBytesAsync(destinationFilePath, fileData);
+        }
+
+        #endregion
+
         #region Static Password Change Methods
 
         /// <summary>
         /// Changes the password of a Cryptomator V8 vault at the specified path.
-        /// This is a static method that doesn't require a VaultManager instance.
-        /// 
-        /// SECURITY NOTE: The passwords will remain in memory until garbage collection.
-        /// The passwords are cleared from memory after key derivation where possible.
         /// </summary>
-        /// <param name="vaultPath">Path to the vault directory</param>
-        /// <param name="oldPassword">Current vault password</param>
-        /// <param name="newPassword">New vault password</param>
-        /// <exception cref="ArgumentNullException">If any parameter is null or empty</exception>
-        /// <exception cref="InvalidCredentialException">If the old password is incorrect</exception>
-        /// <exception cref="IOException">If vault files cannot be read or written</exception>
-        public static async Task ChangeVaultPasswordAsync(string vaultPath, string oldPassword, string newPassword)
+        public static async Task ChangeCryptomatorVaultPasswordAsync(string vaultPath, string oldPassword, string newPassword)
         {
             if (string.IsNullOrEmpty(vaultPath)) throw new ArgumentNullException(nameof(vaultPath));
             if (string.IsNullOrEmpty(oldPassword)) throw new ArgumentNullException(nameof(oldPassword));
@@ -737,7 +835,7 @@ namespace UvfLib.Storage
                 // Write the new masterkey file
                 await File.WriteAllBytesAsync(masterkeyPath, newMasterkeyContent);
 
-                // Update vault.cryptomator if it exists (needs to be re-signed with new key)
+                // Update vault.cryptomator if it exists
                 string vaultConfigPath = Path.Combine(vaultPath, "vault.cryptomator");
                 if (File.Exists(vaultConfigPath))
                 {
@@ -746,49 +844,60 @@ namespace UvfLib.Storage
             }
             catch (Exception ex) when (ex is not ArgumentNullException && ex is not FileNotFoundException)
             {
-                throw new IOException($"Failed to change vault password: {ex.Message}", ex);
+                throw new IOException($"Failed to change Cryptomator vault password: {ex.Message}", ex);
             }
         }
 
         /// <summary>
-        /// Changes the password of a Cryptomator V8 vault at the specified path with enhanced password security.
-        /// This is a static method that doesn't require a VaultManager instance.
-        /// The char arrays will be cleared after key derivation.
+        /// Changes the password of a Cryptomator V8 vault with enhanced password security.
         /// </summary>
-        /// <param name="vaultPath">Path to the vault directory</param>
-        /// <param name="oldPasswordChars">Current password as char array (will be cleared after key derivation)</param>
-        /// <param name="newPasswordChars">New password as char array (will be cleared after key derivation)</param>
-        /// <exception cref="ArgumentNullException">If any parameter is null</exception>
-        /// <exception cref="InvalidCredentialException">If the old password is incorrect</exception>
-        /// <exception cref="IOException">If vault files cannot be read or written</exception>
-        public static async Task ChangeVaultPasswordAsync(string vaultPath, char[] oldPasswordChars, char[] newPasswordChars)
+        public static async Task ChangeCryptomatorVaultPasswordAsync(string vaultPath, char[] oldPasswordChars, char[] newPasswordChars)
         {
             if (string.IsNullOrEmpty(vaultPath)) throw new ArgumentNullException(nameof(vaultPath));
             if (oldPasswordChars == null) throw new ArgumentNullException(nameof(oldPasswordChars));
             if (newPasswordChars == null) throw new ArgumentNullException(nameof(newPasswordChars));
-            
+
             string oldPassword = new string(oldPasswordChars);
             string newPassword = new string(newPasswordChars);
-            
+
             try
             {
-                await ChangeVaultPasswordAsync(vaultPath, oldPassword, newPassword);
+                await ChangeCryptomatorVaultPasswordAsync(vaultPath, oldPassword, newPassword);
             }
             finally
             {
                 // Clear passwords from memory
-                if (oldPasswordChars != null)
+                Array.Clear(oldPasswordChars, 0, oldPasswordChars.Length);
+                Array.Clear(newPasswordChars, 0, newPasswordChars.Length);
+            }
+        }
+        
+        /// <summary>
+        /// Changes the password of a UVF vault at the specified path.
+        /// </summary>
+        public static async Task ChangeUvfPasswordAsync(string vaultPath, string oldPassword, string newPassword)
+        {
+            if (string.IsNullOrEmpty(vaultPath)) throw new ArgumentNullException(nameof(vaultPath));
+            if (string.IsNullOrEmpty(oldPassword)) throw new ArgumentNullException(nameof(oldPassword));
+            if (string.IsNullOrEmpty(newPassword)) throw new ArgumentNullException(nameof(newPassword));
+
+            try
+            {
+                string vaultFilePath = Path.Combine(vaultPath, "vault.uvf");
+                if (!File.Exists(vaultFilePath))
                 {
-                    Array.Clear(oldPasswordChars, 0, oldPasswordChars.Length);
-                }
-                if (newPasswordChars != null)
-                {
-                    Array.Clear(newPasswordChars, 0, newPasswordChars.Length);
+                    throw new FileNotFoundException($"UVF vault file not found: {vaultFilePath}");
                 }
                 
-                // Clear string passwords (best effort)
-                ClearString(oldPassword);
-                ClearString(newPassword);
+                byte[] currentVaultContent = await File.ReadAllBytesAsync(vaultFilePath);
+
+                byte[] newVaultContent = VaultHandler.ChangeUvfVaultPassword(currentVaultContent, oldPassword, newPassword);
+
+                await File.WriteAllBytesAsync(vaultFilePath, newVaultContent);
+            }
+            catch (Exception ex) when (ex is not ArgumentNullException && ex is not FileNotFoundException)
+            {
+                throw new IOException($"Failed to change UVF vault password: {ex.Message}", ex);
             }
         }
 

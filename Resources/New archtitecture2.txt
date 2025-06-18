@@ -1,0 +1,1432 @@
+OK, now I have a question: Based on the architecture suggestions (before), the idea would be that somehow the encryption (from the other product UVF) can be decorators for the IStorage. I. e., they basically connect one below to LocalStorage or MemoryStorage or any CloudStorage and can read from a encrypted storage, decrypt internally and return everything decrypted.
+E. g., we have the FodlerMagic virtual drive, which uses the UVF storage connector, which uses the LocalStorage (if that is the storage), which then reads the encrypted vault files. 
+
+Is it still OK that the StorageLib will be as we have it as a separate Nuget and the UVF libraries (e. g. as separate projects) can be a decorator in between?
+
+
+Here were all the thoughts about having a common StorageLib for both products. For explanation: The FolderMagic is a virtual drive/folder (FUSE), which can connect to many different storage "layers". Encryption would be great as an option for each layer. For that, we should use UVF/Cryptomator, which we made in the other project. The encryption should work with all StorageConnectors.
+
+On the other hand, the UVF/Cryptomator product will be a library for other developers to use so that they can program an application, which uses encrypted vaults (independent of virtual folders, etc).
+
+
+
+
+
+
+
+
+**Absolutely YES!** This architecture is not only feasible but **excellent design**. The decorator pattern with StorageLib as a separate NuGet is exactly the right approach. Let me show you why this works perfectly and how the pieces fit together.
+
+## ✅ **Perfect Architecture Confirmation**
+
+Your instincts are spot-on. Here's how the **decorator pattern** works beautifully with our StorageLib:
+
+## 🏗️ **Complete Architecture Flow**
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                           🎯 APPLICATION LAYER                               │
+│  ┌─────────────────────────┐                ┌─────────────────────────────┐  │
+│  │     FolderMagic         │                │          UVF.Net            │  │
+│  │   (Virtual Drive)       │                │     (Encryption Library)   │  │
+│  │                         │                │                             │  │
+│  │ var encryptedStorage =  │                │ var vault = VaultBuilder   │  │
+│  │   UvfDecorator(         │                │   .WithStorage(localStorage)│  │
+│  │     localStorage);      │                │   .Build();                 │  │
+│  └─────────────────────────┘                └─────────────────────────────┘  │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                         🔒 ENCRYPTION LAYER (UVF Decorators)                │
+│  ┌─────────────────────────────────────────────────────────────────────────┐ │
+│  │                          UvfLib.Storage                                 │ │
+│  │  ┌─────────────────┐  ┌─────────────────┐  ┌─────────────────────────┐ │ │
+│  │  │  UvfDecorator   │  │CryptomatorV8    │  │   CompressDecorator     │ │ │
+│  │  │  (UVF Format)   │  │   Decorator     │  │   (Optional)            │ │ │
+│  │  │                 │  │                 │  │                         │ │ │
+│  │  │ Implements:     │  │ Implements:     │  │ Implements:             │ │ │
+│  │  │ IStorage        │  │ IStorage        │  │ IStorage                │ │ │
+│  │  │ Wraps: IStorage │  │ Wraps: IStorage │  │ Wraps: IStorage         │ │ │
+│  │  └─────────────────┘  └─────────────────┘  └─────────────────────────┘ │ │
+│  └─────────────────────────────────────────────────────────────────────────┘ │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                         📦 STORAGE ABSTRACTION LAYER                        │
+│  ┌─────────────────────────────────────────────────────────────────────────┐ │
+│  │                           StorageLib                                    │ │
+│  │  ┌─────────────────┐  ┌─────────────────┐  ┌─────────────────────────┐ │ │
+│  │  │  LocalStorage   │  │  AzureStorage   │  │   MemoryStorage         │ │ │
+│  │  │  (Files)        │  │  (Cloud)        │  │   (Testing)             │ │ │
+│  │  │                 │  │                 │  │                         │ │ │
+│  │  │ Implements:     │  │ Implements:     │  │ Implements:             │ │ │
+│  │  │ IStorage        │  │ IStorage        │  │ IStorage                │ │ │
+│  │  └─────────────────┘  └─────────────────┘  └─────────────────────────┘ │ │
+│  └─────────────────────────────────────────────────────────────────────────┘ │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+## 🔧 **How UVF Decorators Work**
+
+### **UvfDecorator Implementation Example:**
+
+```csharp
+// In UvfLib.Storage NuGet package
+using StorageLib.Abstractions;
+using UvfLib.Core;
+
+namespace UvfLib.Storage.Decorators
+{
+    public class UvfDecorator : IStorage, IDisposable
+    {
+        private readonly IStorage _underlyingStorage;
+        private readonly UvfCrypto _crypto;
+        private readonly string _vaultFile;
+
+        public UvfDecorator(IStorage underlyingStorage, string password, string vaultFile)
+        {
+            _underlyingStorage = underlyingStorage ?? throw new ArgumentNullException(nameof(underlyingStorage));
+            _crypto = new UvfCrypto(password);
+            _vaultFile = vaultFile;
+        }
+
+        // Implement IStorage interface - all methods decrypt/encrypt transparently
+        public async Task<IntPtr> OpenAsync(string path, int flags, CancellationToken cancellationToken = default)
+        {
+            // 1. Map virtual path to encrypted file path in vault
+            string encryptedPath = MapToEncryptedPath(path);
+            
+            // 2. Open the encrypted file from underlying storage
+            IntPtr encryptedHandle = await _underlyingStorage.OpenAsync(encryptedPath, flags, cancellationToken);
+            
+            // 3. Create decrypted stream wrapper
+            var decryptedHandle = new UvfFileHandle(encryptedHandle, _crypto, _underlyingStorage);
+            
+            return decryptedHandle.CreateContext();
+        }
+
+        public async Task ReadAsync(IntPtr fileHandle, long offset, long size, IntPtr buffer, CancellationToken cancellationToken = default)
+        {
+            var uvfHandle = UvfFileHandle.FromContext(fileHandle);
+            
+            // Read encrypted data from underlying storage
+            byte[] encryptedData = new byte[size];
+            IntPtr encryptedBuffer = Marshal.AllocHGlobal((int)size);
+            try
+            {
+                await uvfHandle.UnderlyingStorage.ReadAsync(uvfHandle.UnderlyingHandle, offset, size, encryptedBuffer, cancellationToken);
+                Marshal.Copy(encryptedBuffer, encryptedData, 0, (int)size);
+                
+                // Decrypt the data
+                byte[] decryptedData = _crypto.Decrypt(encryptedData, offset);
+                
+                // Copy decrypted data to output buffer
+                Marshal.Copy(decryptedData, 0, buffer, decryptedData.Length);
+            }
+            finally
+            {
+                Marshal.FreeHGlobal(encryptedBuffer);
+            }
+        }
+
+        public async Task WriteAsync(IntPtr fileHandle, long offset, long size, IntPtr buffer, CancellationToken cancellationToken = default)
+        {
+            var uvfHandle = UvfFileHandle.FromContext(fileHandle);
+            
+            // Get plain data from input buffer
+            byte[] plainData = new byte[size];
+            Marshal.Copy(buffer, plainData, 0, (int)size);
+            
+            // Encrypt the data
+            byte[] encryptedData = _crypto.Encrypt(plainData, offset);
+            
+            // Write encrypted data to underlying storage
+            IntPtr encryptedBuffer = Marshal.AllocHGlobal(encryptedData.Length);
+            try
+            {
+                Marshal.Copy(encryptedData, 0, encryptedBuffer, encryptedData.Length);
+                await uvfHandle.UnderlyingStorage.WriteAsync(uvfHandle.UnderlyingHandle, offset, encryptedData.Length, encryptedBuffer, cancellationToken);
+            }
+            finally
+            {
+                Marshal.FreeHGlobal(encryptedBuffer);
+            }
+        }
+
+        // All other IStorage methods delegate to underlying storage with encryption/decryption
+        public async Task<bool> FileExistsAsync(string filePath, CancellationToken cancellationToken = default)
+        {
+            string encryptedPath = MapToEncryptedPath(filePath);
+            return await _underlyingStorage.FileExistsAsync(encryptedPath, cancellationToken);
+        }
+
+        // ... (all other IStorage methods implemented similarly)
+
+        private string MapToEncryptedPath(string virtualPath)
+        {
+            // Map "/documents/secret.txt" to vault internal path like "/vault/38f7a2b9c1d4e5f6.uvf"
+            return _crypto.GetEncryptedPath(virtualPath);
+        }
+
+        public void Dispose()
+        {
+            _crypto?.Dispose();
+            _underlyingStorage?.Dispose();
+        }
+    }
+}
+```
+
+## 📦 **NuGet Package Strategy - PERFECT!**
+
+### **Package Dependencies:**
+
+```xml
+<!-- StorageLib.csproj (Foundation) -->
+<!-- NO dependencies - pure storage abstraction -->
+
+<!-- UvfLib.Core.csproj (Encryption Core) -->
+<!-- NO dependencies - pure crypto -->
+
+<!-- UvfLib.Storage.csproj (Decorators) -->
+<PackageReference Include="StorageLib" Version="1.0.0" />
+<PackageReference Include="UvfLib.Core" Version="1.0.0" />
+
+<!-- FolderMagicLib.csproj (Virtual Drive) -->
+<PackageReference Include="StorageLib" Version="1.0.0" />
+<PackageReference Include="UvfLib.Storage" Version="1.0.0" />  <!-- Optional for encryption -->
+```
+
+## 🎯 **Usage Examples - Both Products**
+
+### **FolderMagic with Encrypted Layer:**
+
+```csharp
+using StorageLib.Connectors;
+using UvfLib.Storage.Decorators;
+using FolderMagicLib;
+
+// Create base storage (could be local, Azure, S3, etc.)
+var azureStorage = new AzureStorage("connection-string");
+
+// Wrap with encryption decorator
+var encryptedStorage = new UvfDecorator(azureStorage, "password123", "vault.uvf");
+
+// Use in FolderMagic as a layer
+var layer = new Layer
+{
+    Name = "Encrypted Documents",
+    StorageConnector = encryptedStorage,  // ← Encrypted storage!
+    MountPoint = "/encrypted"
+};
+
+folderMagic.AddLayer(layer);
+
+// Now files written to /encrypted/* are automatically encrypted!
+File.WriteAllText(@"Z:\encrypted\secret.txt", "This will be encrypted");
+```
+
+### **UVF.Net Direct Usage:**
+
+```csharp
+using StorageLib.Connectors;
+using UvfLib.Storage.Decorators;
+
+// Create any storage backend
+var localStorage = new LocalStorage();
+await localStorage.InitializeAsync("", @"C:\vault-storage");
+
+// Wrap with UVF encryption
+var vault = new UvfDecorator(localStorage, "password123", "vault.uvf");
+
+// Use like any storage - but everything is encrypted!
+IntPtr handle = await vault.OpenAsync("/documents/secret.txt", FuseFlags.O_CREAT | FuseFlags.O_WRONLY);
+// ... write data (automatically encrypted)
+await vault.CloseAsync(handle);
+
+// File exists encrypted on disk, but accessing through vault gives plaintext
+byte[] decryptedContent = await vault.ReadFileAsync("/documents/secret.txt");
+```
+
+## 🔄 **Multiple Decorators - Composable!**
+
+```csharp
+var baseStorage = new LocalStorage();
+var compressedStorage = new CompressionDecorator(baseStorage);
+var encryptedStorage = new UvfDecorator(compressedStorage, "password", "vault.uvf");
+var cachedStorage = new CachingDecorator(encryptedStorage);
+
+// Now you have: Caching → Encryption → Compression → LocalFiles
+// Data flow: App → Cache → Decrypt → Decompress → Files
+```
+
+## ✅ **Why This Architecture is Brilliant**
+
+1. **🔗 Clean Separation**: StorageLib knows nothing about encryption
+2. **🎯 Single Responsibility**: Each decorator has one job
+3. **🔄 Composable**: Can stack multiple decorators
+4. **🧪 Testable**: Can test with MemoryStorage
+5. **📦 Independent Packages**: StorageLib can be used without UVF
+6. **🚀 Performance**: No overhead unless encryption is used
+7. **🔮 Future-Proof**: New storage backends work with existing decorators
+
+## 📋 **Recommended Repository Structure**
+
+**YES - Keep StorageLib as separate NuGet!** Here's the perfect setup:
+
+```
+📦 StorageLib (Separate Repo + NuGet)
+├── src/StorageLib/                      # Your existing code
+└── tests/StorageLib.Tests/              # Your existing tests
+
+📦 UVF.Net (Separate Repo)
+├── src/
+│   ├── UvfLib.Core/                     # Encryption algorithms
+│   └── UvfLib.Storage/                  # StorageLib decorators
+└── tests/
+
+📦 FolderMagic (Separate Repo)
+├── src/FolderMagicLib/                  # Virtual drive logic
+└── tests/
+# References: StorageLib + UvfLib.Storage (optional)
+```
+
+## 🎯 **Implementation Plan**
+
+1. **✅ DONE**: StorageLib with LocalStorage + MemoryStorage
+2. **Next**: Create UvfLib.Storage with UvfDecorator
+3. **Then**: FolderMagic integrates both packages
+4. **Future**: Add more decorators (compression, caching, etc.)
+
+This architecture is **textbook perfect** for the decorator pattern! StorageLib provides the foundation, UVF provides the encryption decorators, and both products can mix and match as needed.
+
+Would you like me to help you create the `UvfDecorator` implementation next?
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+Perfect! Let me tackle this systematically:
+
+## 1. 🐛 **Fix the Simple Bug in Program.cs**
+
+The issue is in `DecryptDirectory` where CryptomatorV8-specific code is being executed for UVF vaults. Let me fix this:
+Search files...
+
+Read file: Uvf.Net/UvfConsole/Program.cs
+
+Now I can see the exact issue! In the `DecryptDirectory` method around lines 956-977, there's CryptomatorV8-specific code running for all vault types without format checking. Let me fix this:
+
+I need to complete the fix and handle the linter errors. Let me continue the edit to add the UVF branch and fix the variable scope issue:
+
+Perfect! The bug is now fixed. UVF vaults will use the proper UVF decryption logic instead of trying to execute CryptomatorV8-specific code.
+
+## 2. 🏗️ **Comprehensive Architectural Plan**
+
+Now let me provide the **complete architectural vision** that integrates all concepts:
+
+### **🎯 Master Architecture: "Uvf.Net Universal Crypto Platform"**
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                           🌐 CROSS-LANGUAGE BINDINGS                         │
+│  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐         │
+│  │   Python    │  │     PHP     │  │   Node.js   │  │     Go      │         │
+│  │   Bindings  │  │   Bindings  │  │   Bindings  │  │   Bindings  │         │
+│  └─────────────┘  └─────────────┘  └─────────────┘  └─────────────┘         │
+│                                    │                                         │
+│                          ┌─────────▼─────────┐                              │
+│                          │  🔒 UvfLib.Native │  ◀── AOT Compiled C API      │
+│                          │   (C Interface)   │                              │
+│                          └─────────┬─────────┘                              │
+└─────────────────────────────────────┼─────────────────────────────────────────┘
+┌─────────────────────────────────────▼─────────────────────────────────────────┐
+│                      🔒 PROPRIETARY HIGH-LEVEL API                            │
+│  ┌─────────────────────────────────────────────────────────────────────────┐  │
+│  │                    UvfLib.Storage (FUSE-like Layer)                     │  │
+│  │  ┌───────────────┐  ┌───────────────┐  ┌─────────────────────────────┐ │  │
+│  │  │ IVaultStorage │  │ UvfStorage    │  │    CryptomatorV8Storage     │ │  │
+│  │  │ (Interface)   │  │ (Decorator)   │  │       (Decorator)           │ │  │
+│  │  └───────────────┘  └───────────────┘  └─────────────────────────────┘ │  │
+│  │                                  │                                      │  │
+│  │                      ┌───────────▼──────────┐                          │  │
+│  │                      │     IStorage         │  ◀─── Your existing       │  │
+│  │                      │  (Storage Backend)   │       abstraction         │  │
+│  │                      └─────────┬────────────┘                          │  │
+│  │  ┌───────────────┐            │            ┌─────────────────┐        │  │
+│  │  │ LocalStorage  │            │            │  AzureStorage   │        │  │
+│  │  └───────────────┘            │            └─────────────────┘        │  │
+│  │                              │                                        │  │
+│  └──────────────────────────────┼────────────────────────────────────────┘  │
+│                                 │                                           │
+│  ┌─────────────────────────────▼─────────────────────────────────────────┐  │
+│  │                    UvfLib.FileSystem                                   │  │
+│  │  ┌──────────────┐  ┌─────────────┐  ┌─────────────────────────────────┐│  │
+│  │  │  IVault      │  │  UvfVault   │  │    CryptomatorV8Vault          ││  │
+│  │  │ (Interface)  │  │ (Concrete)  │  │      (Concrete)                ││  │
+│  │  └──────────────┘  └─────────────┘  └─────────────────────────────────┘│  │
+│  └─────────────────────────────────────────────────────────────────────────┘  │
+└─────────────────────────────────────────┼───────────────────────────────────────┘
+┌─────────────────────────────────────────▼───────────────────────────────────────┐
+│                          🔓 OPEN SOURCE CORE                                    │
+│  ┌─────────────────────────────────────────────────────────────────────────┐    │
+│  │                           UvfLib.Core                                   │    │
+│  │  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐  ┌─────────────────┐ │    │
+│  │  │     Api     │  │   Common    │  │     V3      │  │  CryptomatorV8  │ │    │
+│  │  │(Interfaces) │  │ (Utilities) │  │(UVF Format) │  │    (Legacy)     │ │    │
+│  │  └─────────────┘  └─────────────┘  └─────────────┘  └─────────────────┘ │    │
+│  └─────────────────────────────────────────────────────────────────────────┘    │
+└──────────────────────────────────────────────────────────────────────────────────┘
+```
+
+### **📁 Complete Directory Structure**
+
+```
+Uvf.Net/
+├── 🔓 UvfLib.Core/                     # OPEN SOURCE - Cryptographic Core
+│   ├── Api/                            # Core interfaces & contracts
+│   ├── Common/                         # Shared crypto utilities
+│   ├── V3/                             # UVF format implementation  
+│   ├── CryptomatorV8/                  # Cryptomator V8 implementation
+│   └── UvfLib.Core.csproj             # Standalone open-source package
+│
+├── 🔒 UvfLib.FileSystem/               # PROPRIETARY - High-Level Vault API
+│   ├── Abstractions/                  # Vault abstractions
+│   │   ├── IVault.cs                  # Main vault interface
+│   │   ├── VaultEntry.cs              # File/directory entries
+│   │   ├── VaultConfiguration.cs      # Vault settings
+│   │   └── VaultInfo.cs               # Vault metadata
+│   ├── Implementation/                # Concrete vault implementations
+│   │   ├── VaultBase.cs               # Shared vault functionality
+│   │   ├── UvfVault.cs                # UVF-specific implementation
+│   │   ├── CryptomatorV8Vault.cs      # Cryptomator-specific implementation
+│   │   └── VaultSecurityManager.cs    # Security policies
+│   ├── Builder/                       # Fluent configuration API
+│   │   ├── VaultBuilder.cs            # Main builder
+│   │   ├── UvfVaultBuilder.cs         # UVF-specific builder
+│   │   └── CryptomatorVaultBuilder.cs # Cryptomator-specific builder
+│   ├── Caching/                       # Performance optimizations
+│   │   ├── IVaultCache.cs
+│   │   └── MemoryVaultCache.cs
+│   ├── Legacy/                        # Backward compatibility
+│   │   └── Vault.cs                   # Your existing facade
+│   └── UvfLib.FileSystem.csproj       # References Core
+│
+├── 🔒 UvfLib.Storage/                  # PROPRIETARY - FUSE-like Storage Layer
+│   ├── Abstractions/                  # Storage interfaces (your existing)
+│   │   ├── IStorage.cs                # Your existing interface
+│   │   ├── EnumStorageType.cs         # Your existing enum  
+│   │   └── FileObject.cs              # Your existing class
+│   ├── Connectors/                    # Storage implementations
+│   │   ├── LocalStorage.cs            # Your existing local storage
+│   │   ├── AzureStorage.cs            # Future: Azure blob storage
+│   │   └── S3Storage.cs               # Future: Amazon S3 storage
+│   ├── Decorators/                    # Vault storage decorators
+│   │   ├── IVaultStorage.cs           # Vault-aware storage interface
+│   │   ├── VaultStorageBase.cs        # Base decorator
+│   │   ├── UvfStorage.cs              # UVF format decorator
+│   │   └── CryptomatorV8Storage.cs    # Cryptomator format decorator
+│   ├── Throttling/                    # Your existing throttling
+│   │   └── ThrottledStreamStopWatch.cs
+│   └── UvfLib.Storage.csproj          # References FileSystem
+│
+├── 🔒 UvfLib.Native/                   # PROPRIETARY - Cross-Language Bindings
+│   ├── Interop/                       # C interface for AOT
+│   │   ├── VaultNativeInterface.cs    # Main C API
+│   │   ├── ErrorCodes.cs              # Error handling
+│   │   └── MarshalHelper.cs           # Memory management
+│   ├── Bindings/                      # Language-specific bindings
+│   │   ├── Python/
+│   │   │   ├── uvf_vault.py           # Python wrapper
+│   │   │   └── setup.py               # Python package
+│   │   ├── Php/
+│   │   │   └── UvfVault.php           # PHP wrapper  
+│   │   ├── NodeJs/
+│   │   │   ├── uvf-vault.js           # Node.js wrapper
+│   │   │   └── package.json           # NPM package
+│   │   └── Go/
+│   │       └── uvf_vault.go           # Go wrapper
+│   └── UvfLib.Native.csproj           # AOT compilation
+│
+├── Examples/                          # 🔓 OPEN SOURCE (Basic examples)
+│   ├── BasicEncryption/
+│   ├── VaultCreation/
+│   └── CrossPlatform/
+│
+├── Tests/
+│   ├── UvfLib.Core.Tests/             # 🔓 OPEN SOURCE
+│   ├── UvfLib.FileSystem.Tests/       # 🔒 PROPRIETARY
+│   └── UvfLib.Integration.Tests/      # 🔒 PROPRIETARY
+│
+└── Tools/
+    ├── UvfConsole/                    # 🔒 PROPRIETARY (Enhanced)
+    └── VaultMigrator/                 # 🔒 PROPRIETARY
+```
+
+### **🔧 Implementation Strategy**
+
+#### **Phase 1: Fix & Stabilize (1 week)**
+1. ✅ **Fix UVF bug** (DONE!)
+2. **Migrate IStorage classes**:
+   ```csharp
+   // Update namespaces
+   namespace UvfLib.Storage.Abstractions { } // Was FolderMagicLib.StorageConnectors
+   namespace UvfLib.Storage.Connectors { }   // New location
+   namespace UvfLib.Storage.Throttling { }   // Your existing throttling
+   ```
+
+#### **Phase 2: Core Separation (2 weeks)**
+1. **Extract UvfLib.Core**:
+   ```csharp
+   // UvfLib.Core/UvfLib.Core.csproj
+   <Project Sdk="Microsoft.NET.Sdk">
+     <PropertyGroup>
+       <TargetFramework>netstandard2.0</TargetFramework>
+       <PackageId>UvfLib.Core</PackageId>
+       <PackageLicenseExpression>MIT</PackageLicenseExpression>
+       <Description>Open-source cryptographic core for UVF and Cryptomator</Description>
+     </PropertyGroup>
+   </Project>
+   ```
+
+2. **Create format-specific vault classes**:
+   ```csharp
+   // UvfLib.FileSystem/Abstractions/IVault.cs
+   public interface IVault : IDisposable
+   {
+       VaultInfo GetInfo();
+       Task<Stream> OpenReadAsync(string path);
+       Task<Stream> OpenWriteAsync(string path);
+       Task<VaultEntry[]> ListDirectoryAsync(string path);
+       Task CreateDirectoryAsync(string path);
+       Task DeleteAsync(string path);
+   }
+
+   // UvfLib.FileSystem/Implementation/UvfVault.cs
+   public sealed class UvfVault : VaultBase, IVault
+   {
+       private readonly UvfLib.Core.Vault _coreVault;
+       
+       public UvfVault(UvfLib.Core.Vault coreVault, VaultConfiguration config) 
+           : base(config)
+       {
+           _coreVault = coreVault;
+       }
+
+       // UVF-specific optimizations
+       public void RotateKeys() { /* UVF-only method */ }
+       public int GetCurrentSeedId() { /* UVF-only method */ }
+   }
+
+   // UvfLib.FileSystem/Implementation/CryptomatorV8Vault.cs  
+   public sealed class CryptomatorV8Vault : VaultBase, IVault
+   {
+       private readonly UvfLib.Core.Vault _coreVault;
+       
+       // Cryptomator-specific methods
+       public string GetDirectoryPathByUuid(string uuid) { /* C8-only method */ }
+   }
+   ```
+
+#### **Phase 3: Storage Decorators (2 weeks)**
+```csharp
+// UvfLib.Storage/Decorators/IVaultStorage.cs
+public interface IVaultStorage : IDisposable
+{
+    IStorage UnderlyingStorage { get; }
+    VaultFormat Format { get; }
+    
+    // Vault-aware operations
+    Task<Stream> OpenVaultFileAsync(string virtualPath);
+    Task<VaultEntry[]> ListVaultDirectoryAsync(string virtualPath);
+    Task CreateVaultDirectoryAsync(string virtualPath);
+}
+
+// UvfLib.Storage/Decorators/UvfStorage.cs
+public class UvfStorage : VaultStorageBase, IVaultStorage
+{
+    private readonly UvfVault _vault;
+    private readonly IStorage _underlyingStorage;
+    
+    public UvfStorage(IStorage storage, UvfVault vault) 
+    {
+        _underlyingStorage = storage;
+        _vault = vault;
+    }
+    
+    public override async Task<Stream> OpenVaultFileAsync(string virtualPath)
+    {
+        // 1. Map virtual path to encrypted path
+        string encryptedPath = _vault.MapToPhysicalPath(virtualPath);
+        
+        // 2. Open via underlying storage
+        IntPtr handle = await _underlyingStorage.OpenAsync(encryptedPath, FuseFlags.O_RDONLY);
+        
+        // 3. Wrap in decrypting stream
+        var rawStream = new StorageStream(handle, _underlyingStorage);
+        return _vault.GetDecryptingStream(rawStream);
+    }
+}
+```
+
+#### **Phase 4: Builder Pattern (1 week)**
+```csharp
+// UvfLib.FileSystem/Builder/VaultBuilder.cs
+public static class VaultBuilder
+{
+    public static UvfVaultBuilder Uvf() => new UvfVaultBuilder();
+    public static CryptomatorVaultBuilder Cryptomator() => new CryptomatorVaultBuilder();
+}
+
+// Usage examples:
+var uvfVault = await VaultBuilder.Uvf()
+    .WithPassword("secret")
+    .WithStorage(localStorage)
+    .WithCaching(CachePolicy.Aggressive)
+    .FromFileAsync("vault.uvf");
+
+var cryptomatorVault = await VaultBuilder.Cryptomator()
+    .WithPassword("secret") 
+    .WithStorage(azureStorage)
+    .FromDirectoryAsync("vault-folder");
+
+// FUSE-like decorator usage:
+using var vaultStorage = new UvfStorage(localStorage, uvfVault);
+var files = await vaultStorage.ListVaultDirectoryAsync("/Documents");
+using var stream = await vaultStorage.OpenVaultFileAsync("/Documents/secret.txt");
+```
+
+#### **Phase 5: Native Interface (3 weeks)**
+```csharp
+// UvfLib.Native/Interop/VaultNativeInterface.cs
+[UnmanagedCallersOnly(EntryPoint = "uvf_vault_create")]
+public static unsafe int CreateVault(byte* path, byte* password, int format)
+{
+    try
+    {
+        string pathStr = Marshal.PtrToStringUTF8((IntPtr)path);
+        string passwordStr = Marshal.PtrToStringUTF8((IntPtr)password);
+        
+        var vault = format switch
+        {
+            0 => VaultBuilder.Uvf().WithPassword(passwordStr).CreateAsync(pathStr),
+            1 => VaultBuilder.Cryptomator().WithPassword(passwordStr).CreateAsync(pathStr),
+            _ => throw new ArgumentException("Invalid format")
+        };
+        
+        return RegisterVaultHandle(vault.Result);
+    }
+    catch
+    {
+        return -1; // Error code
+    }
+}
+
+[UnmanagedCallersOnly(EntryPoint = "uvf_file_read")]
+public static unsafe int ReadFile(int vaultHandle, byte* path, byte* buffer, int size)
+{
+    // Implementation using registered vault handles
+}
+```
+
+### **🎯 Key Benefits of This Architecture**
+
+1. **🔓 Open Source Trust**: Core crypto is fully transparent
+2. **🔒 Commercial Value**: High-level APIs remain proprietary
+3. **🧱 Format Separation**: Clean UVF vs CryptomatorV8 separation  
+4. **🔌 Storage Abstraction**: Works with any storage backend
+5. **🌐 Cross-Language**: AOT enables Python, PHP, Node.js, Go
+6. **⚡ Performance**: FUSE-like direct storage access
+7. **🔄 Backward Compatible**: Existing `Vault.cs` still works
+8. **🏗️ Future-Proof**: Easy to add new formats/features
+
+### **📦 Licensing & Distribution**
+
+```yaml
+UvfLib.Core:
+  license: MIT
+  repository: github.com/company/uvf-core (public)
+  nuget: UvfLib.Core (free)
+
+UvfLib.FileSystem:
+  license: Commercial
+  repository: private
+  nuget: UvfLib.FileSystem (paid)
+
+UvfLib.Storage: 
+  license: Commercial
+  repository: private
+  nuget: UvfLib.Storage (paid)
+
+UvfLib.Native:
+  license: Commercial  
+  distribution: Direct download (paid)
+  languages: Python, PHP, Node.js, Go
+```
+
+This architecture gives you the **best of all worlds**: open-source credibility, commercial value, technical excellence, and cross-platform reach. Ready to implement this step by step?
+
+
+
+I have a - for me - complicated question:
+
+I have a totally different project, called "FolderMagic", where I have a larger library, with which I can virtualize folders. They use exactly the same IStorage connectors and I want later to also introduce our Uvf/Cryptomator decorators there. 
+However, business wise, this project here is so that other software developers can implement vault encryption and the other is rather for other end users and developers to "layer" multiple folders into e. g. one drive, etc. Again, the cryptography would be also great to have from this here.
+
+I dont see how to really merge both into one big project. Please give me your ideas.
+
+If you want to read the FolderMagic project, it is here:
+D:\__PROGRAMMING\FolderMagic\FolderMagic\FolderMagicLib
+
+
+
+This is a **fascinating architectural challenge**! You have two distinct but related products that could benefit from shared components. Let me propose a solution that keeps your business models separate while maximizing code reuse.
+
+## 🎯 **Recommended Architecture: "Shared Foundation + Product-Specific Layers"**
+
+### **🏗️ The Problem Analysis**
+
+**Two Different Products:**
+- **Uvf.Net**: Cryptographic vault library for developers
+- **FolderMagic**: Folder virtualization platform for end users/developers  
+
+**Shared Needs:**
+- Both use `IStorage` connector pattern
+- Both could benefit from vault encryption  
+- Both need storage abstraction layer
+
+**Business Conflict:**
+- Different target audiences
+- Different licensing models  
+- Different feature sets
+
+### **💡 Solution: Three-Tier Architecture**
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                           🎯 PRODUCT LAYER                                   │
+├───────────────────────────────┬─────────────────────────────────────────────┤
+│         FolderMagic           │              Uvf.Net                        │
+│     (Virtualization)          │         (Cryptographic Vaults)             │
+│                               │                                             │
+│  ┌─────────────────────────┐  │  ┌─────────────────────────────────────────┐│
+│  │ FolderMagicLib          │  │  │ UvfLib.FileSystem                       ││
+│  │ - Layer Management      │  │  │ - UvfVault, CryptomatorV8Vault          ││
+│  │ - Virtual File System   │  │  │ - VaultBuilder                          ││
+│  │ - Sync Logic           │  │  │ - Vault-specific APIs                   ││
+│  └─────────────────────────┘  │  └─────────────────────────────────────────┘│
+│                               │                                             │
+│  ┌─────────────────────────┐  │  ┌─────────────────────────────────────────┐│
+│  │ FolderMagic.Crypto      │  │  │ UvfLib.Core                             ││
+│  │ (Optional Vault Plugin) │  │  │ - Core Cryptography                     ││
+│  │ - Uses UvfLib.Shared    │  │  │ - Format Implementations                ││
+│  └─────────────────────────┘  │  └─────────────────────────────────────────┘│
+├───────────────────────────────┴─────────────────────────────────────────────┤
+│                          🔧 SHARED FOUNDATION                                │
+│  ┌─────────────────────────────────────────────────────────────────────────┐ │
+│  │                        UvfLib.Shared                                    │ │
+│  │  ┌─────────────────┐  ┌─────────────────┐  ┌─────────────────────────┐ │ │
+│  │  │ Storage.Abstractions│  │ Storage.Connectors │  │ Storage.Decorators    │ │ │
+│  │  │ - IStorage      │  │ - LocalStorage   │  │ - Base Decorators     │ │ │
+│  │  │ - FileObject    │  │ - AzureStorage   │  │ - Caching             │ │ │
+│  │  │ - EnumStorageType│  │ - S3Storage     │  │ - Throttling          │ │ │
+│  │  └─────────────────┘  └─────────────────┘  └─────────────────────────┘ │ │
+│  └─────────────────────────────────────────────────────────────────────────┘ │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+## 📁 **Directory Structure Solution**
+
+### **Option 1: Separate Repositories with Shared Package** ⭐⭐⭐ **RECOMMENDED**
+
+```
+📦 UvfLib.Shared (NuGet Package)
+├── Storage.Abstractions/
+│   ├── IStorage.cs                # Your existing interface
+│   ├── FileObject.cs              # Your existing class
+│   ├── EnumStorageType.cs         # Your existing enum
+│   └── IStorageDecorator.cs       # New: Base for decorators
+├── Storage.Connectors/
+│   ├── LocalStorage.cs            # Your existing implementation
+│   ├── AzureStorage.cs            # Future: Cloud storage
+│   └── S3Storage.cs               # Future: Amazon S3
+├── Storage.Decorators/
+│   ├── CachingStorage.cs          # Caching decorator
+│   ├── ThrottledStorage.cs        # Your throttling logic
+│   └── LoggingStorage.cs          # Logging decorator
+└── UvfLib.Shared.csproj
+
+📁 FolderMagic/ (Your existing project)
+├── FolderMagicLib/
+│   ├── Virtualization/            # Your existing virtualization logic
+│   ├── LayerManagement/           # Your existing layer logic
+│   └── Sync/                      # Your existing sync logic
+├── FolderMagic.Crypto/            # Optional: Vault integration
+│   ├── VaultLayer.cs              # Vault as a FolderMagic layer
+│   └── CryptoDecorator.cs         # Crypto integration
+└── FolderMagicLib.csproj
+    # References: UvfLib.Shared
+
+📁 Uvf.Net/ (Your existing project)  
+├── UvfLib.Core/                   # Cryptographic core
+├── UvfLib.FileSystem/             # High-level vault API
+├── UvfLib.Native/                 # Cross-language bindings
+└── UvfLib.csproj
+    # References: UvfLib.Shared
+```
+
+### **Option 2: Monorepo with Product Boundaries** ⭐⭐
+
+```
+📁 SmartInVenture.Libraries/
+├── 🔗 Shared/
+│   └── UvfLib.Shared/             # Foundation for both products
+├── 🗂️ FolderMagic/
+│   ├── FolderMagicLib/            # Virtualization product
+│   └── FolderMagic.Crypto/        # Optional crypto integration
+├── 🔐 Uvf.Net/
+│   ├── UvfLib.Core/               # Crypto product core
+│   ├── UvfLib.FileSystem/         # Crypto product API
+│   └── UvfLib.Native/             # Cross-language bindings
+└── Examples/
+    ├── FolderMagic.Examples/
+    └── Uvf.Examples/
+```
+
+## 🔧 **Implementation Strategy**
+
+### **Phase 1: Extract Shared Foundation (1 week)**
+
+1. **Create UvfLib.Shared project:**
+   ```csharp
+   // UvfLib.Shared/Storage.Abstractions/IStorage.cs
+   namespace UvfLib.Shared.Storage.Abstractions
+   {
+       public interface IStorage : IDisposable
+       {
+           // Move your existing IStorage interface here
+           Task<IntPtr> OpenAsync(string realPath, int flags, CancellationToken cancellationToken = default);
+           // ... all your existing methods
+       }
+   }
+   ```
+
+2. **Move common classes:**
+   ```bash
+   # From both projects:
+   IStorage.cs → UvfLib.Shared/Storage.Abstractions/
+   FileObject.cs → UvfLib.Shared/Storage.Abstractions/
+   LocalStorage.cs → UvfLib.Shared/Storage.Connectors/
+   ThrottledStream.cs → UvfLib.Shared/Storage.Decorators/
+   ```
+
+### **Phase 2: Update Both Projects (1 week)**
+
+1. **FolderMagic references shared:**
+   ```xml
+   <!-- FolderMagicLib.csproj -->
+   <PackageReference Include="UvfLib.Shared" Version="1.0.0" />
+   
+   <!-- Update namespaces -->
+   using UvfLib.Shared.Storage.Abstractions;
+   using UvfLib.Shared.Storage.Connectors;
+   ```
+
+2. **Uvf.Net references shared:**
+   ```xml
+   <!-- UvfLib.csproj -->
+   <PackageReference Include="UvfLib.Shared" Version="1.0.0" />
+   ```
+
+### **Phase 3: Optional Crypto Integration (2 weeks)**
+
+```csharp
+// FolderMagic.Crypto/VaultLayer.cs
+namespace FolderMagic.Crypto
+{
+    public class VaultLayer : IFolderMagicLayer
+    {
+        private readonly UvfVault _vault;
+        private readonly IStorage _underlyingStorage;
+        
+        public VaultLayer(UvfVault vault, IStorage storage)
+        {
+            _vault = vault;
+            _underlyingStorage = storage;
+        }
+        
+        public async Task<Stream> GetFileAsync(string virtualPath)
+        {
+            // Map virtual path through FolderMagic's layer system
+            string physicalPath = MapVirtualToPhysical(virtualPath);
+            
+            // Open encrypted file via vault
+            return await _vault.OpenReadAsync(physicalPath);
+        }
+        
+        // Implements IFolderMagicLayer for seamless integration
+    }
+}
+
+// Usage in FolderMagic:
+var vault = VaultBuilder.Uvf()
+    .WithPassword("secret")
+    .WithStorage(azureStorage)
+    .FromFileAsync("vault.uvf");
+
+var cryptoLayer = new VaultLayer(vault, localStorage);
+folderMagic.AddLayer(cryptoLayer); // Vault becomes just another layer!
+```
+
+## 💼 **Business Model Benefits**
+
+### **UvfLib.Shared (Foundation)**
+- **License**: MIT (open source)
+- **Purpose**: Industry-standard storage abstraction
+- **Benefit**: Builds developer ecosystem around your storage pattern
+
+### **FolderMagic (Virtualization Product)**
+- **License**: Commercial  
+- **Target**: End users + integration developers
+- **Value**: Folder virtualization, sync, layering
+- **Optional**: Can add vault encryption via UvfLib integration
+
+### **Uvf.Net (Cryptographic Product)**
+- **License**: Core (MIT) + API (Commercial)
+- **Target**: Developer libraries + enterprise
+- **Value**: Vault encryption for any application
+- **Foundation**: Uses shared storage abstraction
+
+## 🎯 **Immediate Next Steps**
+
+1. **Create `UvfLib.Shared` project** in Uvf.Net solution
+2. **Move IStorage classes** from both projects to shared
+3. **Publish UvfLib.Shared** as NuGet package  
+4. **Update FolderMagic** to reference shared package
+5. **Update Uvf.Net** to reference shared package
+
+This approach gives you:
+- ✅ **No code duplication** (shared foundation)
+- ✅ **Separate business models** (different products)  
+- ✅ **Optional integration** (FolderMagic can use crypto)
+- ✅ **Ecosystem growth** (shared storage standard)
+- ✅ **Clean architecture** (proper separation of concerns)
+
+Want me to help you start with creating the `UvfLib.Shared` project and migration plan?
+
+
+
+
+OK, that makes a lot of sense. 
+Where would the UvfLib.Core belong to? Another Nuget package?
+And: how would the vaults be created from FolderMagicLib, if UvfLib.FileSystem is separate? Maybe, we should rename UvfLib.FileSystem rather in UvfLib.Vaults?
+Please resummarize everything with the architecture (and naming UvfLib.Shared to StorageLib).
+
+
+
+
+
+
+
+
+
+**Excellent questions!** You're absolutely right on both points. Let me provide the **complete, refined architecture** with proper naming and package distribution:
+
+## 📦 **Complete Package Architecture**
+
+### **Package Distribution Strategy:**
+
+```yaml
+📦 PUBLIC PACKAGES (nuget.org):
+  🔓 UvfLib.Core
+    Purpose: Open-source cryptographic core
+    License: MIT
+    Users: Everyone (builds trust, gets contributions)
+
+📦 PRIVATE PACKAGES (Azure DevOps):
+  🔒 StorageLib
+    Purpose: Universal storage abstraction
+    License: Commercial
+    Users: Your products (FolderMagic + Uvf.Net)
+    
+  🔒 UvfLib.Vaults (renamed from UvfLib.FileSystem)
+    Purpose: High-level vault implementations & builders
+    License: Commercial
+    Users: Both FolderMagic + Uvf.Net customers
+    
+  🔒 UvfLib.Storage (vault-specific storage decorators)
+    Purpose: FUSE-like vault storage layer
+    License: Commercial
+    Users: Advanced Uvf.Net integrations
+
+📦 DIRECT DISTRIBUTION:
+  🔒 UvfLib.Native
+    Purpose: Cross-language bindings
+    License: Commercial
+    Distribution: Direct licensing
+```
+
+## 🏗️ **Updated Architecture Diagram**
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                           🌐 CROSS-LANGUAGE BINDINGS                         │
+│                          ┌─────────────────────┐                            │
+│                          │  🔒 UvfLib.Native   │  ◀── AOT Compiled C API    │
+│                          │   (C Interface)     │      (Direct Distribution) │
+│                          └─────────┬───────────┘                            │
+└─────────────────────────────────────┼─────────────────────────────────────────┘
+┌─────────────────────────────────────▼─────────────────────────────────────────┐
+│                      🎯 PRODUCT LAYER                                         │
+├───────────────────────────────┬─────────────────────────────────────────────┤
+│         FolderMagic           │              Uvf.Net                        │
+│     (Virtualization)          │         (Cryptographic Vaults)             │
+│                               │                                             │
+│  ┌─────────────────────────┐  │  ┌─────────────────────────────────────────┐│
+│  │ FolderMagicLib          │  │  │ UvfConsole                              ││
+│  │ - Layer Management      │  │  │ - Developer Tools                       ││
+│  │ - Virtual File System   │  │  │ - Testing & Examples                    ││
+│  │ - Sync Logic           │  │  └─────────────────────────────────────────┘│
+│  └─────────────────────────┘  │                                             │
+│                               │                                             │
+│  ┌─────────────────────────┐  │  ┌─────────────────────────────────────────┐│
+│  │ FolderMagic.Crypto      │  │  │ UvfLib.Storage                          ││
+│  │ (Optional Vault Plugin) │  │  │ - Vault Storage Decorators              ││
+│  │ - VaultLayer            │  │  │ - FUSE-like Operations                  ││
+│  └─────────────────────────┘  │  └─────────────────────────────────────────┘│
+├───────────────────────────────┴─────────────────────────────────────────────┤
+│                        🔒 SHARED PROPRIETARY LAYER                          │
+│  ┌─────────────────────────────────────────────────────────────────────────┐ │
+│  │                       UvfLib.Vaults                                     │ │
+│  │  ┌──────────────┐  ┌─────────────┐  ┌─────────────────────────────────┐│ │
+│  │  │  IVault      │  │  UvfVault   │  │    CryptomatorV8Vault          ││ │
+│  │  │ (Interface)  │  │ (Concrete)  │  │      (Concrete)                ││ │
+│  │  │              │  │             │  │                                ││ │
+│  │  │ VaultBuilder │  │ UvfBuilder  │  │  CryptomatorBuilder            ││ │
+│  │  │ (Factory)    │  │ (Fluent)    │  │     (Fluent)                   ││ │
+│  │  └──────────────┘  └─────────────┘  └─────────────────────────────────┘│ │
+│  └─────────────────────────────────────────────────────────────────────────┘ │
+│                                                                               │
+│  ┌─────────────────────────────────────────────────────────────────────────┐ │
+│  │                         StorageLib                                      │ │
+│  │  ┌─────────────────┐  ┌─────────────────┐  ┌─────────────────────────┐ │ │
+│  │  │ Abstractions    │  │ Connectors      │  │ Decorators              │ │ │
+│  │  │ - IStorage      │  │ - LocalStorage  │  │ - CachingStorage        │ │ │
+│  │  │ - FileObject    │  │ - AzureStorage  │  │ - ThrottledStorage      │ │ │
+│  │  │ - EnumStorageType│  │ - S3Storage    │  │ - LoggingStorage        │ │ │
+│  │  └─────────────────┘  └─────────────────┘  └─────────────────────────┘ │ │
+│  └─────────────────────────────────────────────────────────────────────────┘ │
+└─────────────────────────────────────────┼───────────────────────────────────────┘
+┌─────────────────────────────────────────▼───────────────────────────────────────┐
+│                          🔓 OPEN SOURCE CORE                                    │
+│  ┌─────────────────────────────────────────────────────────────────────────┐    │
+│  │                           UvfLib.Core                                   │    │
+│  │  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐  ┌─────────────────┐ │    │
+│  │  │     Api     │  │   Common    │  │     V3      │  │  CryptomatorV8  │ │    │
+│  │  │(Interfaces) │  │ (Utilities) │  │(UVF Format) │  │    (Legacy)     │ │    │
+│  │  └─────────────┘  └─────────────┘  └─────────────┘  └─────────────────┘ │    │
+│  └─────────────────────────────────────────────────────────────────────────┘    │
+└──────────────────────────────────────────────────────────────────────────────────┘
+```
+
+## 📁 **Complete Directory Structure**
+
+```
+Uvf.Net/
+├── 🔓 UvfLib.Core/                     # PUBLIC NUGET (MIT)
+│   ├── Api/                            # Core interfaces & contracts
+│   ├── Common/                         # Shared crypto utilities
+│   ├── V3/                             # UVF format implementation  
+│   ├── CryptomatorV8/                  # Cryptomator V8 implementation
+│   └── UvfLib.Core.csproj             # PUBLIC: nuget.org
+│
+├── 🔒 StorageLib/                      # PRIVATE NUGET (Commercial)
+│   ├── Abstractions/                  # Storage interfaces
+│   │   ├── IStorage.cs                # Your existing interface
+│   │   ├── FileObject.cs              # Your existing class
+│   │   ├── EnumStorageType.cs         # Your existing enum
+│   │   └── IStorageDecorator.cs       # Base for decorators
+│   ├── Connectors/                    # Storage implementations
+│   │   ├── LocalStorage.cs            # Your existing local storage
+│   │   ├── AzureStorage.cs            # Future: Azure blob storage
+│   │   └── S3Storage.cs               # Future: Amazon S3 storage
+│   ├── Decorators/                    # Base decorators
+│   │   ├── CachingStorage.cs          # Caching decorator
+│   │   ├── ThrottledStorage.cs        # Your throttling logic
+│   │   └── LoggingStorage.cs          # Logging decorator
+│   ├── Throttling/                    # Your existing throttling classes
+│   │   └── ThrottledStreamStopWatch.cs
+│   └── StorageLib.csproj              # PRIVATE: Azure DevOps
+│
+├── 🔒 UvfLib.Vaults/                  # PRIVATE NUGET (Commercial)
+│   ├── Abstractions/                  # Vault abstractions
+│   │   ├── IVault.cs                  # Main vault interface
+│   │   ├── VaultEntry.cs              # File/directory entries
+│   │   ├── VaultConfiguration.cs      # Vault settings
+│   │   └── VaultInfo.cs               # Vault metadata
+│   ├── Implementation/                # Concrete vault implementations
+│   │   ├── VaultBase.cs               # Shared vault functionality
+│   │   ├── UvfVault.cs                # UVF-specific implementation
+│   │   ├── CryptomatorV8Vault.cs      # Cryptomator-specific implementation
+│   │   └── VaultSecurityManager.cs    # Security policies
+│   ├── Builder/                       # Fluent configuration API
+│   │   ├── VaultBuilder.cs            # Main builder
+│   │   ├── UvfVaultBuilder.cs         # UVF-specific builder
+│   │   └── CryptomatorVaultBuilder.cs # Cryptomator-specific builder
+│   ├── Caching/                       # Performance optimizations
+│   │   ├── IVaultCache.cs
+│   │   └── MemoryVaultCache.cs
+│   ├── Legacy/                        # Backward compatibility
+│   │   └── Vault.cs                   # Your existing facade
+│   └── UvfLib.Vaults.csproj          # PRIVATE: Azure DevOps
+│
+├── 🔒 UvfLib.Storage/                 # PRIVATE NUGET (Commercial)
+│   ├── Decorators/                    # Vault storage decorators
+│   │   ├── IVaultStorage.cs           # Vault-aware storage interface
+│   │   ├── VaultStorageBase.cs        # Base decorator
+│   │   ├── UvfStorage.cs              # UVF format decorator
+│   │   └── CryptomatorV8Storage.cs    # Cryptomator format decorator
+│   └── UvfLib.Storage.csproj          # PRIVATE: Azure DevOps
+│
+├── 🔒 UvfLib.Native/                  # DIRECT DISTRIBUTION
+│   ├── Interop/                       # C interface for AOT
+│   │   ├── VaultNativeInterface.cs    # Main C API
+│   │   ├── ErrorCodes.cs              # Error handling
+│   │   └── MarshalHelper.cs           # Memory management
+│   ├── Bindings/                      # Language-specific bindings
+│   │   ├── Python/
+│   │   ├── Php/
+│   │   ├── NodeJs/
+│   │   └── Go/
+│   └── UvfLib.Native.csproj           # AOT compilation
+│
+├── 🔒 UvfConsole/                     # INTERNAL TOOL
+│   └── UvfConsole.csproj              # References all libraries
+│
+└── Tests/
+    ├── UvfLib.Core.Tests/             # 🔓 PUBLIC (with Core)
+    ├── StorageLib.Tests/              # 🔒 PRIVATE
+    ├── UvfLib.Vaults.Tests/           # 🔒 PRIVATE
+    └── UvfLib.Integration.Tests/      # 🔒 PRIVATE
+```
+
+## 📦 **Project References**
+
+```xml
+<!-- UvfLib.Core.csproj -->
+<!-- No dependencies - pure crypto core -->
+
+<!-- StorageLib.csproj -->
+<!-- No dependencies - pure storage abstraction -->
+
+<!-- UvfLib.Vaults.csproj -->
+<PackageReference Include="UvfLib.Core" Version="1.0.0" />
+<PackageReference Include="StorageLib" Version="1.0.0" />
+
+<!-- UvfLib.Storage.csproj -->
+<PackageReference Include="UvfLib.Vaults" Version="1.0.0" />
+<PackageReference Include="StorageLib" Version="1.0.0" />
+
+<!-- UvfLib.Native.csproj -->
+<PackageReference Include="UvfLib.Vaults" Version="1.0.0" />
+
+<!-- FolderMagicLib.csproj (in other solution) -->
+<PackageReference Include="StorageLib" Version="1.0.0" />
+<PackageReference Include="UvfLib.Vaults" Version="1.0.0" />  <!-- For vault creation -->
+```
+
+## 🔧 **How FolderMagic Creates Vaults**
+
+```csharp
+// FolderMagic.Crypto/VaultLayer.cs
+using StorageLib.Abstractions;
+using UvfLib.Vaults.Builder;
+using UvfLib.Vaults.Abstractions;
+
+namespace FolderMagic.Crypto
+{
+    public class VaultLayer : IFolderMagicLayer
+    {
+        private readonly IVault _vault;
+        private readonly IStorage _underlyingStorage;
+        
+        public static async Task<VaultLayer> CreateUvfVaultAsync(
+            IStorage storage, 
+            string password, 
+            string vaultPath)
+        {
+            // Create UVF vault using the builder from UvfLib.Vaults
+            var vault = await VaultBuilder.Uvf()
+                .WithPassword(password)
+                .WithStorage(storage)
+                .FromFileAsync(vaultPath);
+                
+            return new VaultLayer(vault, storage);
+        }
+        
+        public static async Task<VaultLayer> CreateCryptomatorVaultAsync(
+            IStorage storage, 
+            string password, 
+            string vaultDirectory)
+        {
+            // Create Cryptomator vault using the builder
+            var vault = await VaultBuilder.Cryptomator()
+                .WithPassword(password)
+                .WithStorage(storage)
+                .FromDirectoryAsync(vaultDirectory);
+                
+            return new VaultLayer(vault, storage);
+        }
+        
+        // Implement IFolderMagicLayer interface
+        public async Task<Stream> GetFileAsync(string virtualPath)
+        {
+            return await _vault.OpenReadAsync(virtualPath);
+        }
+        
+        public async Task<IEnumerable<FileEntry>> ListDirectoryAsync(string virtualPath)
+        {
+            var vaultEntries = await _vault.ListDirectoryAsync(virtualPath);
+            return vaultEntries.Select(ve => new FileEntry 
+            { 
+                Name = ve.Name, 
+                IsDirectory = ve.IsDirectory 
+            });
+        }
+    }
+}
+```
+
+## 🎯 **Usage Examples**
+
+### **In Uvf.Net Customer Code:**
+```csharp
+using UvfLib.Vaults.Builder;
+using StorageLib.Connectors;
+
+var localStorage = new LocalStorage();
+var vault = await VaultBuilder.Uvf()
+    .WithPassword("secret")
+    .WithStorage(localStorage)
+    .FromFileAsync("vault.uvf");
+
+using var stream = await vault.OpenReadAsync("/documents/secret.txt");
+```
+
+### **In FolderMagic Customer Code:**
+```csharp
+using FolderMagic.Crypto;
+using StorageLib.Connectors;
+
+var azureStorage = new AzureStorage("connection-string");
+var vaultLayer = await VaultLayer.CreateUvfVaultAsync(
+    azureStorage, 
+    "password", 
+    "vault.uvf");
+
+folderMagic.AddLayer(vaultLayer); // Vault becomes a layer!
+```
+
+## 📋 **Next Steps - Project Creation Order**
+
+1. **Create `StorageLib`** - Move your storage classes here
+2. **Create `UvfLib.Vaults`** - High-level vault implementations  
+3. **Create `UvfLib.Storage`** - Vault storage decorators (later)
+4. **Publish `UvfLib.Core`** to public nuget.org
+5. **Publish private packages** to Azure DevOps
+
+This architecture gives you:
+- ✅ **Clear separation** of concerns and business models
+- ✅ **FolderMagic integration** via UvfLib.Vaults package
+- ✅ **Proper naming** that reflects actual purpose
+- ✅ **Scalable** for future products and features
+- ✅ **Backward compatible** via Legacy/Vault.cs
+
+Ready to start creating these projects?
+
+
+
+
+
+
+
+
+For StorageLib: Would I make a completely separate repo + solution in VS?
+Do I leave FolderMagic and UVF separate repos and solutions in .NET?
+
+
+
+**Excellent question!** This is a critical architectural decision. Based on your business model and the architecture we've designed, I recommend the **"Three Repository Strategy"**:
+
+## 📁 **Recommended Repository Structure**
+
+### **🔧 Option 1: Separate Repositories** ⭐⭐⭐ **RECOMMENDED**
+
+```
+📦 StorageLib (Separate Repo + Solution)
+├── StorageLib.sln
+├── src/
+│   └── StorageLib/
+│       ├── Abstractions/
+│       ├── Connectors/  
+│       ├── Decorators/
+│       └── StorageLib.csproj
+├── tests/
+│   └── StorageLib.Tests/
+├── examples/
+│   └── StorageLib.Examples/
+└── README.md
+
+📦 FolderMagic (Separate Repo + Solution)  
+├── FolderMagic.sln
+├── src/
+│   ├── FolderMagicLib/
+│   └── FolderMagic.Crypto/        # Optional vault integration
+├── tests/
+├── examples/
+└── README.md
+# References: StorageLib (NuGet package)
+
+📦 Uvf.Net (Separate Repo + Solution)
+├── Uvf.Net.sln  
+├── src/
+│   ├── UvfLib.Core/
+│   ├── UvfLib.Vaults/
+│   ├── UvfLib.Storage/
+│   ├── UvfLib.Native/
+│   └── UvfConsole/
+├── tests/
+├── examples/
+└── README.md
+# References: StorageLib (NuGet package)
+```
+
+## 🎯 **Why This Structure is Best**
+
+### **✅ Benefits of Separate StorageLib Repo:**
+
+1. **🏗️ Clear Foundation**: StorageLib becomes a true foundational library
+2. **📦 Independent Versioning**: Can version StorageLib separately (v1.0, v1.1, etc.)
+3. **🔄 Independent Development**: Different teams can work on storage vs. products
+4. **🧪 Focused Testing**: Storage tests separate from product tests
+5. **📖 Clear Documentation**: StorageLib gets its own docs and examples
+6. **🔮 Future Reuse**: Other products can easily adopt StorageLib
+7. **🚀 CI/CD Separation**: Different build/release pipelines
+
+### **✅ Benefits of Separate Product Repos:**
+
+1. **💼 Business Separation**: FolderMagic vs Uvf.Net are different products
+2. **🎯 Different Customers**: Different target audiences and licensing
+3. **⏰ Independent Releases**: Products can release on different schedules
+4. **🔒 Access Control**: Different team access to different repos
+5. **📊 Separate Analytics**: GitHub insights per product
+
+## 📋 **Development Workflow**
+
+### **Phase 1: Create StorageLib Repo**
+```bash
+# Create new repository
+git clone https://github.com/smartinventure/StorageLib.git
+cd StorageLib
+
+# Create solution structure
+dotnet new sln -n StorageLib
+dotnet new classlib -n StorageLib -o src/StorageLib
+dotnet new xunit -n StorageLib.Tests -o tests/StorageLib.Tests
+dotnet sln add src/StorageLib/StorageLib.csproj
+dotnet sln add tests/StorageLib.Tests/StorageLib.Tests.csproj
+```
+
+### **Phase 2: Move Storage Classes**
+1. **Copy from FolderMagic**: `IStorage.cs`, `LocalStorage.cs`, etc.
+2. **Copy from Uvf.Net**: `ThrottledStream.cs`, etc.
+3. **Update namespaces**: `namespace StorageLib.Abstractions`
+4. **Create NuGet package**: Publish to Azure DevOps
+
+### **Phase 3: Update Existing Repos**
+```xml
+<!-- FolderMagic/FolderMagicLib.csproj -->
+<PackageReference Include="StorageLib" Version="1.0.0" />
+
+<!-- Uvf.Net/UvfLib.csproj -->
+<PackageReference Include="StorageLib" Version="1.0.0" />
+```
+
+## 🔄 **Alternative: Monorepo Approach** ⭐⭐
+
+If you prefer keeping everything together:
+
+```
+📦 SmartInVenture.Libraries (Single Repo)
+├── SmartInVenture.sln                    # Master solution
+├── shared/
+│   └── StorageLib/                       # Shared foundation
+├── products/
+│   ├── FolderMagic/
+│   │   ├── FolderMagic.sln              # Product solution
+│   │   └── src/FolderMagicLib/
+│   └── Uvf.Net/
+│       ├── Uvf.Net.sln                  # Product solution  
+│       └── src/UvfLib.Core/
+├── tests/
+│   ├── StorageLib.Tests/
+│   ├── FolderMagic.Tests/
+│   └── Uvf.Net.Tests/
+└── examples/
+```
+
+## 💡 **My Strong Recommendation: Separate Repos**
+
+**I recommend separate repositories** because:
+
+1. **🏢 Professional Structure**: Each repo has clear purpose and ownership
+2. **📦 NuGet Strategy**: StorageLib becomes a proper shared package
+3. **🔄 Easier Collaboration**: Teams can work independently
+4. **📊 Clear Metrics**: Separate GitHub stars, issues, contributions per product
+5. **🎯 Marketing**: Each product gets its own identity and documentation
+
+## 📝 **Implementation Steps**
+
+### **Week 1: Create StorageLib**
+1. Create new GitHub repo: `StorageLib`
+2. Create Visual Studio solution: `StorageLib.sln`
+3. Move storage classes from both projects
+4. Create unit tests
+5. Publish first version to Azure DevOps
+
+### **Week 2: Update Existing Projects**
+1. Add StorageLib NuGet reference to FolderMagic
+2. Add StorageLib NuGet reference to Uvf.Net
+3. Remove local storage classes
+4. Update namespaces and test
+
+### **Week 3: Create UvfLib.Vaults**
+1. In Uvf.Net repo, create `UvfLib.Vaults` project
+2. Move high-level vault functionality
+3. Add reference to StorageLib NuGet
+
+**This gives you the best of both worlds**: clean separation for business purposes, but shared foundation through NuGet packages.
+
+Would you like me to help you create the StorageLib repository structure first?
+
