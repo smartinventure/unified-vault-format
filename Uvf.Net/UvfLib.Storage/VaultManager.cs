@@ -91,8 +91,28 @@ namespace UvfLib.Storage
 
         /// <summary>
         /// Loads an existing UVF vault from the specified path using LocalStorage.
+        /// Automatically detects the filename encryption mode from the vault metadata.
         /// </summary>
-        public static async Task<VaultManager> LoadUvfVaultAsync(string vaultPath, string password, bool encryptFilenames = true)
+        public static async Task<VaultManager> LoadUvfVaultAsync(string vaultPath, string password)
+        {
+            var storage = await StorageFactory.CreateInitializedLocalStorageAsync("/");
+            
+            // Auto-detect filename encryption mode
+            string vaultFilePath = Path.Combine(vaultPath, "vault.uvf");
+            if (!System.IO.File.Exists(vaultFilePath))
+                throw new FileNotFoundException($"UVF vault file not found: {vaultFilePath}");
+                
+            byte[] vaultFileContent = await System.IO.File.ReadAllBytesAsync(vaultFilePath);
+            bool encryptFilenames = VaultHandler.DetectFilenameEncryption(vaultFileContent, password);
+            
+            return await LoadUvfVaultAsync(storage, password, vaultPath, encryptFilenames, ownsStorage: true);
+        }
+
+        /// <summary>
+        /// Loads an existing UVF vault from the specified path using LocalStorage.
+        /// Allows manual override of filename encryption mode (for compatibility).
+        /// </summary>
+        public static async Task<VaultManager> LoadUvfVaultAsync(string vaultPath, string password, bool encryptFilenames)
         {
             var storage = await StorageFactory.CreateInitializedLocalStorageAsync("/");
             return await LoadUvfVaultAsync(storage, password, vaultPath, encryptFilenames, ownsStorage: true);
@@ -110,8 +130,28 @@ namespace UvfLib.Storage
 
         /// <summary>
         /// Loads an existing UVF vault using the provided storage connector.
+        /// Automatically detects the filename encryption mode from the vault metadata.
         /// </summary>
-        public static async Task<VaultManager> LoadUvfVaultAsync(IStorage storage, string password, string vaultBasePath, bool encryptFilenames = true, bool ownsStorage = false)
+        public static async Task<VaultManager> LoadUvfVaultAsync(IStorage storage, string password, string vaultBasePath, bool ownsStorage = false)
+        {
+            // Auto-detect filename encryption mode
+            string vaultFilePath = Path.Combine(vaultBasePath, "vault.uvf");
+            if (!System.IO.File.Exists(vaultFilePath))
+                throw new FileNotFoundException($"UVF vault file not found: {vaultFilePath}");
+                
+            byte[] vaultFileContent = await System.IO.File.ReadAllBytesAsync(vaultFilePath);
+            bool encryptFilenames = VaultHandler.DetectFilenameEncryption(vaultFileContent, password);
+            
+            var manager = new VaultManager();
+            await manager.InitializeExistingUvfVaultAsync(storage, password, vaultBasePath, encryptFilenames, ownsStorage);
+            return manager;
+        }
+
+        /// <summary>
+        /// Loads an existing UVF vault using the provided storage connector.
+        /// Allows manual override of filename encryption mode (for compatibility).
+        /// </summary>
+        public static async Task<VaultManager> LoadUvfVaultAsync(IStorage storage, string password, string vaultBasePath, bool encryptFilenames, bool ownsStorage = false)
         {
             var manager = new VaultManager();
             await manager.InitializeExistingUvfVaultAsync(storage, password, vaultBasePath, encryptFilenames, ownsStorage);
@@ -519,8 +559,8 @@ namespace UvfLib.Storage
 
             try
             {
-                // Create new UVF vault file
-                byte[] vaultFileContent = VaultHandler.CreateNewUvfVaultFileContent(password);
+                // Create new UVF vault file with filename encryption setting
+                byte[] vaultFileContent = VaultHandler.CreateNewUvfVaultFileContent(password, encryptFilenames);
                 string vaultFilePath = Path.Combine(_vaultBasePath, "vault.uvf");
                 await File.WriteAllBytesAsync(vaultFilePath, vaultFileContent);
 

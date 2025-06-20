@@ -22,6 +22,34 @@ namespace UvfLib.Core.Jwe
         [JsonPropertyName("rootDirId")]
         [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
         public string? RootDirId { get; set; } // Base64urlOctets
+
+        /// <summary>
+        /// Custom extension field for UvfLib.Net-specific vault configuration.
+        /// This field is optional and follows UVF extension naming conventions.
+        /// </summary>
+        [JsonPropertyName("uvf.ext.uvflib-net.config")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public UvfLibNetConfig? Config { get; set; }
+    }
+
+    /// <summary>
+    /// Configuration object for UvfLib.Net-specific vault settings.
+    /// </summary>
+    public class UvfLibNetConfig
+    {
+        /// <summary>
+        /// Whether filename encryption is enabled in this vault.
+        /// If null/missing, defaults to true (encrypted filenames) for compatibility.
+        /// </summary>
+        [JsonPropertyName("encryptFilenames")]
+        public bool? EncryptFilenames { get; set; }
+
+        /// <summary>
+        /// Version of UvfLib.Net that created this vault.
+        /// </summary>
+        [JsonPropertyName("createdByVersion")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public string? CreatedByVersion { get; set; }
     }
 
     public class PayloadKey

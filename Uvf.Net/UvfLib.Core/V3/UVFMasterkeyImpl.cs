@@ -243,7 +243,7 @@ namespace UvfLib.Core.V3
         /// Generates a UvfMasterkeyPayload object from the current master key state.
         /// This is used when creating a new JWE vault.
         /// </summary>
-        public UvfMasterkeyPayload ToMasterkeyPayload()
+        public UvfMasterkeyPayload ToMasterkeyPayload(bool? encryptFilenames = null, string? createdByVersion = null)
         {
             ThrowIfDestroyed();
 
@@ -252,6 +252,16 @@ namespace UvfLib.Core.V3
                 UvfSpecVersion = 1, // Current version
                 Keys = new List<PayloadKey>()
             };
+
+            // Add UvfLib.Net-specific configuration if provided
+            if (encryptFilenames.HasValue || !string.IsNullOrEmpty(createdByVersion))
+            {
+                payload.Config = new UvfLibNetConfig
+                {
+                    EncryptFilenames = encryptFilenames,
+                    CreatedByVersion = createdByVersion
+                };
+            }
 
             if (_primaryEncryptionKey != null)
             {

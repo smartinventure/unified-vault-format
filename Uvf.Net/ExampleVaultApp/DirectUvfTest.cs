@@ -129,6 +129,7 @@ namespace ExampleVaultApp
             if (!File.Exists(vaultFilePath))
             {
                 Console.WriteLine("🔧 Creating new UVF V3 vault using VaultManager...");
+                Console.WriteLine($"🔧 UVF Filename Encryption: {(_encryptFilenames ? "Enabled" : "Disabled")}");
                 
                 // Use VaultManager to create the vault - this properly sets up the UvfStorageDecorator
                 var vaultManager = await VaultManager.CreateUvfVaultAsync(_vaultFolderPath, _password, _encryptFilenames);
@@ -138,10 +139,22 @@ namespace ExampleVaultApp
             }
             else
             {
-                Console.WriteLine("🔧 Loading existing UVF V3 vault using VaultManager...");
+                Console.WriteLine("🔧 Loading existing UVF V3 vault using VaultManager with auto-detection...");
                 
-                // Use VaultManager to load the vault - this properly sets up the UvfStorageDecorator
-                var vaultManager = await VaultManager.LoadUvfVaultAsync(_vaultFolderPath, _password, _encryptFilenames);
+                // Use VaultManager to load the vault with automatic filename encryption detection
+                var vaultManager = await VaultManager.LoadUvfVaultAsync(_vaultFolderPath, _password);
+                
+                // Try to detect and display the actual setting
+                try
+                {
+                    byte[] vaultFileContent = await File.ReadAllBytesAsync(vaultFilePath);
+                    bool detectedEncryptFilenames = VaultHandler.DetectFilenameEncryption(vaultFileContent, _password);
+                    Console.WriteLine($"🔍 Auto-detected filename encryption: {(detectedEncryptFilenames ? "Enabled" : "Disabled")}");
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"⚠️ Could not detect filename encryption setting: {ex.Message}");
+                }
                 
                 Console.WriteLine("✅ UVF vault loaded with VaultManager");
                 return vaultManager;

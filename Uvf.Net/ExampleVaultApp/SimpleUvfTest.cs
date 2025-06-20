@@ -1,4 +1,5 @@
 using UvfLib.Storage;
+using UvfLib.Vault;
 using System.Diagnostics;
 using System.Security.Cryptography;
 using System.IO;
@@ -45,19 +46,18 @@ namespace ExampleVaultApp
                 CleanupDirectory(_vaultFolderPath, "vault");
                 CleanupDirectory(_decryptedFolderPath, "decrypted");
                 
-                // Phase 2: Create fresh vault
-                // Source and decrypted are plain directories (regular File operations)
-                // Only the vault uses VaultManager for encryption
-                using var vault = await VaultManager.CreateUvfVaultAsync(_vaultFolderPath, _password, _encryptFilenames);
+                // Phase 2: Create fresh vault with specified filename encryption setting
+                Console.WriteLine($"🆕 Creating fresh UVF vault with filename encryption: {(_encryptFilenames ? "Enabled" : "Disabled")}");
+                var vault = await VaultManager.CreateUvfVaultAsync(_vaultFolderPath, _password, _encryptFilenames);
                 
-                Console.WriteLine("✅ Fresh UVF vault created successfully");
+                Console.WriteLine("✅ UVF vault ready for operations");
                 
                 // Phase 3: Source data (use whatever exists in source directory)
                 
                 // Phase 4: Encryption phase (File -> VaultManager)
                 await EncryptionPhaseAsync(vault);
                 
-                // Phase 5: Decryption phase (VaultManager -> File)
+                // Phase 5: Decryption phase (VaultManager -> File) - handles vault reloading with auto-detection
                 await DecryptionPhaseAsync(vault);
                 
                 // Phase 6: Verification phase (File vs File)
@@ -162,14 +162,35 @@ namespace ExampleVaultApp
         {
             Console.WriteLine("\n📦 Starting decryption phase (VaultManager -> File)...");
             
+            // Close the creation vault and reload with auto-detection
+            await vault.CloseVaultAsync();
+            vault.Dispose();
+            
+            // Reload vault with automatic filename encryption detection
+            Console.WriteLine("🔍 Reloading vault with automatic filename encryption detection...");
+            using var autoDetectedVault = await VaultManager.LoadUvfVaultAsync(_vaultFolderPath, _password);
+            
+            // Try to detect and display the actual setting
+            try
+            {
+                string vaultUvfFile = Path.Combine(_vaultFolderPath, "vault.uvf");
+                byte[] vaultFileContent = await File.ReadAllBytesAsync(vaultUvfFile);
+                bool detectedEncryptFilenames = VaultHandler.DetectFilenameEncryption(vaultFileContent, _password);
+                Console.WriteLine($"🔍 Auto-detected filename encryption: {(detectedEncryptFilenames ? "Enabled" : "Disabled")}");
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"⚠️ Could not detect filename encryption setting: {ex.Message}");
+            }
+            
             _stopwatch.Restart();
             _totalBytesProcessed = 0;
             
             // Ensure decrypted directory exists
             Directory.CreateDirectory(_decryptedFolderPath);
             
-            // Process vault directory recursively
-            await ProcessDirectoryForDecryptionAsync(vault, "/", _decryptedFolderPath, "");
+            // Process vault directory recursively using auto-detected vault
+            await ProcessDirectoryForDecryptionAsync(autoDetectedVault, "/", _decryptedFolderPath, "");
             
             _stopwatch.Stop();
             PrintSpeed("Decryption", _totalBytesProcessed, _stopwatch.Elapsed);

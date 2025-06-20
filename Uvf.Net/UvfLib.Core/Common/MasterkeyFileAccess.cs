@@ -118,7 +118,7 @@ namespace UvfLib.Core.Common
                 ScryptBlockSize = blockSize,
                 ScryptParallelism = parallelism,
                 VaultVersion = 8, // latest version of Cryptomator Vault Format
-                Version = 8, // Also set the Version property to match VaultVersion
+                Version = 999, // Legacy version field used by Cryptomator (matches real Cryptomator behavior)
                 ContentEncryptionScheme = "SIV_GCM", // default for version 8
                 FilenameEncryptionScheme = "SIV", // default for version 8
             };
@@ -175,7 +175,7 @@ namespace UvfLib.Core.Common
             // Create a clean MasterkeyFile with ONLY the essential fields set
             var masterkeyFile = new MasterkeyFile
             {
-                Version = 8, // Cryptomator v8 version
+                Version = 999, // Legacy version field used by Cryptomator (matches real Cryptomator behavior)
                 ScryptCostParam = costParam,
                 ScryptBlockSize = blockSize,
                 ScryptParallelism = parallelism,
@@ -205,8 +205,9 @@ namespace UvfLib.Core.Common
                 byte[] versionMac;
                 using (var hmac = new HMACSHA256(macKey))
                 {
-                    // Convert vault version to big-endian bytes
-                    byte[] versionBytes = BitConverter.GetBytes(8); // Use version 8
+                    // Convert vault version to big-endian bytes for MAC calculation
+                    // Note: We use 999 for the MAC calculation to match the version field
+                    byte[] versionBytes = BitConverter.GetBytes(999); // Use version 999 for MAC
                     if (BitConverter.IsLittleEndian)
                     {
                         Array.Reverse(versionBytes);

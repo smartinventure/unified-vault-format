@@ -148,7 +148,7 @@ namespace UvfLib.Vault
         /// </summary>
         /// <param name="password">The password for the new vault.</param>
         /// <returns>A byte array containing the encrypted UVF vault file data (JWE string as UTF-8 bytes).</returns>
-        public static byte[] CreateNewUvfVaultFileContent(string password)
+        public static byte[] CreateNewUvfVaultFileContent(string password, bool encryptFilenames = true)
         {
             if (string.IsNullOrEmpty(password)) throw new ArgumentNullException(nameof(password));
 
@@ -203,7 +203,12 @@ namespace UvfLib.Vault
                         Created = DateTime.UtcNow.ToString("yyyy-MM-ddTHH:mm:ssZ")
                     }
                 },
-                RootDirId = Base64Url.Encode(rootDirId)
+                RootDirId = Base64Url.Encode(rootDirId),
+                Config = new UvfLibNetConfig
+                {
+                    EncryptFilenames = encryptFilenames,
+                    CreatedByVersion = System.Reflection.Assembly.GetExecutingAssembly().GetName().Version?.ToString()
+                }
             };
 
             string jweString = JweVaultManager.CreateVault(payload, password);
@@ -215,11 +220,46 @@ namespace UvfLib.Vault
         /// </summary>
         /// <param name="filePath">The path where the UVF vault file will be created.</param>
         /// <param name="password">The password for the new vault.</param>
-        public static void CreateNewUvfVault(string filePath, string password)
+        /// <param name="encryptFilenames">Whether to encrypt filenames in this vault.</param>
+        public static void CreateNewUvfVault(string filePath, string password, bool encryptFilenames = true)
         {
             if (string.IsNullOrEmpty(filePath)) throw new ArgumentNullException(nameof(filePath));
-            byte[] uvfFileContent = CreateNewUvfVaultFileContent(password);
+            byte[] uvfFileContent = CreateNewUvfVaultFileContent(password, encryptFilenames);
             File.WriteAllBytes(filePath, uvfFileContent);
+        }
+
+        /// <summary>
+        /// Detects whether filename encryption is enabled in a UVF vault without loading the full vault.
+        /// </summary>
+        /// <param name="uvfFileContent">The byte content of the UVF vault file (JWE string).</param>
+        /// <param name="password">The vault password.</param>
+        /// <returns>True if filename encryption is enabled, false if disabled. Defaults to true if not specified.</returns>
+        /// <exception cref="ArgumentNullException">If file content or password is null.</exception>
+        /// <exception cref="InvalidPassphraseException">If the password is incorrect.</exception>
+        /// <exception cref="MasterkeyLoadingFailedException">If the vault file cannot be decrypted or parsed.</exception>
+        public static bool DetectFilenameEncryption(byte[] uvfFileContent, string password)
+        {
+            if (uvfFileContent == null || uvfFileContent.Length == 0) throw new ArgumentNullException(nameof(uvfFileContent));
+            if (string.IsNullOrEmpty(password)) throw new ArgumentNullException(nameof(password));
+
+            try
+            {
+                string jweString = Encoding.UTF8.GetString(uvfFileContent);
+                UvfMasterkeyPayload payload = JweVaultManager.LoadVaultPayload(jweString, password);
+                
+                // Check for the custom config field
+                if (payload.Config?.EncryptFilenames.HasValue == true)
+                {
+                    return payload.Config.EncryptFilenames.Value;
+                }
+                
+                // Default to true (encrypted filenames) for compatibility with vaults created before this feature
+                return true;
+            }
+            catch (Exception ex) when (ex is Jose.JoseException || ex is JsonException || ex is InvalidOperationException || ex is ArgumentException)
+            {
+                throw new MasterkeyLoadingFailedException("Failed to detect filename encryption mode. Check password or file integrity.", ex);
+            }
         }
 
         /// <summary>
@@ -1246,6 +1286,146 @@ namespace UvfLib.Vault
             return coreMetadata;
         }
 
+        // --- Symlink Operations (UVF only) ---
+
+        /// <summary>
+        /// Encrypts a symlink target for storage in a symlink.uvf file.
+        /// The target is encrypted as file content using the file content cryptor.
+        /// </summary>
+        /// <param name="symlinkTarget">The plaintext symlink target path</param>
+        /// <returns>Encrypted bytes suitable for writing to symlink.uvf</returns>
+        /// <exception cref="ArgumentNullException">If symlinkTarget is null</exception>
+        /// <exception cref="InvalidOperationException">If this is not a UVF vault or the cryptor is not available</exception>
+        /// <exception cref="CryptoException">If encryption fails</exception>
+        public byte[] EncryptSymlinkTarget(string symlinkTarget)
+        {
+            if (_disposed) throw new ObjectDisposedException(nameof(VaultHandler));
+            if (symlinkTarget == null) throw new ArgumentNullException(nameof(symlinkTarget));
+            if (IsCryptomatorV8()) throw new InvalidOperationException("Symlinks are only supported in UVF format");
+
+            var fileContentCryptor = _cryptor.FileContentCryptor();
+            var fileHeaderCryptor = _cryptor.FileHeaderCryptor();
+            if (fileContentCryptor == null) throw new InvalidOperationException("File content cryptor not available.");
+            if (fileHeaderCryptor == null) throw new InvalidOperationException("File header cryptor not available.");
+
+            try
+            {
+                // Convert symlink target to UTF-8 bytes (Normalization Form C as per UVF spec)
+                byte[] targetBytes = System.Text.Encoding.UTF8.GetBytes(symlinkTarget.Normalize(System.Text.NormalizationForm.FormC));
+                
+                // Create file header
+                var fileHeader = fileHeaderCryptor.Create();
+                
+                // Encrypt the header
+                Memory<byte> encryptedHeaderMemory = fileHeaderCryptor.EncryptHeader(fileHeader);
+                
+                // Encrypt the symlink target content in chunks
+                using var outputStream = new MemoryStream();
+                
+                // Write encrypted header first
+                outputStream.Write(encryptedHeaderMemory.Span);
+                
+                // Encrypt content in chunks
+                int cleartextChunkSize = fileContentCryptor.CleartextChunkSize();
+                long chunkNumber = 0;
+                
+                for (int offset = 0; offset < targetBytes.Length; offset += cleartextChunkSize)
+                {
+                    int chunkSize = Math.Min(cleartextChunkSize, targetBytes.Length - offset);
+                    ReadOnlyMemory<byte> cleartextChunk = new ReadOnlyMemory<byte>(targetBytes, offset, chunkSize);
+                    
+                    Memory<byte> encryptedChunk = fileContentCryptor.EncryptChunk(cleartextChunk, chunkNumber, fileHeader);
+                    outputStream.Write(encryptedChunk.Span);
+                    
+                    chunkNumber++;
+                }
+                
+                return outputStream.ToArray();
+            }
+            catch (Exception ex) when (!(ex is ArgumentNullException || ex is InvalidOperationException))
+            {
+                throw new CryptoException("Failed to encrypt symlink target", ex);
+            }
+        }
+
+        /// <summary>
+        /// Decrypts a symlink target from encrypted bytes read from a symlink.uvf file.
+        /// </summary>
+        /// <param name="encryptedSymlinkBytes">Encrypted bytes from symlink.uvf file</param>
+        /// <returns>The plaintext symlink target path</returns>
+        /// <exception cref="ArgumentNullException">If encryptedSymlinkBytes is null</exception>
+        /// <exception cref="InvalidOperationException">If this is not a UVF vault or the cryptor is not available</exception>
+        /// <exception cref="AuthenticationFailedException">If the encrypted data authentication fails</exception>
+        /// <exception cref="CryptoException">If decryption fails</exception>
+        public string DecryptSymlinkTarget(byte[] encryptedSymlinkBytes)
+        {
+            if (_disposed) throw new ObjectDisposedException(nameof(VaultHandler));
+            if (encryptedSymlinkBytes == null) throw new ArgumentNullException(nameof(encryptedSymlinkBytes));
+            if (IsCryptomatorV8()) throw new InvalidOperationException("Symlinks are only supported in UVF format");
+
+            var fileContentCryptor = _cryptor.FileContentCryptor();
+            var fileHeaderCryptor = _cryptor.FileHeaderCryptor();
+            if (fileContentCryptor == null) throw new InvalidOperationException("File content cryptor not available.");
+            if (fileHeaderCryptor == null) throw new InvalidOperationException("File header cryptor not available.");
+
+            try
+            {
+                using var inputStream = new MemoryStream(encryptedSymlinkBytes);
+                
+                // Read and decrypt file header
+                int headerSize = fileHeaderCryptor.HeaderSize();
+                byte[] headerBytes = new byte[headerSize];
+                if (inputStream.Read(headerBytes, 0, headerSize) != headerSize)
+                {
+                    throw new CryptoException("Failed to read complete file header from symlink data");
+                }
+                
+                var fileHeader = fileHeaderCryptor.DecryptHeader(new ReadOnlyMemory<byte>(headerBytes));
+                
+                // Decrypt the symlink target content in chunks
+                using var outputStream = new MemoryStream();
+                int ciphertextChunkSize = fileContentCryptor.CiphertextChunkSize();
+                long chunkNumber = 0;
+                
+                byte[] chunkBuffer = new byte[ciphertextChunkSize];
+                int bytesRead;
+                
+                while ((bytesRead = inputStream.Read(chunkBuffer, 0, ciphertextChunkSize)) > 0)
+                {
+                    ReadOnlyMemory<byte> encryptedChunk = new ReadOnlyMemory<byte>(chunkBuffer, 0, bytesRead);
+                    Memory<byte> decryptedChunk = fileContentCryptor.DecryptChunk(encryptedChunk, chunkNumber, fileHeader, true);
+                    
+                    outputStream.Write(decryptedChunk.Span);
+                    chunkNumber++;
+                }
+                
+                byte[] targetBytes = outputStream.ToArray();
+                
+                // Convert back to string (UTF-8 Normalization Form C)
+                return System.Text.Encoding.UTF8.GetString(targetBytes);
+            }
+            catch (AuthenticationFailedException)
+            {
+                throw; // Re-throw authentication failures as-is
+            }
+            catch (Exception ex) when (!(ex is ArgumentNullException || ex is InvalidOperationException))
+            {
+                throw new CryptoException("Failed to decrypt symlink target", ex);
+            }
+        }
+
+        /// <summary>
+        /// Gets the symlink metadata filename for UVF format.
+        /// </summary>
+        /// <returns>The symlink metadata filename ("symlink.uvf")</returns>
+        /// <exception cref="InvalidOperationException">If this is not a UVF vault</exception>
+        public string GetSymlinkMetadataFilename()
+        {
+            if (_disposed) throw new ObjectDisposedException(nameof(VaultHandler));
+            if (IsCryptomatorV8()) throw new InvalidOperationException("Symlinks are only supported in UVF format");
+            
+            return UvfLib.Core.V3.Constants.SYMLINK_FILE;
+        }
 
     }
 }

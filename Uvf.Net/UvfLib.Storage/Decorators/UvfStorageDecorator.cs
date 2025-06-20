@@ -490,9 +490,13 @@ namespace UvfLib.Storage.Decorators
                                         ? $"/{decryptedDirName}" 
                                         : $"{realPath}/{decryptedDirName}";
                                     
+                                    // Check if this directory contains symlink.uvf (making it a symlink)
+                                    string symlinkUvfPath = Path.Combine(item.RealPath ?? item.Filename, _vault.GetSymlinkMetadataFilename());
+                                    bool isSymlink = await _underlyingStorage.FileExistsAsync(symlinkUvfPath, cancellationToken);
+                                    
                                     var dirObject = new FileObject(virtualDirPath)
                                     {
-                                        IsDirectory = true,
+                                        IsDirectory = !isSymlink, // If it's a symlink, it's not a directory
                                         Filename = decryptedDirName,
                                         RealPath = virtualDirPath,
                                         VirtualPath = virtualDirPath,
@@ -502,6 +506,13 @@ namespace UvfLib.Storage.Decorators
                                         LastAccessTime = item.LastAccessTime,
                                         SC = this
                                     };
+                                    
+                                    // Note: FileObject doesn't have Properties collection, so symlink metadata
+                                    // needs to be determined by calling IsSymlinkAsync() when needed
+                                    if (isSymlink)
+                                    {
+                                        _logger?.LogDebug("Detected symlink in directory listing: {Path}", virtualDirPath);
+                                    }
                                     
                                     fileObjects.Add(dirObject);
                                 }
@@ -568,9 +579,13 @@ namespace UvfLib.Storage.Decorators
                                 ? $"/{dirName}" 
                                 : $"{realPath}/{dirName}";
                             
+                            // Check if this directory contains symlink.uvf (making it a symlink)
+                            string symlinkUvfPath = Path.Combine(dir.RealPath ?? Path.Combine(physicalPath, dir.Filename), _vault.GetSymlinkMetadataFilename());
+                            bool isSymlink = await _underlyingStorage.FileExistsAsync(symlinkUvfPath, cancellationToken);
+                            
                             var dirObject = new FileObject(virtualPath)
                             {
-                                IsDirectory = true,
+                                IsDirectory = !isSymlink, // If it's a symlink, it's not a directory
                                 Filename = dirName,
                                 RealPath = virtualPath,
                                 VirtualPath = virtualPath,
@@ -580,6 +595,11 @@ namespace UvfLib.Storage.Decorators
                                 LastAccessTime = dir.LastAccessTime,
                                 SC = this
                             };
+                            
+                            if (isSymlink)
+                            {
+                                _logger?.LogDebug("Detected symlink in simple mode directory listing: {Path}", virtualPath);
+                            }
                             
                             fileObjects.Add(dirObject);
                         }
@@ -693,6 +713,231 @@ namespace UvfLib.Storage.Decorators
             finally
             {
                 await _underlyingStorage.CloseAsync(fileHandle, cancellationToken);
+            }
+        }
+
+        #endregion
+
+        #region Symlink Operations (UVF only)
+
+        /// <summary>
+        /// Creates a symlink at the specified path pointing to the given target.
+        /// UVF symlinks are stored as directories containing symlink.uvf files.
+        /// </summary>
+        /// <param name="symlinkPath">Virtual path where the symlink should be created</param>
+        /// <param name="targetPath">The target path the symlink should point to</param>
+        /// <param name="cancellationToken">Cancellation token</param>
+        /// <exception cref="InvalidOperationException">If this is not a UVF vault</exception>
+        /// <exception cref="ArgumentException">If paths are invalid</exception>
+        /// <exception cref="IOException">If the symlink cannot be created</exception>
+        public async Task CreateSymlinkAsync(string symlinkPath, string targetPath, CancellationToken cancellationToken = default)
+        {
+            if (_vault.IsCryptomatorV8())
+            {
+                throw new InvalidOperationException("Symlinks are only supported in UVF format");
+            }
+
+            if (string.IsNullOrEmpty(symlinkPath)) throw new ArgumentException("Symlink path cannot be null or empty", nameof(symlinkPath));
+            if (string.IsNullOrEmpty(targetPath)) throw new ArgumentException("Target path cannot be null or empty", nameof(targetPath));
+
+            try
+            {
+                // Get parent directory metadata to encrypt the symlink name
+                string parentPath = Path.GetDirectoryName(symlinkPath)?.Replace('\\', '/') ?? "/";
+                string symlinkName = Path.GetFileName(symlinkPath);
+                
+                var parentMetadata = await GetDirectoryMetadataAsync(parentPath);
+                
+                // Encrypt the symlink name using parent metadata
+                string encryptedSymlinkName;
+                if (_encryptFilenames)
+                {
+                    encryptedSymlinkName = _vault.EncryptFilename(symlinkName, parentMetadata);
+                }
+                else
+                {
+                    // Simple mode: symlink names are not encrypted
+                    encryptedSymlinkName = symlinkName;
+                }
+                
+                // Determine parent content directory
+                string parentContentDir;
+                if (parentPath == "/")
+                {
+                    parentContentDir = Path.Combine(_vaultBasePath, _vault.GetRootDirectoryPath());
+                }
+                else
+                {
+                    parentContentDir = Path.Combine(_vaultBasePath, _vault.GetDirectoryPath(parentMetadata));
+                }
+                
+                // Create symlink directory in parent content directory
+                string symlinkDirectory = Path.Combine(parentContentDir, encryptedSymlinkName);
+                await _underlyingStorage.CreateDirectoryAsync(symlinkDirectory, cancellationToken);
+                
+                // Encrypt the symlink target
+                byte[] encryptedTarget = _vault.EncryptSymlinkTarget(targetPath);
+                
+                // Create symlink.uvf file in the symlink directory
+                string symlinkUvfPath = Path.Combine(symlinkDirectory, _vault.GetSymlinkMetadataFilename());
+                IntPtr fileHandle = await _underlyingStorage.OpenAsync(symlinkUvfPath, OpenFlags.Create | OpenFlags.WriteOnly, cancellationToken);
+                try
+                {
+                    await _underlyingStorage.WriteAsync(fileHandle, 0, encryptedTarget.Length, Marshal.UnsafeAddrOfPinnedArrayElement(encryptedTarget, 0), cancellationToken);
+                }
+                finally
+                {
+                    await _underlyingStorage.CloseAsync(fileHandle, cancellationToken);
+                }
+                
+                _logger?.LogDebug("Created UVF symlink: {SymlinkPath} -> {TargetPath}", symlinkPath, targetPath);
+            }
+            catch (Exception ex)
+            {
+                _logger?.LogError(ex, "Error creating UVF symlink: {SymlinkPath} -> {TargetPath}", symlinkPath, targetPath);
+                throw new IOException($"Failed to create symlink '{symlinkPath}' -> '{targetPath}': {ex.Message}", ex);
+            }
+        }
+
+        /// <summary>
+        /// Reads the target of a symlink at the specified path.
+        /// </summary>
+        /// <param name="symlinkPath">Virtual path of the symlink</param>
+        /// <param name="cancellationToken">Cancellation token</param>
+        /// <returns>The target path the symlink points to</returns>
+        /// <exception cref="InvalidOperationException">If this is not a UVF vault</exception>
+        /// <exception cref="ArgumentException">If the path is invalid</exception>
+        /// <exception cref="FileNotFoundException">If the symlink does not exist</exception>
+        /// <exception cref="IOException">If the symlink cannot be read</exception>
+        public async Task<string> ReadSymlinkAsync(string symlinkPath, CancellationToken cancellationToken = default)
+        {
+            if (_vault.IsCryptomatorV8())
+            {
+                throw new InvalidOperationException("Symlinks are only supported in UVF format");
+            }
+
+            if (string.IsNullOrEmpty(symlinkPath)) throw new ArgumentException("Symlink path cannot be null or empty", nameof(symlinkPath));
+
+            try
+            {
+                // Get parent directory metadata to encrypt the symlink name
+                string parentPath = Path.GetDirectoryName(symlinkPath)?.Replace('\\', '/') ?? "/";
+                string symlinkName = Path.GetFileName(symlinkPath);
+                
+                var parentMetadata = await GetDirectoryMetadataAsync(parentPath);
+                
+                // Encrypt the symlink name using parent metadata
+                string encryptedSymlinkName;
+                if (_encryptFilenames)
+                {
+                    encryptedSymlinkName = _vault.EncryptFilename(symlinkName, parentMetadata);
+                }
+                else
+                {
+                    // Simple mode: symlink names are not encrypted
+                    encryptedSymlinkName = symlinkName;
+                }
+                
+                // Determine parent content directory
+                string parentContentDir;
+                if (parentPath == "/")
+                {
+                    parentContentDir = Path.Combine(_vaultBasePath, _vault.GetRootDirectoryPath());
+                }
+                else
+                {
+                    parentContentDir = Path.Combine(_vaultBasePath, _vault.GetDirectoryPath(parentMetadata));
+                }
+                
+                // Get symlink directory path
+                string symlinkDirectory = Path.Combine(parentContentDir, encryptedSymlinkName);
+                string symlinkUvfPath = Path.Combine(symlinkDirectory, _vault.GetSymlinkMetadataFilename());
+                
+                if (!await _underlyingStorage.FileExistsAsync(symlinkUvfPath, cancellationToken))
+                {
+                    throw new FileNotFoundException($"Symlink not found: {symlinkPath}");
+                }
+                
+                // Read and decrypt the symlink.uvf file
+                var fileInfo = await _underlyingStorage.GetFileInfoAsync(symlinkUvfPath, cancellationToken);
+                var buffer = new byte[fileInfo.Size];
+                
+                IntPtr fileHandle = await _underlyingStorage.OpenAsync(symlinkUvfPath, OpenFlags.ReadOnly, cancellationToken);
+                try
+                {
+                    await _underlyingStorage.ReadAsync(fileHandle, 0, fileInfo.Size, Marshal.UnsafeAddrOfPinnedArrayElement(buffer, 0), cancellationToken);
+                    return _vault.DecryptSymlinkTarget(buffer);
+                }
+                finally
+                {
+                    await _underlyingStorage.CloseAsync(fileHandle, cancellationToken);
+                }
+            }
+            catch (Exception ex) when (!(ex is FileNotFoundException || ex is InvalidOperationException || ex is ArgumentException))
+            {
+                _logger?.LogError(ex, "Error reading UVF symlink: {SymlinkPath}", symlinkPath);
+                throw new IOException($"Failed to read symlink '{symlinkPath}': {ex.Message}", ex);
+            }
+        }
+
+        /// <summary>
+        /// Checks if the specified path is a symlink.
+        /// </summary>
+        /// <param name="path">Virtual path to check</param>
+        /// <param name="cancellationToken">Cancellation token</param>
+        /// <returns>True if the path is a symlink, false otherwise</returns>
+        /// <exception cref="InvalidOperationException">If this is not a UVF vault</exception>
+        public async Task<bool> IsSymlinkAsync(string path, CancellationToken cancellationToken = default)
+        {
+            if (_vault.IsCryptomatorV8())
+            {
+                throw new InvalidOperationException("Symlinks are only supported in UVF format");
+            }
+
+            if (string.IsNullOrEmpty(path)) return false;
+
+            try
+            {
+                // Get parent directory metadata to encrypt the path name
+                string parentPath = Path.GetDirectoryName(path)?.Replace('\\', '/') ?? "/";
+                string pathName = Path.GetFileName(path);
+                
+                var parentMetadata = await GetDirectoryMetadataAsync(parentPath);
+                
+                // Encrypt the path name using parent metadata
+                string encryptedPathName;
+                if (_encryptFilenames)
+                {
+                    encryptedPathName = _vault.EncryptFilename(pathName, parentMetadata);
+                }
+                else
+                {
+                    // Simple mode: path names are not encrypted
+                    encryptedPathName = pathName;
+                }
+                
+                // Determine parent content directory
+                string parentContentDir;
+                if (parentPath == "/")
+                {
+                    parentContentDir = Path.Combine(_vaultBasePath, _vault.GetRootDirectoryPath());
+                }
+                else
+                {
+                    parentContentDir = Path.Combine(_vaultBasePath, _vault.GetDirectoryPath(parentMetadata));
+                }
+                
+                // Check if symlink directory exists and contains symlink.uvf
+                string symlinkDirectory = Path.Combine(parentContentDir, encryptedPathName);
+                string symlinkUvfPath = Path.Combine(symlinkDirectory, _vault.GetSymlinkMetadataFilename());
+                
+                return await _underlyingStorage.DirectoryExistsAsync(symlinkDirectory, cancellationToken) &&
+                       await _underlyingStorage.FileExistsAsync(symlinkUvfPath, cancellationToken);
+            }
+            catch (Exception ex)
+            {
+                _logger?.LogWarning(ex, "Error checking if path is symlink: {Path}", path);
+                return false;
             }
         }
 

@@ -46,6 +46,8 @@ namespace ExampleVaultApp
                         await RunBackupTestAsync(vaultFormat);
                         break;
 
+
+
                     default:
                         Console.WriteLine($"❌ Unknown command: {command}");
                         Console.WriteLine("Run without arguments to see available commands.");
@@ -73,6 +75,7 @@ namespace ExampleVaultApp
             Console.WriteLine("  directtest        : Full encrypt + decrypt + verify cycle using low-level IStorage interface");
             Console.WriteLine("  changepassword    : Test password change functionality");
             Console.WriteLine("  backuptest        : Test vault backup functionality");
+
             Console.WriteLine();
             Console.WriteLine("Format Options (choose one):");
             Console.WriteLine("  --cryptomator     : Use Cryptomator V8 format");
@@ -88,6 +91,7 @@ namespace ExampleVaultApp
             Console.WriteLine("  ExampleVaultApp simpletest --uvf --encryptfilenames=false");
             Console.WriteLine("  ExampleVaultApp changepassword --uvf --encryptfilenames=true");
             Console.WriteLine("  ExampleVaultApp backuptest");
+
             Console.WriteLine();
             Console.WriteLine("Notes:");
             Console.WriteLine("  - UVF is used by default if no format option is specified");
@@ -238,6 +242,8 @@ namespace ExampleVaultApp
             
             Console.WriteLine("\n✅ Backup test completed successfully!");
         }
+
+
 
         #endregion
 

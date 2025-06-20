@@ -4,6 +4,7 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using UvfLib.Storage;
+using UvfLib.Vault;
 using StorageLib.Abstractions;
 
 namespace ExampleVaultApp
@@ -96,7 +97,21 @@ namespace ExampleVaultApp
         /// </summary>
         private async Task VerifyVaultAccessAsync(string password, string passwordType)
         {
-            using var vault = await VaultManager.LoadUvfVaultAsync(_testVaultPath, password, _encryptFilenames);
+            // Use auto-detection when loading vault for verification
+            using var vault = await VaultManager.LoadUvfVaultAsync(_testVaultPath, password);
+            
+            // Try to detect and display the actual setting
+            try
+            {
+                string vaultUvfFile = Path.Combine(_testVaultPath, "vault.uvf");
+                byte[] vaultFileContent = await File.ReadAllBytesAsync(vaultUvfFile);
+                bool detectedEncryptFilenames = VaultHandler.DetectFilenameEncryption(vaultFileContent, password);
+                Console.WriteLine($"🔍 Auto-detected filename encryption during {passwordType} password verification: {(detectedEncryptFilenames ? "Enabled" : "Disabled")}");
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"⚠️ Could not detect filename encryption setting: {ex.Message}");
+            }
             
             // Try to read the test file
             var data = await vault.ReadAllBytesAsync("test.txt");
@@ -163,7 +178,8 @@ namespace ExampleVaultApp
         {
             try
             {
-                using var vault = await VaultManager.LoadUvfVaultAsync(_testVaultPath, password, _encryptFilenames);
+                // Use auto-detection when testing password rejection
+                using var vault = await VaultManager.LoadUvfVaultAsync(_testVaultPath, password);
                 throw new Exception("Expected password to be rejected, but UVF vault opened successfully");
             }
             catch (UnauthorizedAccessException ex)
