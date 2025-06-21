@@ -46,7 +46,9 @@ namespace ExampleVaultApp
                         await RunBackupTestAsync(vaultFormat);
                         break;
 
-
+                    case "multiusertest":
+                        await RunMultiUserTestAsync();
+                        break;
 
                     default:
                         Console.WriteLine($"❌ Unknown command: {command}");
@@ -75,6 +77,7 @@ namespace ExampleVaultApp
             Console.WriteLine("  directtest        : Full encrypt + decrypt + verify cycle using low-level IStorage interface");
             Console.WriteLine("  changepassword    : Test password change functionality");
             Console.WriteLine("  backuptest        : Test vault backup functionality");
+            Console.WriteLine("  multiusertest     : Test multi-user UVF vault functionality");
 
             Console.WriteLine();
             Console.WriteLine("Format Options (choose one):");
@@ -353,6 +356,13 @@ namespace ExampleVaultApp
                 if (Directory.Exists(backupPath))
                     Directory.Delete(backupPath, true);
             }
+        }
+
+        private static async Task RunMultiUserTestAsync()
+        {
+            Console.WriteLine("🔧 Running Multi-User UVF Vault Test...");
+            var multiUserTest = new MultiUserVaultTest();
+            await multiUserTest.RunMultiUserVaultTestAsync();
         }
 
         #endregion

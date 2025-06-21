@@ -7,6 +7,8 @@ using System.Text;
 using System.Security;
 using System.Runtime.InteropServices;
 using System.Security.Cryptography;
+using System.Buffers.Binary;
+using UvfLib.Core.Jwe;
 
 namespace UvfLib.Storage
 {
@@ -156,6 +158,291 @@ namespace UvfLib.Storage
             var manager = new VaultManager();
             await manager.InitializeExistingUvfVaultAsync(storage, password, vaultBasePath, encryptFilenames, ownsStorage);
             return manager;
+        }
+
+        #endregion
+
+        #region Factory Methods - Multi-User UVF
+
+        /// <summary>
+        /// Creates a new multi-user UVF vault with admin user at the specified path using LocalStorage.
+        /// </summary>
+        /// <param name="vaultPath">Path where the vault will be created</param>
+        /// <param name="adminPassword">Admin password (char[])</param>
+        /// <param name="encryptFilenames">Whether to encrypt filenames</param>
+        /// <returns>VaultManager instance</returns>
+        public static async Task<VaultManager> CreateMultiUserUvfVaultAsync(string vaultPath, char[] adminPassword, bool encryptFilenames = true)
+        {
+            var storage = await StorageFactory.CreateInitializedLocalStorageAsync("/");
+            return await CreateMultiUserUvfVaultAsync(storage, adminPassword, vaultPath, encryptFilenames, ownsStorage: true);
+        }
+
+        /// <summary>
+        /// Creates a new multi-user UVF vault with admin user at the specified path using LocalStorage.
+        /// </summary>
+        /// <param name="vaultPath">Path where the vault will be created</param>
+        /// <param name="adminPassword">Admin password (string)</param>
+        /// <param name="encryptFilenames">Whether to encrypt filenames</param>
+        /// <returns>VaultManager instance</returns>
+        public static async Task<VaultManager> CreateMultiUserUvfVaultAsync(string vaultPath, string adminPassword, bool encryptFilenames = true)
+        {
+            char[] adminPasswordChars = adminPassword.ToCharArray();
+            try
+            {
+                return await CreateMultiUserUvfVaultAsync(vaultPath, adminPasswordChars, encryptFilenames);
+            }
+            finally
+            {
+                Array.Clear(adminPasswordChars, 0, adminPasswordChars.Length);
+            }
+        }
+
+        /// <summary>
+        /// Creates a new multi-user UVF vault using the provided storage connector.
+        /// </summary>
+        /// <param name="storage">Storage connector</param>
+        /// <param name="adminPassword">Admin password (char[])</param>
+        /// <param name="vaultBasePath">Base path for the vault</param>
+        /// <param name="encryptFilenames">Whether to encrypt filenames</param>
+        /// <param name="ownsStorage">Whether this manager owns the storage</param>
+        /// <returns>VaultManager instance</returns>
+        public static async Task<VaultManager> CreateMultiUserUvfVaultAsync(IStorage storage, char[] adminPassword, string vaultBasePath, bool encryptFilenames = true, bool ownsStorage = false)
+        {
+            var manager = new VaultManager();
+            await manager.InitializeNewMultiUserUvfVaultAsync(storage, adminPassword, vaultBasePath, encryptFilenames, ownsStorage);
+            return manager;
+        }
+
+        /// <summary>
+        /// Loads an existing multi-user UVF vault from the specified path using LocalStorage.
+        /// </summary>
+        /// <param name="vaultPath">Path to the vault</param>
+        /// <param name="userPassword">User password (char[])</param>
+        /// <param name="userId">Optional user ID hint</param>
+        /// <returns>VaultManager instance</returns>
+        public static async Task<VaultManager> LoadMultiUserUvfVaultAsync(string vaultPath, char[] userPassword, string? userId = null)
+        {
+            var storage = await StorageFactory.CreateInitializedLocalStorageAsync("/");
+            return await LoadMultiUserUvfVaultAsync(storage, userPassword, vaultPath, userId, ownsStorage: true);
+        }
+
+        /// <summary>
+        /// Loads an existing multi-user UVF vault from the specified path using LocalStorage.
+        /// </summary>
+        /// <param name="vaultPath">Path to the vault</param>
+        /// <param name="userPassword">User password (string)</param>
+        /// <param name="userId">Optional user ID hint</param>
+        /// <returns>VaultManager instance</returns>
+        public static async Task<VaultManager> LoadMultiUserUvfVaultAsync(string vaultPath, string userPassword, string? userId = null)
+        {
+            char[] userPasswordChars = userPassword.ToCharArray();
+            try
+            {
+                return await LoadMultiUserUvfVaultAsync(vaultPath, userPasswordChars, userId);
+            }
+            finally
+            {
+                Array.Clear(userPasswordChars, 0, userPasswordChars.Length);
+            }
+        }
+
+        /// <summary>
+        /// Loads an existing multi-user UVF vault using the provided storage connector.
+        /// </summary>
+        /// <param name="storage">Storage connector</param>
+        /// <param name="userPassword">User password (char[])</param>
+        /// <param name="vaultBasePath">Base path for the vault</param>
+        /// <param name="userId">Optional user ID hint</param>
+        /// <param name="ownsStorage">Whether this manager owns the storage</param>
+        /// <returns>VaultManager instance</returns>
+        public static async Task<VaultManager> LoadMultiUserUvfVaultAsync(IStorage storage, char[] userPassword, string vaultBasePath, string? userId = null, bool ownsStorage = false)
+        {
+            var manager = new VaultManager();
+            await manager.InitializeExistingMultiUserUvfVaultAsync(storage, userPassword, vaultBasePath, userId, ownsStorage);
+            return manager;
+        }
+
+        /// <summary>
+        /// Adds a user to an existing multi-user UVF vault.
+        /// </summary>
+        /// <param name="vaultPath">Path to the vault</param>
+        /// <param name="adminPassword">Admin password (char[])</param>
+        /// <param name="newUserId">New user ID</param>
+        /// <param name="newUserPassword">New user password (char[])</param>
+        public static async Task AddUserToVaultAsync(string vaultPath, char[] adminPassword, string newUserId, char[] newUserPassword)
+        {
+            string vaultFilePath = Path.Combine(vaultPath, "vault.uvf");
+            if (!System.IO.File.Exists(vaultFilePath))
+                throw new FileNotFoundException($"UVF vault file not found: {vaultFilePath}");
+
+            byte[] vaultFileContent = await System.IO.File.ReadAllBytesAsync(vaultFilePath);
+            string jweString = System.Text.Encoding.UTF8.GetString(vaultFileContent);
+            string updatedJweString = UvfLib.Core.Jwe.MultiUserJweVaultManager.AddUserToVault(jweString, adminPassword, newUserId, newUserPassword);
+            byte[] updatedVaultContent = System.Text.Encoding.UTF8.GetBytes(updatedJweString);
+            await System.IO.File.WriteAllBytesAsync(vaultFilePath, updatedVaultContent);
+        }
+
+        /// <summary>
+        /// Adds a user to an existing multi-user UVF vault.
+        /// </summary>
+        /// <param name="vaultPath">Path to the vault</param>
+        /// <param name="adminPassword">Admin password (string)</param>
+        /// <param name="newUserId">New user ID</param>
+        /// <param name="newUserPassword">New user password (string)</param>
+        public static async Task AddUserToVaultAsync(string vaultPath, string adminPassword, string newUserId, string newUserPassword)
+        {
+            char[] adminPasswordChars = adminPassword.ToCharArray();
+            char[] newUserPasswordChars = newUserPassword.ToCharArray();
+            try
+            {
+                await AddUserToVaultAsync(vaultPath, adminPasswordChars, newUserId, newUserPasswordChars);
+            }
+            finally
+            {
+                Array.Clear(adminPasswordChars, 0, adminPasswordChars.Length);
+                Array.Clear(newUserPasswordChars, 0, newUserPasswordChars.Length);
+            }
+        }
+
+        /// <summary>
+        /// Removes a user from an existing multi-user UVF vault.
+        /// </summary>
+        /// <param name="vaultPath">Path to the vault</param>
+        /// <param name="adminPassword">Admin password (char[])</param>
+        /// <param name="userIdToRemove">User ID to remove</param>
+        public static async Task RemoveUserFromVaultAsync(string vaultPath, char[] adminPassword, string userIdToRemove)
+        {
+            string vaultFilePath = Path.Combine(vaultPath, "vault.uvf");
+            if (!System.IO.File.Exists(vaultFilePath))
+                throw new FileNotFoundException($"UVF vault file not found: {vaultFilePath}");
+
+            byte[] vaultFileContent = await System.IO.File.ReadAllBytesAsync(vaultFilePath);
+            string jweString = System.Text.Encoding.UTF8.GetString(vaultFileContent);
+            string updatedJweString = UvfLib.Core.Jwe.MultiUserJweVaultManager.RemoveUserFromVault(jweString, adminPassword, userIdToRemove);
+            byte[] updatedVaultContent = System.Text.Encoding.UTF8.GetBytes(updatedJweString);
+            await System.IO.File.WriteAllBytesAsync(vaultFilePath, updatedVaultContent);
+        }
+
+        /// <summary>
+        /// Removes a user from an existing multi-user UVF vault.
+        /// </summary>
+        /// <param name="vaultPath">Path to the vault</param>
+        /// <param name="adminPassword">Admin password (string)</param>
+        /// <param name="userIdToRemove">User ID to remove</param>
+        public static async Task RemoveUserFromVaultAsync(string vaultPath, string adminPassword, string userIdToRemove)
+        {
+            char[] adminPasswordChars = adminPassword.ToCharArray();
+            try
+            {
+                await RemoveUserFromVaultAsync(vaultPath, adminPasswordChars, userIdToRemove);
+            }
+            finally
+            {
+                Array.Clear(adminPasswordChars, 0, adminPasswordChars.Length);
+            }
+        }
+
+        /// <summary>
+        /// Rotates keys for a multi-user UVF vault.
+        /// Note: Multi-user key rotation is complex and requires all user passwords to be available.
+        /// This is a limitation of the current implementation.
+        /// </summary>
+        /// <param name="vaultPath">Path to the vault</param>
+        /// <param name="adminPassword">Admin password (char[])</param>
+        public static async Task RotateVaultKeysAsync(string vaultPath, char[] adminPassword)
+        {
+            string vaultFilePath = Path.Combine(vaultPath, "vault.uvf");
+            if (!System.IO.File.Exists(vaultFilePath))
+                throw new FileNotFoundException($"UVF vault file not found: {vaultFilePath}");
+
+            byte[] vaultFileContent = await System.IO.File.ReadAllBytesAsync(vaultFilePath);
+            string jweString = System.Text.Encoding.UTF8.GetString(vaultFileContent);
+            
+            // Get current users to check if rotation is possible
+            var currentUsers = UvfLib.Core.Jwe.MultiUserJweVaultManager.GetVaultUsers(jweString, adminPassword);
+            
+            // Check if there are other users besides admin
+            var nonAdminUsers = currentUsers.Where(u => u != "admin").ToList();
+            if (nonAdminUsers.Any())
+            {
+                throw new InvalidOperationException($"Cannot rotate keys for multi-user vault with users: {string.Join(", ", nonAdminUsers)}. " +
+                    "Multi-user key rotation requires all user passwords to re-encrypt the vault for all users. " +
+                    "Consider removing all users except admin before key rotation, or implement a more sophisticated key management system.");
+            }
+
+            // If only admin user exists, we can proceed with rotation
+            // Load the vault to get current payload
+            var payload = UvfLib.Core.Jwe.MultiUserJweVaultManager.LoadMultiUserVault(jweString, adminPassword, "admin");
+
+            // For now, key rotation for multi-user vaults is not fully implemented
+            // This would require generating new seeds and re-encrypting the vault
+            throw new NotImplementedException("Multi-user vault key rotation is not yet fully implemented. " +
+                "As a workaround, you can create a new vault and migrate data, or remove all users except admin before rotation.");
+        }
+
+        /// <summary>
+        /// Rotates keys for a multi-user UVF vault.
+        /// </summary>
+        /// <param name="vaultPath">Path to the vault</param>
+        /// <param name="adminPassword">Admin password (string)</param>
+        public static async Task RotateVaultKeysAsync(string vaultPath, string adminPassword)
+        {
+            char[] adminPasswordChars = adminPassword.ToCharArray();
+            try
+            {
+                await RotateVaultKeysAsync(vaultPath, adminPasswordChars);
+            }
+            finally
+            {
+                Array.Clear(adminPasswordChars, 0, adminPasswordChars.Length);
+            }
+        }
+
+        /// <summary>
+        /// Gets list of users from a multi-user UVF vault.
+        /// </summary>
+        /// <param name="vaultPath">Path to the vault</param>
+        /// <param name="adminPassword">Admin password (char[])</param>
+        /// <returns>List of vault users</returns>
+        public static async Task<List<UvfLib.Core.Api.VaultUser>> GetVaultUsersAsync(string vaultPath, char[] adminPassword)
+        {
+            string vaultFilePath = Path.Combine(vaultPath, "vault.uvf");
+            if (!System.IO.File.Exists(vaultFilePath))
+                throw new FileNotFoundException($"UVF vault file not found: {vaultFilePath}");
+
+            byte[] vaultFileContent = await System.IO.File.ReadAllBytesAsync(vaultFilePath);
+            string jweString = System.Text.Encoding.UTF8.GetString(vaultFileContent);
+            var userIds = UvfLib.Core.Jwe.MultiUserJweVaultManager.GetVaultUsers(jweString, adminPassword);
+
+            var metadata = new UvfLib.Core.Api.MultiUserVaultMetadata("admin");
+            
+            foreach (var userId in userIds)
+            {
+                var role = userId == "admin" ? UvfLib.Core.Api.VaultUserRole.Admin : UvfLib.Core.Api.VaultUserRole.User;
+                var user = new UvfLib.Core.Api.VaultUser(userId, role);
+                metadata.AddUser(user);
+            }
+
+            return metadata.Users;
+        }
+
+        /// <summary>
+        /// Gets list of users from a multi-user UVF vault.
+        /// </summary>
+        /// <param name="vaultPath">Path to the vault</param>
+        /// <param name="adminPassword">Admin password (string)</param>
+        /// <returns>List of vault users</returns>
+        public static async Task<List<UvfLib.Core.Api.VaultUser>> GetVaultUsersAsync(string vaultPath, string adminPassword)
+        {
+            char[] adminPasswordChars = adminPassword.ToCharArray();
+            try
+            {
+                return await GetVaultUsersAsync(vaultPath, adminPasswordChars);
+            }
+            finally
+            {
+                Array.Clear(adminPasswordChars, 0, adminPasswordChars.Length);
+            }
         }
 
         #endregion
@@ -630,6 +917,168 @@ namespace UvfLib.Storage
                 encryptFilenames, // Use the provided encryptFilenames parameter
                 _vaultBasePath!
             );
+        }
+
+        private async Task InitializeNewMultiUserUvfVaultAsync(IStorage storage, char[] adminPassword, string vaultBasePath, bool encryptFilenames, bool ownsStorage)
+        {
+            _baseStorage = storage ?? throw new ArgumentNullException(nameof(storage));
+            _vaultBasePath = vaultBasePath ?? throw new ArgumentNullException(nameof(vaultBasePath));
+            _ownsStorage = ownsStorage;
+            _vaultFormat = VaultFormat.UvfV3;
+
+            // Create UVF masterkey payload exactly like the single-user system does
+            using var rng = RandomNumberGenerator.Create();
+
+            byte[] primaryEncryptionKey = new byte[32];
+            rng.GetBytes(primaryEncryptionKey);
+            byte[] primaryHmacKey = new byte[32];
+            rng.GetBytes(primaryHmacKey);
+            byte[] seedValue = new byte[32];
+            rng.GetBytes(seedValue);
+            int initialSeedId = 1;
+            byte[] kdfSaltForSeeds = new byte[32];
+            rng.GetBytes(kdfSaltForSeeds);
+            byte[] rootDirIdContext = Encoding.ASCII.GetBytes("rootDirId");
+            byte[] rootDirId = HKDF.DeriveKey(HashAlgorithmName.SHA512, seedValue, UvfLib.Core.V3.Constants.DIR_ID_SIZE, kdfSaltForSeeds, rootDirIdContext);
+
+            byte[] initialSeedIdBytes = new byte[4];
+            BinaryPrimitives.WriteInt32BigEndian(initialSeedIdBytes, initialSeedId);
+
+            var payload = new UvfMasterkeyPayload
+            {
+                UvfSpecVersion = 1,
+                Keys = new List<PayloadKey>
+                {
+                    new PayloadKey 
+                    {
+                        Id = "1", 
+                        Purpose = "org.cryptomator.masterkey", 
+                        Alg = "AES-256-RAW", 
+                        Value = Jose.Base64Url.Encode(primaryEncryptionKey)
+                    },
+                    new PayloadKey 
+                    {
+                        Id = "2", 
+                        Purpose = "org.cryptomator.hmacMasterkey", 
+                        Alg = "HMAC-SHA256-RAW", 
+                        Value = Jose.Base64Url.Encode(primaryHmacKey)
+                    }
+                },
+                Kdf = new PayloadKdf
+                {
+                    Type = "HKDF-SHA512",
+                    Salt = Jose.Base64Url.Encode(kdfSaltForSeeds)
+                },
+                Seeds = new List<PayloadSeed>
+                {
+                    new PayloadSeed
+                    {
+                        Id = Jose.Base64Url.Encode(initialSeedIdBytes),
+                        Value = Jose.Base64Url.Encode(seedValue),
+                        Created = DateTime.UtcNow.ToString("yyyy-MM-ddTHH:mm:ssZ")
+                    }
+                },
+                RootDirId = Jose.Base64Url.Encode(rootDirId),
+                Config = new UvfLibNetConfig
+                {
+                    EncryptFilenames = encryptFilenames,
+                    CreatedByVersion = System.Reflection.Assembly.GetExecutingAssembly().GetName().Version?.ToString()
+                }
+            };
+
+            // Create multi-user JWE with admin user only
+            var userCredentials = new Dictionary<string, char[]>();
+            string jweString = UvfLib.Core.Jwe.MultiUserJweVaultManager.CreateMultiUserVault(payload, userCredentials, adminPassword);
+            byte[] vaultFileContent = System.Text.Encoding.UTF8.GetBytes(jweString);
+            
+            // Ensure vault directory exists
+            string vaultDirectoryPath = Path.GetDirectoryName(Path.Combine(_vaultBasePath, "vault.uvf"))!;
+            if (!string.IsNullOrEmpty(vaultDirectoryPath) && !Directory.Exists(vaultDirectoryPath))
+            {
+                Directory.CreateDirectory(vaultDirectoryPath);
+            }
+
+            // Write vault file
+            string vaultFilePath = Path.Combine(_vaultBasePath, "vault.uvf");
+            await System.IO.File.WriteAllBytesAsync(vaultFilePath, vaultFileContent);
+
+            // Load the vault for use
+            await LoadMultiUserUvfVaultInternalAsync(adminPassword, encryptFilenames);
+        }
+
+        private async Task InitializeExistingMultiUserUvfVaultAsync(IStorage storage, char[] userPassword, string vaultBasePath, string? userId, bool ownsStorage)
+        {
+            _baseStorage = storage ?? throw new ArgumentNullException(nameof(storage));
+            _vaultBasePath = vaultBasePath ?? throw new ArgumentNullException(nameof(vaultBasePath));
+            _ownsStorage = ownsStorage;
+            _vaultFormat = VaultFormat.UvfV3;
+
+            // Auto-detect filename encryption mode
+            string vaultFilePath = Path.Combine(_vaultBasePath, "vault.uvf");
+            if (!System.IO.File.Exists(vaultFilePath))
+                throw new FileNotFoundException($"UVF vault file not found: {vaultFilePath}");
+                
+            byte[] vaultFileContent = await System.IO.File.ReadAllBytesAsync(vaultFilePath);
+            
+            // Detect filename encryption mode from the JWE payload
+            bool encryptFilenames = true; // Default to encrypted
+            try
+            {
+                string jweString = System.Text.Encoding.UTF8.GetString(vaultFileContent);
+                var payload = UvfLib.Core.Jwe.MultiUserJweVaultManager.LoadMultiUserVault(jweString, userPassword, userId);
+                
+                // Check config for filename encryption setting
+                if (payload.Config != null && payload.Config.EncryptFilenames.HasValue)
+                {
+                    encryptFilenames = payload.Config.EncryptFilenames.Value;
+                }
+            }
+            catch
+            {
+                // If we can't detect, default to encrypted for security
+                encryptFilenames = true;
+            }
+            
+            await LoadMultiUserUvfVaultInternalAsync(userPassword, encryptFilenames);
+        }
+
+        private async Task LoadMultiUserUvfVaultInternalAsync(char[] userPassword, bool encryptFilenames)
+        {
+            if (_baseStorage == null || string.IsNullOrEmpty(_vaultBasePath))
+                throw new InvalidOperationException("Storage and vault path must be set before loading vault");
+
+            try
+            {
+                // Load vault file content
+                string vaultFilePath = Path.Combine(_vaultBasePath, "vault.uvf");
+                if (!System.IO.File.Exists(vaultFilePath))
+                    throw new FileNotFoundException($"UVF vault file not found: {vaultFilePath}");
+
+                byte[] vaultFileContent = await System.IO.File.ReadAllBytesAsync(vaultFilePath);
+                string jweString = System.Text.Encoding.UTF8.GetString(vaultFileContent);
+                
+                // Load the multi-user vault payload first
+                var payload = UvfLib.Core.Jwe.MultiUserJweVaultManager.LoadMultiUserVault(jweString, userPassword, null);
+                
+                // Convert the payload back to a single-user JWE format that VaultHandler can understand
+                string singleUserJweString = UvfLib.Core.Jwe.JweVaultManager.CreateVault(payload, new string(userPassword));
+                byte[] singleUserJweBytes = System.Text.Encoding.UTF8.GetBytes(singleUserJweString);
+                
+                // Now load using the regular UVF loader
+                _vault = UvfLib.Vault.VaultHandler.LoadUvfVault(singleUserJweBytes, new string(userPassword));
+
+                // Create storage decorator
+                _vaultStorage = new UvfStorageDecorator(_baseStorage, _vault, encryptFilenames, _vaultBasePath);
+
+                _isOpen = true;
+            }
+            catch (Exception)
+            {
+                // Clean up on failure
+                _vault?.Dispose();
+                _vault = null;
+                throw;
+            }
         }
 
         #endregion
