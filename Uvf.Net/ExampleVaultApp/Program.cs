@@ -1,5 +1,7 @@
 ﻿using ExampleVaultApp;
 using UvfLib.Storage;
+using UvfLib.Vault;
+using UvfLib.Core.Api;
 
 namespace ExampleVaultApp
 {
@@ -25,17 +27,18 @@ namespace ExampleVaultApp
             string command = args[0].ToLowerInvariant();
             var vaultFormat = ParseVaultFormat(args);
             var encryptFilenames = ParseEncryptFilenames(args);
+            var keyDerivationParams = ParseKeyDerivation(args);
 
             try
             {
                 switch (command)
                 {
                     case "simpletest":
-                        await RunSimpleTestAsync(vaultFormat, encryptFilenames);
+                        await RunSimpleTestAsync(vaultFormat, encryptFilenames, keyDerivationParams);
                         break;
 
                     case "directtest":
-                        await RunDirectTestAsync(vaultFormat, encryptFilenames);
+                        await RunDirectTestAsync(vaultFormat, encryptFilenames, keyDerivationParams);
                         break;
 
                     case "changepassword":
@@ -88,10 +91,16 @@ namespace ExampleVaultApp
             Console.WriteLine("  --encryptfilenames=true   : Enable filename/directory encryption (default)");
             Console.WriteLine("  --encryptfilenames=false  : Disable filename/directory encryption (simple mode)");
             Console.WriteLine();
+            Console.WriteLine("Key Derivation Options (UVF only):");
+            Console.WriteLine("  --keyderivation=pbkdf2    : Use PBKDF2-HMAC-SHA512 with 64,000 iterations (default)");
+            Console.WriteLine("  --keyderivation=scrypt    : Use Scrypt with N=32768, r=8, p=1 (enhanced security)");
+            Console.WriteLine();
             Console.WriteLine("Examples:");
             Console.WriteLine("  ExampleVaultApp simpletest --cryptomator");
             Console.WriteLine("  ExampleVaultApp directtest --uvf");
             Console.WriteLine("  ExampleVaultApp simpletest --uvf --encryptfilenames=false");
+            Console.WriteLine("  ExampleVaultApp simpletest --uvf --keyderivation=scrypt");
+            Console.WriteLine("  ExampleVaultApp directtest --uvf --encryptfilenames=true --keyderivation=pbkdf2");
             Console.WriteLine("  ExampleVaultApp changepassword --uvf --encryptfilenames=true");
             Console.WriteLine("  ExampleVaultApp backuptest");
 
@@ -99,7 +108,9 @@ namespace ExampleVaultApp
             Console.WriteLine("Notes:");
             Console.WriteLine("  - UVF is used by default if no format option is specified");
             Console.WriteLine("  - Filename encryption is enabled by default for UVF (like Cryptomator)");
-            Console.WriteLine("  - --encryptfilenames option only applies to UVF format");
+            Console.WriteLine("  - PBKDF2 key derivation is used by default for backward compatibility");
+            Console.WriteLine("  - --encryptfilenames and --keyderivation options only apply to UVF format");
+            Console.WriteLine("  - Scrypt provides enhanced security but may be slower than PBKDF2");
         }
 
         private static VaultFormat ParseVaultFormat(string[] args)
@@ -128,14 +139,38 @@ namespace ExampleVaultApp
             return true;
         }
 
+        private static KeyDerivationParameters ParseKeyDerivation(string[] args)
+        {
+            // Look for --keyderivation=pbkdf2 or --keyderivation=scrypt
+            var keyDerivationArg = args.FirstOrDefault(arg => arg.StartsWith("--keyderivation="));
+            if (keyDerivationArg != null)
+            {
+                var value = keyDerivationArg.Split('=')[1].ToLowerInvariant();
+                switch (value)
+                {
+                    case "pbkdf2":
+                        return KeyDerivationParameters.Default();
+                    case "scrypt":
+                        return KeyDerivationParameters.Scrypt();
+                    default:
+                        Console.WriteLine($"⚠️ Unknown key derivation method: {value}. Using default PBKDF2.");
+                        return KeyDerivationParameters.Default();
+                }
+            }
+            
+            // Default to PBKDF2 for backward compatibility
+            return KeyDerivationParameters.Default();
+        }
+
         #region Command Implementations
 
-        private static async Task RunSimpleTestAsync(VaultFormat format, bool encryptFilenames)
+        private static async Task RunSimpleTestAsync(VaultFormat format, bool encryptFilenames, KeyDerivationParameters keyDerivationParams)
         {
             Console.WriteLine($"🔧 Running Simple Test using VaultManager API with {format} format...");
             if (format == VaultFormat.UVF)
             {
                 Console.WriteLine($"🔧 UVF Filename Encryption: {(encryptFilenames ? "Enabled" : "Disabled")}");
+                Console.WriteLine($"🔧 UVF Key Derivation: {keyDerivationParams.Method} {GetKeyDerivationDetails(keyDerivationParams)}");
             }
             
             switch (format)
@@ -155,7 +190,8 @@ namespace ExampleVaultApp
                         VaultFolderPath, 
                         DecryptedFolderPath, 
                         Password,
-                        encryptFilenames);
+                        encryptFilenames,
+                        keyDerivationParams);
                     await uvfTest.RunTestAsync();
                     break;
 
@@ -164,12 +200,13 @@ namespace ExampleVaultApp
             }
         }
 
-        private static async Task RunDirectTestAsync(VaultFormat format, bool encryptFilenames)
+        private static async Task RunDirectTestAsync(VaultFormat format, bool encryptFilenames, KeyDerivationParameters keyDerivationParams)
         {
             Console.WriteLine($"🔧 Running Direct Test using low-level IStorage interface with {format} format...");
             if (format == VaultFormat.UVF)
             {
                 Console.WriteLine($"🔧 UVF Filename Encryption: {(encryptFilenames ? "Enabled" : "Disabled")}");
+                Console.WriteLine($"🔧 UVF Key Derivation: {keyDerivationParams.Method} {GetKeyDerivationDetails(keyDerivationParams)}");
             }
             
             switch (format)
@@ -189,12 +226,26 @@ namespace ExampleVaultApp
                         VaultFolderPath, 
                         DecryptedFolderPath, 
                         Password,
-                        encryptFilenames);
+                        encryptFilenames,
+                        keyDerivationParams);
                     await uvfTest.RunTestAsync();
                     break;
 
                 default:
                     throw new ArgumentException($"Unsupported vault format: {format}");
+            }
+        }
+
+        private static string GetKeyDerivationDetails(KeyDerivationParameters kdfParams)
+        {
+            switch (kdfParams.Method)
+            {
+                case KeyDerivationMethod.PBKDF2_HMAC_SHA512:
+                    return $"({kdfParams.Pbkdf2Iterations:N0} iterations)";
+                case KeyDerivationMethod.Scrypt:
+                    return $"(N={kdfParams.ScryptN}, r={kdfParams.ScryptR}, p={kdfParams.ScryptP})";
+                default:
+                    return "";
             }
         }
 
@@ -245,8 +296,6 @@ namespace ExampleVaultApp
             
             Console.WriteLine("\n✅ Backup test completed successfully!");
         }
-
-
 
         #endregion
 

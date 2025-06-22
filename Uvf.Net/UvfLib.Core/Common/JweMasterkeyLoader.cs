@@ -52,7 +52,7 @@ namespace UvfLib.Core.Common // Or UvfLib.Jwe, depending on preference
             {
                 string jweString = File.ReadAllText(vaultPath, Encoding.UTF8);
                 
-                UvfMasterkeyPayload payload = JweVaultManager.LoadVaultPayload(jweString, password);
+                UvfMasterkeyPayload payload = JweVaultManager.LoadVaultPayload(jweString, password, (int?)null);
                 
                 // Serialize payload back to JSON string to pass to UVFMasterkey.FromDecryptedPayload
                 // (as UVFMasterkeyImpl expects a JSON string)

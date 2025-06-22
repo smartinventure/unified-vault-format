@@ -86,11 +86,11 @@ namespace UvfLib.Vault.VaultHelpers
 
             // 1. Load the existing payload using the old password
             // LoadVaultPayload returns the UvfMasterkeyPayload directly.
-            UvfMasterkeyPayload existingPayload = JweVaultManager.LoadVaultPayload(jweStringOld, oldPassword);
+            UvfMasterkeyPayload existingPayload = JweVaultManager.LoadVaultPayload(jweStringOld, oldPassword, (int?)null);
 
             // 2. Create a new JWE vault with the existing payload and the new password
             // This re-encrypts the same master key material with a new KEK derived from the new password.
-            string jweStringNew = JweVaultManager.CreateVault(existingPayload, newPassword);
+            string jweStringNew = JweVaultManager.CreateVault(existingPayload, newPassword, (int?)null);
 
             return Encoding.UTF8.GetBytes(jweStringNew);
         }

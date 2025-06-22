@@ -3,6 +3,7 @@ using StorageLib.Streaming;
 using UvfLib.Storage;
 using UvfLib.Storage.Decorators;
 using UvfLib.Vault;
+using UvfLib.Core.Api;
 using System.Diagnostics;
 using System.Security.Cryptography;
 using System.Runtime.InteropServices;
@@ -22,17 +23,19 @@ namespace ExampleVaultApp
         private readonly string _decryptedFolderPath;
         private readonly string _password;
         private readonly bool _encryptFilenames;
+        private readonly KeyDerivationParameters _keyDerivationParams;
         
         private readonly Stopwatch _stopwatch = new();
         private long _totalBytesProcessed = 0;
 
-        public DirectUvfTest(string sourceFolderPath, string vaultFolderPath, string decryptedFolderPath, string password, bool encryptFilenames)
+        public DirectUvfTest(string sourceFolderPath, string vaultFolderPath, string decryptedFolderPath, string password, bool encryptFilenames, KeyDerivationParameters? keyDerivationParams = null)
         {
             _sourceFolderPath = sourceFolderPath;
             _vaultFolderPath = vaultFolderPath;
             _decryptedFolderPath = decryptedFolderPath;
             _password = password;
             _encryptFilenames = encryptFilenames;
+            _keyDerivationParams = keyDerivationParams ?? KeyDerivationParameters.Default();
         }
 
         public async Task RunTestAsync()
@@ -130,9 +133,10 @@ namespace ExampleVaultApp
             {
                 Console.WriteLine("🔧 Creating new UVF V3 vault using VaultManager...");
                 Console.WriteLine($"🔧 UVF Filename Encryption: {(_encryptFilenames ? "Enabled" : "Disabled")}");
+                Console.WriteLine($"🔑 Using key derivation: {_keyDerivationParams.Method} {GetKeyDerivationDetails(_keyDerivationParams)}");
                 
                 // Use VaultManager to create the vault - this properly sets up the UvfStorageDecorator
-                var vaultManager = await VaultManager.CreateUvfVaultAsync(_vaultFolderPath, _password, _encryptFilenames);
+                var vaultManager = await VaultManager.CreateUvfVaultWithKdfAsync(_vaultFolderPath, _password, _encryptFilenames, _keyDerivationParams);
                 
                 Console.WriteLine("✅ UVF vault created with VaultManager");
                 return vaultManager;
@@ -643,6 +647,19 @@ namespace ExampleVaultApp
             {
                 double mbps = (totalBytes / (1024.0 * 1024.0)) / elapsed.TotalSeconds;
                 Console.WriteLine($"   ⚡ Speed: {mbps:F2} MB/s");
+            }
+        }
+
+        private static string GetKeyDerivationDetails(KeyDerivationParameters kdfParams)
+        {
+            switch (kdfParams.Method)
+            {
+                case KeyDerivationMethod.PBKDF2_HMAC_SHA512:
+                    return $"({kdfParams.Pbkdf2Iterations:N0} iterations)";
+                case KeyDerivationMethod.Scrypt:
+                    return $"(N={kdfParams.ScryptN}, r={kdfParams.ScryptR}, p={kdfParams.ScryptP})";
+                default:
+                    return "";
             }
         }
 

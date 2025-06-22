@@ -9,6 +9,7 @@ using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using System.Buffers.Binary;
 using UvfLib.Core.Jwe;
+using UvfLib.Core.Api;
 
 namespace UvfLib.Storage
 {
@@ -143,7 +144,7 @@ namespace UvfLib.Storage
                 
             byte[] vaultFileContent = await System.IO.File.ReadAllBytesAsync(vaultFilePath);
             bool encryptFilenames = VaultHandler.DetectFilenameEncryption(vaultFileContent, password);
-            
+
             var manager = new VaultManager();
             await manager.InitializeExistingUvfVaultAsync(storage, password, vaultBasePath, encryptFilenames, ownsStorage);
             return manager;
@@ -158,6 +159,51 @@ namespace UvfLib.Storage
             var manager = new VaultManager();
             await manager.InitializeExistingUvfVaultAsync(storage, password, vaultBasePath, encryptFilenames, ownsStorage);
             return manager;
+        }
+
+        /// <summary>
+        /// Creates a new UVF vault with configurable key derivation method.
+        /// </summary>
+        /// <param name="vaultPath">Path to create the vault</param>
+        /// <param name="password">Vault password</param>
+        /// <param name="encryptFilenames">Whether to encrypt filenames</param>
+        /// <param name="kdfParams">Key derivation parameters (optional, defaults to PBKDF2)</param>
+        /// <returns>Initialized vault manager</returns>
+        public static async Task<VaultManager> CreateUvfVaultWithKdfAsync(string vaultPath, string password, bool encryptFilenames = true, KeyDerivationParameters kdfParams = null)
+        {
+            var storage = await StorageFactory.CreateInitializedLocalStorageAsync("/");
+            return await CreateUvfVaultWithKdfAsync(storage, password, vaultPath, encryptFilenames, kdfParams, ownsStorage: true);
+        }
+
+        /// <summary>
+        /// Creates a new UVF vault with configurable key derivation method.
+        /// </summary>
+        /// <param name="storage">The storage provider</param>
+        /// <param name="password">Vault password</param>
+        /// <param name="vaultBasePath">Base path for the vault</param>
+        /// <param name="encryptFilenames">Whether to encrypt filenames</param>
+        /// <param name="kdfParams">Key derivation parameters (optional, defaults to PBKDF2)</param>
+        /// <param name="ownsStorage">Whether this manager owns the storage</param>
+        /// <returns>Initialized vault manager</returns>
+        public static async Task<VaultManager> CreateUvfVaultWithKdfAsync(IStorage storage, string password, string vaultBasePath, bool encryptFilenames = true, KeyDerivationParameters kdfParams = null, bool ownsStorage = false)
+        {
+            // Use default PBKDF2 if no parameters provided (backward compatibility)
+            kdfParams ??= KeyDerivationParameters.Default();
+            kdfParams.Validate();
+
+            var manager = new VaultManager();
+            
+            try
+            {
+                // Initialize vault with KDF-aware method
+                await manager.InitializeNewUvfVaultWithKdfAsync(storage, password, vaultBasePath, encryptFilenames, kdfParams, ownsStorage);
+                return manager;
+            }
+            catch
+            {
+                manager.Dispose();
+                throw;
+            }
         }
 
         #endregion
@@ -903,7 +949,16 @@ namespace UvfLib.Storage
 
             try
             {
-                _vault = VaultHandler.LoadUvfVault(vaultBytes, password);
+                // Use KDF-aware loading that auto-detects PBKDF2 vs Scrypt
+                string jweString = System.Text.Encoding.UTF8.GetString(vaultBytes);
+                var payload = UvfLib.Core.Jwe.JweVaultManager.LoadVaultPayload(jweString, password, (KeyDerivationParameters?)null);
+                
+                // Convert payload back to JWE format that VaultHandler can understand
+                string singleUserJweString = UvfLib.Core.Jwe.JweVaultManager.CreateVault(payload, password, (int?)null);
+                byte[] singleUserJweBytes = System.Text.Encoding.UTF8.GetBytes(singleUserJweString);
+                
+                // Load using VaultHandler with the converted PBKDF2 JWE
+                _vault = VaultHandler.LoadUvfVault(singleUserJweBytes, password);
             }
             catch (Exception ex)
             {
@@ -988,7 +1043,7 @@ namespace UvfLib.Storage
 
             // Create multi-user JWE with admin user only
             var userCredentials = new Dictionary<string, char[]>();
-            string jweString = UvfLib.Core.Jwe.MultiUserJweVaultManager.CreateMultiUserVault(payload, userCredentials, adminPassword);
+            string jweString = UvfLib.Core.Jwe.MultiUserJweVaultManager.CreateMultiUserVault(payload, userCredentials, adminPassword, (int?)null);
             byte[] vaultFileContent = System.Text.Encoding.UTF8.GetBytes(jweString);
             
             // Ensure vault directory exists
@@ -1061,7 +1116,7 @@ namespace UvfLib.Storage
                 var payload = UvfLib.Core.Jwe.MultiUserJweVaultManager.LoadMultiUserVault(jweString, userPassword, null);
                 
                 // Convert the payload back to a single-user JWE format that VaultHandler can understand
-                string singleUserJweString = UvfLib.Core.Jwe.JweVaultManager.CreateVault(payload, new string(userPassword));
+                string singleUserJweString = UvfLib.Core.Jwe.JweVaultManager.CreateVault(payload, new string(userPassword), (int?)null);
                 byte[] singleUserJweBytes = System.Text.Encoding.UTF8.GetBytes(singleUserJweString);
                 
                 // Now load using the regular UVF loader
@@ -1079,6 +1134,126 @@ namespace UvfLib.Storage
                 _vault = null;
                 throw;
             }
+        }
+
+        private async Task InitializeNewUvfVaultWithKdfAsync(IStorage storage, string password, string vaultBasePath, bool encryptFilenames, KeyDerivationParameters kdfParams, bool ownsStorage)
+        {
+            _baseStorage = storage;
+            _vaultBasePath = vaultBasePath;
+            _ownsStorage = ownsStorage;
+            _vaultFormat = VaultFormat.UvfV3;
+
+            try
+            {
+                // Create new UVF vault file with KDF-aware content creation
+                byte[] vaultFileContent = CreateUvfVaultFileContentWithKdf(password, encryptFilenames, kdfParams);
+                string vaultFilePath = Path.Combine(_vaultBasePath, "vault.uvf");
+                await File.WriteAllBytesAsync(vaultFilePath, vaultFileContent);
+
+                // Load the newly created vault
+                await LoadUvfVaultInternalAsync(password, encryptFilenames);
+                _isOpen = true;
+            }
+            catch
+            {
+                // Cleanup on failure
+                if (_ownsStorage && storage is IDisposable disposable)
+                {
+                    disposable.Dispose();
+                }
+                throw;
+            }
+        }
+
+        /// <summary>
+        /// Creates UVF vault file content with configurable key derivation.
+        /// </summary>
+        private static byte[] CreateUvfVaultFileContentWithKdf(string password, bool encryptFilenames, KeyDerivationParameters kdfParams)
+        {
+            // For PBKDF2, use the existing proven implementation
+            if (kdfParams.Method == KeyDerivationMethod.PBKDF2_HMAC_SHA512)
+            {
+                return VaultHandler.CreateNewUvfVaultFileContent(password, encryptFilenames);
+            }
+            
+            // For Scrypt, create the payload manually and use the KDF-aware JWE manager
+            if (kdfParams.Method == KeyDerivationMethod.Scrypt)
+            {
+                // Create the same UVF payload as VaultHandler.CreateNewUvfVaultFileContent
+                var payload = CreateUvfMasterkeyPayload(encryptFilenames);
+                
+                // Use the KDF-aware JweVaultManager.CreateVault method
+                string jweString = UvfLib.Core.Jwe.JweVaultManager.CreateVault(payload, password, kdfParams);
+                return System.Text.Encoding.UTF8.GetBytes(jweString);
+            }
+            
+            throw new ArgumentException($"Unsupported key derivation method: {kdfParams.Method}");
+        }
+
+        /// <summary>
+        /// Creates a UVF masterkey payload with the same structure as VaultHandler.CreateNewUvfVaultFileContent.
+        /// This is extracted from VaultHandler to allow custom KDF usage.
+        /// </summary>
+        private static UvfLib.Core.Jwe.UvfMasterkeyPayload CreateUvfMasterkeyPayload(bool encryptFilenames)
+        {
+            using var rng = System.Security.Cryptography.RandomNumberGenerator.Create();
+
+            byte[] primaryEncryptionKey = new byte[32];
+            rng.GetBytes(primaryEncryptionKey);
+            byte[] primaryHmacKey = new byte[32];
+            rng.GetBytes(primaryHmacKey);
+            byte[] seedValue = new byte[32];
+            rng.GetBytes(seedValue);
+            int initialSeedId = 1;
+            byte[] kdfSaltForSeeds = new byte[32];
+            rng.GetBytes(kdfSaltForSeeds);
+            byte[] rootDirIdContext = System.Text.Encoding.ASCII.GetBytes("rootDirId");
+            byte[] rootDirId = System.Security.Cryptography.HKDF.DeriveKey(System.Security.Cryptography.HashAlgorithmName.SHA512, seedValue, UvfLib.Core.V3.Constants.DIR_ID_SIZE, kdfSaltForSeeds, rootDirIdContext);
+
+            byte[] initialSeedIdBytes = new byte[4];
+            System.Buffers.Binary.BinaryPrimitives.WriteInt32BigEndian(initialSeedIdBytes, initialSeedId);
+
+            return new UvfLib.Core.Jwe.UvfMasterkeyPayload
+            {
+                UvfSpecVersion = 1,
+                Keys = new List<UvfLib.Core.Jwe.PayloadKey>
+                {
+                    new UvfLib.Core.Jwe.PayloadKey 
+                    {
+                        Id = "1", 
+                        Purpose = "org.cryptomator.masterkey", 
+                        Alg = "AES-256-RAW", 
+                        Value = UvfLib.Core.Common.Base64Url.Encode(primaryEncryptionKey)
+                    },
+                    new UvfLib.Core.Jwe.PayloadKey 
+                    {
+                        Id = "2", 
+                        Purpose = "org.cryptomator.hmacMasterkey", 
+                        Alg = "HMAC-SHA256-RAW", 
+                        Value = UvfLib.Core.Common.Base64Url.Encode(primaryHmacKey)
+                    }
+                },
+                Kdf = new UvfLib.Core.Jwe.PayloadKdf
+                {
+                    Type = "HKDF-SHA512",
+                    Salt = UvfLib.Core.Common.Base64Url.Encode(kdfSaltForSeeds)
+                },
+                Seeds = new List<UvfLib.Core.Jwe.PayloadSeed>
+                {
+                    new UvfLib.Core.Jwe.PayloadSeed
+                    {
+                        Id = UvfLib.Core.Common.Base64Url.Encode(initialSeedIdBytes),
+                        Value = UvfLib.Core.Common.Base64Url.Encode(seedValue),
+                        Created = DateTime.UtcNow.ToString("yyyy-MM-ddTHH:mm:ssZ")
+                    }
+                },
+                RootDirId = UvfLib.Core.Common.Base64Url.Encode(rootDirId),
+                Config = new UvfLib.Core.Jwe.UvfLibNetConfig
+                {
+                    EncryptFilenames = encryptFilenames,
+                    CreatedByVersion = System.Reflection.Assembly.GetExecutingAssembly().GetName().Version?.ToString()
+                }
+            };
         }
 
         #endregion

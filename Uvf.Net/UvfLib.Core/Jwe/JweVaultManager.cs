@@ -21,6 +21,27 @@ namespace UvfLib.Core.Jwe
         // Note: Salt (p2s) is automatically generated as random 96-bit value by jose-jwt per RFC 7518
 
         /// <summary>
+        /// Creates a JWE-formatted string representing an encrypted vault.uvf file with configurable key derivation.
+        /// </summary>
+        /// <param name="payload">The UVF masterkey payload to encrypt.</param>
+        /// <param name="password">The password to protect the vault.</param>
+        /// <param name="kdfParams">Key derivation parameters (optional, defaults to PBKDF2)</param>
+        /// <returns>A JWE compact serialization string.</returns>
+        public static string CreateVault(UvfMasterkeyPayload payload, string password, KeyDerivationParameters kdfParams = null)
+        {
+            // Use default PBKDF2 if no parameters provided (backward compatibility)
+            kdfParams ??= KeyDerivationParameters.Default();
+            kdfParams.Validate();
+
+            return kdfParams.Method switch
+            {
+                KeyDerivationMethod.PBKDF2_HMAC_SHA512 => CreateVault(payload, password, kdfParams.Pbkdf2Iterations),
+                KeyDerivationMethod.Scrypt => CreateVaultWithScrypt(payload, password, kdfParams),
+                _ => throw new ArgumentException($"Unsupported key derivation method: {kdfParams.Method}")
+            };
+        }
+
+        /// <summary>
         /// Creates a JWE-formatted string representing an encrypted vault.uvf file.
         /// </summary>
         /// <param name="payload">The UVF masterkey payload to encrypt.</param>
@@ -242,6 +263,162 @@ namespace UvfLib.Core.Jwe
                 throw new InvalidOperationException("Failed to deserialize the JWE payload into UvfMasterkeyPayload.");
             }
             return deserializedPayload;
+        }
+
+        /// <summary>
+        /// Creates a JWE vault using Scrypt key derivation (enhanced security).
+        /// Uses BouncyCastle Scrypt implementation for consistency with Cryptomator.
+        /// </summary>
+        private static string CreateVaultWithScrypt(UvfMasterkeyPayload payload, string password, KeyDerivationParameters kdfParams)
+        {
+            if (payload == null) throw new ArgumentNullException(nameof(payload));
+            if (string.IsNullOrEmpty(password)) throw new ArgumentNullException(nameof(password));
+            if (kdfParams?.Method != KeyDerivationMethod.Scrypt) throw new ArgumentException("KDF parameters must be for Scrypt method");
+
+            string payloadJson = JsonSerializer.Serialize(payload);
+
+            // Generate salt for Scrypt (12 bytes = 96 bits, matching PBES2 standard)
+            byte[] salt = new byte[12];
+            using (var rng = RandomNumberGenerator.Create())
+            {
+                rng.GetBytes(salt);
+            }
+
+            // Derive CEK using proven BouncyCastle Scrypt (same as Cryptomator)
+            byte[] passwordBytes = Encoding.UTF8.GetBytes(password);
+            byte[] cek;
+            try
+            {
+                cek = Org.BouncyCastle.Crypto.Generators.SCrypt.Generate(
+                    passwordBytes,
+                    salt,
+                    kdfParams.ScryptN,  // N parameter (e.g., 32768)
+                    kdfParams.ScryptR,  // r parameter (e.g., 8)
+                    kdfParams.ScryptP,  // p parameter (e.g., 1)
+                    32 // 256-bit CEK for A256GCM
+                );
+            }
+            finally
+            {
+                Array.Clear(passwordBytes, 0, passwordBytes.Length);
+            }
+
+            try
+            {
+                // Create custom JWE header with Scrypt parameters
+                var extraHeaders = new Dictionary<string, object>
+                {
+                    { "uvf.spec.version", payload.UvfSpecVersion },
+                    { "uvf.kdf.method", "scrypt" },
+                    { "uvf.kdf.scrypt.n", kdfParams.ScryptN },
+                    { "uvf.kdf.scrypt.r", kdfParams.ScryptR },
+                    { "uvf.kdf.scrypt.p", kdfParams.ScryptP },
+                    { "uvf.kdf.scrypt.salt", Jose.Base64Url.Encode(salt) }
+                };
+
+                // Use direct encryption with derived CEK
+                return JWT.Encode(payloadJson, cek, JweAlgorithm.DIR, ContentEncryptionAlgorithm, extraHeaders: extraHeaders);
+            }
+            finally
+            {
+                Array.Clear(cek, 0, cek.Length);
+            }
+        }
+
+        /// <summary>
+        /// Loads a UVF vault with automatic key derivation detection.
+        /// Supports both PBKDF2 and Scrypt methods.
+        /// </summary>
+        public static UvfMasterkeyPayload LoadVaultPayload(string jweString, string password, KeyDerivationParameters kdfParams = null)
+        {
+            if (string.IsNullOrEmpty(jweString)) throw new ArgumentNullException(nameof(jweString));
+            if (string.IsNullOrEmpty(password)) throw new ArgumentNullException(nameof(password));
+
+            // Try to detect if this is a Scrypt vault
+            if (IsScryptVault(jweString))
+            {
+                return LoadVaultWithScrypt(jweString, password);
+            }
+            else
+            {
+                // Use standard PBKDF2 decryption (backward compatibility)
+                int iterations = kdfParams?.Pbkdf2Iterations ?? DefaultPbkdf2Iterations;
+                return LoadVaultPayload(jweString, password, iterations);
+            }
+        }
+
+        /// <summary>
+        /// Loads a Scrypt-encrypted vault.
+        /// </summary>
+        private static UvfMasterkeyPayload LoadVaultWithScrypt(string jweString, string password)
+        {
+            // Parse JWE header to extract Scrypt parameters
+            var parts = jweString.Split('.');
+            if (parts.Length != 5) throw new ArgumentException("Invalid JWE format");
+
+            byte[] headerBytes = Jose.Base64Url.Decode(parts[0]);
+            string headerJson = Encoding.UTF8.GetString(headerBytes);
+            using var headerDoc = JsonDocument.Parse(headerJson);
+            var header = headerDoc.RootElement;
+
+            // Extract Scrypt parameters
+            int n = header.GetProperty("uvf.kdf.scrypt.n").GetInt32();
+            int r = header.GetProperty("uvf.kdf.scrypt.r").GetInt32();
+            int p = header.GetProperty("uvf.kdf.scrypt.p").GetInt32();
+            byte[] salt = Jose.Base64Url.Decode(header.GetProperty("uvf.kdf.scrypt.salt").GetString());
+
+            // Derive CEK using BouncyCastle Scrypt
+            byte[] passwordBytes = Encoding.UTF8.GetBytes(password);
+            byte[] cek;
+            try
+            {
+                cek = Org.BouncyCastle.Crypto.Generators.SCrypt.Generate(
+                    passwordBytes,
+                    salt,
+                    n, r, p,
+                    32 // 256-bit CEK
+                );
+            }
+            finally
+            {
+                Array.Clear(passwordBytes, 0, passwordBytes.Length);
+            }
+
+            try
+            {
+                // Decrypt using derived CEK
+                string payloadJson = JWT.Decode(jweString, cek);
+                var options = new JsonSerializerOptions { PropertyNameCaseInsensitive = true };
+                return JsonSerializer.Deserialize<UvfMasterkeyPayload>(payloadJson, options);
+            }
+            finally
+            {
+                Array.Clear(cek, 0, cek.Length);
+            }
+        }
+
+        /// <summary>
+        /// Checks if a JWE string represents a Scrypt-encrypted vault.
+        /// </summary>
+        private static bool IsScryptVault(string jweString)
+        {
+            try
+            {
+                var parts = jweString.Split('.');
+                if (parts.Length != 5) return false;
+
+                byte[] headerBytes = Jose.Base64Url.Decode(parts[0]);
+                string headerJson = Encoding.UTF8.GetString(headerBytes);
+                using var doc = JsonDocument.Parse(headerJson);
+                var header = doc.RootElement;
+
+                return header.TryGetProperty("uvf.kdf.method", out var methodProp) && 
+                       methodProp.GetString() == "scrypt";
+            }
+            catch
+            {
+                return false;
+            }
         }
     }
 } 

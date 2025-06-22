@@ -1,5 +1,6 @@
 using UvfLib.Storage;
 using UvfLib.Vault;
+using UvfLib.Core.Api;
 using System.Diagnostics;
 using System.Security.Cryptography;
 using System.IO;
@@ -19,17 +20,19 @@ namespace ExampleVaultApp
         private readonly string _decryptedFolderPath;
         private readonly string _password;
         private readonly bool _encryptFilenames;
+        private readonly KeyDerivationParameters _keyDerivationParams;
 
         private readonly Stopwatch _stopwatch = new();
         private long _totalBytesProcessed = 0;
 
-        public SimpleUvfTest(string sourceFolderPath, string vaultFolderPath, string decryptedFolderPath, string password, bool encryptFilenames = true)
+        public SimpleUvfTest(string sourceFolderPath, string vaultFolderPath, string decryptedFolderPath, string password, bool encryptFilenames = true, KeyDerivationParameters? keyDerivationParams = null)
         {
             _sourceFolderPath = sourceFolderPath;
             _vaultFolderPath = vaultFolderPath;
             _decryptedFolderPath = decryptedFolderPath;
             _password = password;
             _encryptFilenames = encryptFilenames;
+            _keyDerivationParams = keyDerivationParams ?? KeyDerivationParameters.Default();
         }
 
         public async Task RunTestAsync()
@@ -48,7 +51,8 @@ namespace ExampleVaultApp
                 
                 // Phase 2: Create fresh vault with specified filename encryption setting
                 Console.WriteLine($"🆕 Creating fresh UVF vault with filename encryption: {(_encryptFilenames ? "Enabled" : "Disabled")}");
-                var vault = await VaultManager.CreateUvfVaultAsync(_vaultFolderPath, _password, _encryptFilenames);
+                Console.WriteLine($"🔑 Using key derivation: {_keyDerivationParams.Method} {GetKeyDerivationDetails(_keyDerivationParams)}");
+                var vault = await VaultManager.CreateUvfVaultWithKdfAsync(_vaultFolderPath, _password, _encryptFilenames, _keyDerivationParams);
                 
                 Console.WriteLine("✅ UVF vault ready for operations");
                 
@@ -413,6 +417,19 @@ namespace ExampleVaultApp
             {
                 double mbps = (totalBytes / (1024.0 * 1024.0)) / elapsed.TotalSeconds;
                 Console.WriteLine($"   ⚡ Speed: {mbps:F2} MB/s");
+            }
+        }
+
+        private static string GetKeyDerivationDetails(KeyDerivationParameters kdfParams)
+        {
+            switch (kdfParams.Method)
+            {
+                case KeyDerivationMethod.PBKDF2_HMAC_SHA512:
+                    return $"({kdfParams.Pbkdf2Iterations:N0} iterations)";
+                case KeyDerivationMethod.Scrypt:
+                    return $"(N={kdfParams.ScryptN}, r={kdfParams.ScryptR}, p={kdfParams.ScryptP})";
+                default:
+                    return "";
             }
         }
 
