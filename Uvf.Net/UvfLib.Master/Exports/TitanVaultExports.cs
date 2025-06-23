@@ -1,0 +1,1746 @@
+using System;
+using System.Collections.Concurrent;
+using System.Runtime.InteropServices;
+using System.Security.Cryptography;
+using System.Text;
+using System.Text.Json;
+using UvfLib.Core.Api;
+using UvfLib.Master;
+
+namespace UvfLib.Master.Exports
+{
+    /// <summary>
+    /// TitanVault - Native C-style exports for cross-language compatibility.
+    /// Provides secure vault operations with UTF-8 byte array password handling.
+    /// 
+    /// All functions use explicit UTF-8 byte buffers to avoid encoding ambiguity.
+    /// Memory management is handled through dedicated cleanup functions.
+    /// </summary>
+    public static class TitanVaultExports
+    {
+        #region Constants and Error Codes
+
+        // Return codes for TitanVault operations
+        public const int TITAN_VAULT_SUCCESS = 0;
+        public const int TITAN_VAULT_ERROR_INVALID_PARAMETER = -1;
+        public const int TITAN_VAULT_ERROR_VAULT_NOT_FOUND = -2;
+        public const int TITAN_VAULT_ERROR_INVALID_PASSWORD = -3;
+        public const int TITAN_VAULT_ERROR_ACCESS_DENIED = -4;
+        public const int TITAN_VAULT_ERROR_VAULT_CORRUPTED = -5;
+        public const int TITAN_VAULT_ERROR_INSUFFICIENT_BUFFER = -6;
+        public const int TITAN_VAULT_ERROR_UNSUPPORTED_FORMAT = -7;
+        public const int TITAN_VAULT_ERROR_INTERNAL = -100;
+
+        // Vault format constants
+        public const int TITAN_VAULT_FORMAT_CRYPTOMATOR = 0;
+        public const int TITAN_VAULT_FORMAT_UVF = 1;
+
+        // KDF method constants
+        public const int TITAN_VAULT_KDF_PBKDF2 = 0;
+        public const int TITAN_VAULT_KDF_SCRYPT = 1;
+
+        #endregion
+
+        #region Handle Management
+
+        private static readonly ConcurrentDictionary<IntPtr, VaultManager> _vaultHandles = new();
+        private static long _nextHandle = 1;
+        private static string? _lastError;
+
+        private static IntPtr CreateHandle(VaultManager vault)
+        {
+            var handle = new IntPtr(Interlocked.Increment(ref _nextHandle));
+            _vaultHandles[handle] = vault;
+            return handle;
+        }
+
+        private static VaultManager? GetVault(IntPtr handle)
+        {
+            return _vaultHandles.TryGetValue(handle, out var vault) ? vault : null;
+        }
+
+        private static bool RemoveHandle(IntPtr handle)
+        {
+            return _vaultHandles.TryRemove(handle, out _);
+        }
+
+        private static void SetLastError(string error)
+        {
+            _lastError = error;
+        }
+
+        #endregion
+
+        #region Utility Functions
+
+        /// <summary>
+        /// Get TitanVault library version.
+        /// Returns pointer to null-terminated UTF-8 string.
+        /// </summary>
+        [UnmanagedCallersOnly(EntryPoint = "titan_vault_get_version")]
+        public static unsafe IntPtr GetVersion()
+        {
+            try
+            {
+                var version = "TitanVault v1.0.0 - UVF.NET Native Library";
+                return AllocateUtf8String(version);
+            }
+            catch (Exception ex)
+            {
+                SetLastError($"Failed to get version: {ex.Message}");
+                return IntPtr.Zero;
+            }
+        }
+
+        /// <summary>
+        /// Get last error message.
+        /// Returns pointer to null-terminated UTF-8 string.
+        /// </summary>
+        [UnmanagedCallersOnly(EntryPoint = "titan_vault_get_last_error")]
+        public static unsafe IntPtr GetLastError()
+        {
+            try
+            {
+                var error = _lastError ?? "No error";
+                return AllocateUtf8String(error);
+            }
+            catch
+            {
+                return IntPtr.Zero;
+            }
+        }
+
+        /// <summary>
+        /// Detect vault format at specified path.
+        /// Returns format constant or negative error code.
+        /// </summary>
+        [UnmanagedCallersOnly(EntryPoint = "titan_vault_detect_vault_format")]
+        public static unsafe int DetectVaultFormat(
+            IntPtr vaultPathBytes,
+            int vaultPathLength)
+        {
+            try
+            {
+                if (vaultPathBytes == IntPtr.Zero || vaultPathLength <= 0)
+                {
+                    SetLastError("Invalid vault path parameter");
+                    return TITAN_VAULT_ERROR_INVALID_PARAMETER;
+                }
+
+                var vaultPath = GetUtf8String(vaultPathBytes, vaultPathLength);
+                if (string.IsNullOrEmpty(vaultPath))
+                {
+                    SetLastError("Failed to decode vault path");
+                    return TITAN_VAULT_ERROR_INVALID_PARAMETER;
+                }
+
+                var format = VaultManager.DetectVaultFormat(vaultPath);
+                return format == VaultManager.VaultFormat.CryptomatorV8 
+                    ? TITAN_VAULT_FORMAT_CRYPTOMATOR 
+                    : TITAN_VAULT_FORMAT_UVF;
+            }
+            catch (Exception ex)
+            {
+                SetLastError($"Failed to detect vault format: {ex.Message}");
+                return TITAN_VAULT_ERROR_INTERNAL;
+            }
+        }
+
+        #endregion
+
+        #region Cryptomator Vault Operations
+
+        /// <summary>
+        /// Create new Cryptomator V8 vault.
+        /// </summary>
+        [UnmanagedCallersOnly(EntryPoint = "titan_vault_create_cryptomator_vault")]
+        public static unsafe int CreateCryptomatorVault(
+            IntPtr vaultPathBytes,
+            int vaultPathLength,
+            IntPtr passwordBytes,
+            int passwordLength)
+        {
+            try
+            {
+                if (vaultPathBytes == IntPtr.Zero || vaultPathLength <= 0 ||
+                    passwordBytes == IntPtr.Zero || passwordLength <= 0)
+                {
+                    SetLastError("Invalid parameters");
+                    return TITAN_VAULT_ERROR_INVALID_PARAMETER;
+                }
+
+                var vaultPath = GetUtf8String(vaultPathBytes, vaultPathLength);
+                var passwordChars = GetPasswordChars(passwordBytes, passwordLength);
+
+                if (string.IsNullOrEmpty(vaultPath) || passwordChars == null)
+                {
+                    SetLastError("Failed to decode parameters");
+                    return TITAN_VAULT_ERROR_INVALID_PARAMETER;
+                }
+
+                try
+                {
+                    var vault = VaultManager.CreateCryptomatorVaultAsync(vaultPath, passwordChars).Result;
+                    vault.CloseVaultAsync().Wait();
+                    vault.Dispose();
+                    return TITAN_VAULT_SUCCESS;
+                }
+                finally
+                {
+                    if (passwordChars != null)
+                        Array.Clear(passwordChars, 0, passwordChars.Length);
+                }
+            }
+            catch (AggregateException ex) when (ex.InnerException != null)
+            {
+                SetLastError($"Failed to create Cryptomator vault: {ex.InnerException.Message}");
+                return TITAN_VAULT_ERROR_INTERNAL;
+            }
+            catch (Exception ex)
+            {
+                SetLastError($"Failed to create Cryptomator vault: {ex.Message}");
+                return TITAN_VAULT_ERROR_INTERNAL;
+            }
+        }
+
+        /// <summary>
+        /// Load existing Cryptomator V8 vault.
+        /// Returns vault handle or zero on error.
+        /// </summary>
+        [UnmanagedCallersOnly(EntryPoint = "titan_vault_load_cryptomator_vault")]
+        public static unsafe IntPtr LoadCryptomatorVault(
+            IntPtr vaultPathBytes,
+            int vaultPathLength,
+            IntPtr passwordBytes,
+            int passwordLength)
+        {
+            try
+            {
+                if (vaultPathBytes == IntPtr.Zero || vaultPathLength <= 0 ||
+                    passwordBytes == IntPtr.Zero || passwordLength <= 0)
+                {
+                    SetLastError("Invalid parameters");
+                    return IntPtr.Zero;
+                }
+
+                var vaultPath = GetUtf8String(vaultPathBytes, vaultPathLength);
+                var passwordChars = GetPasswordChars(passwordBytes, passwordLength);
+
+                if (string.IsNullOrEmpty(vaultPath) || passwordChars == null)
+                {
+                    SetLastError("Failed to decode parameters");
+                    return IntPtr.Zero;
+                }
+
+                try
+                {
+                    var vault = VaultManager.LoadCryptomatorVaultAsync(vaultPath, passwordChars).Result;
+                    return CreateHandle(vault);
+                }
+                finally
+                {
+                    if (passwordChars != null)
+                        Array.Clear(passwordChars, 0, passwordChars.Length);
+                }
+            }
+            catch (AggregateException ex) when (ex.InnerException is UnauthorizedAccessException)
+            {
+                SetLastError("Invalid password");
+                return IntPtr.Zero;
+            }
+            catch (AggregateException ex) when (ex.InnerException != null)
+            {
+                SetLastError($"Failed to load Cryptomator vault: {ex.InnerException.Message}");
+                return IntPtr.Zero;
+            }
+            catch (UnauthorizedAccessException)
+            {
+                SetLastError("Invalid password");
+                return IntPtr.Zero;
+            }
+            catch (Exception ex)
+            {
+                SetLastError($"Failed to load Cryptomator vault: {ex.Message}");
+                return IntPtr.Zero;
+            }
+        }
+
+        /// <summary>
+        /// Change Cryptomator vault password.
+        /// </summary>
+        [UnmanagedCallersOnly(EntryPoint = "titan_vault_change_cryptomator_password")]
+        public static unsafe int ChangeCryptomatorPassword(
+            IntPtr vaultPathBytes,
+            int vaultPathLength,
+            IntPtr oldPasswordBytes,
+            int oldPasswordLength,
+            IntPtr newPasswordBytes,
+            int newPasswordLength)
+        {
+            try
+            {
+                if (vaultPathBytes == IntPtr.Zero || vaultPathLength <= 0 ||
+                    oldPasswordBytes == IntPtr.Zero || oldPasswordLength <= 0 ||
+                    newPasswordBytes == IntPtr.Zero || newPasswordLength <= 0)
+                {
+                    SetLastError("Invalid parameters");
+                    return TITAN_VAULT_ERROR_INVALID_PARAMETER;
+                }
+
+                var vaultPath = GetUtf8String(vaultPathBytes, vaultPathLength);
+                var oldPasswordChars = GetPasswordChars(oldPasswordBytes, oldPasswordLength);
+                var newPasswordChars = GetPasswordChars(newPasswordBytes, newPasswordLength);
+
+                if (string.IsNullOrEmpty(vaultPath) || oldPasswordChars == null || newPasswordChars == null)
+                {
+                    SetLastError("Failed to decode parameters");
+                    return TITAN_VAULT_ERROR_INVALID_PARAMETER;
+                }
+
+                try
+                {
+                    VaultManager.ChangeCryptomatorVaultPasswordAsync(vaultPath, oldPasswordChars, newPasswordChars).Wait();
+                    return TITAN_VAULT_SUCCESS;
+                }
+                finally
+                {
+                    if (oldPasswordChars != null)
+                        Array.Clear(oldPasswordChars, 0, oldPasswordChars.Length);
+                    if (newPasswordChars != null)
+                        Array.Clear(newPasswordChars, 0, newPasswordChars.Length);
+                }
+            }
+            catch (AggregateException ex) when (ex.InnerException is UnauthorizedAccessException)
+            {
+                SetLastError("Invalid old password");
+                return TITAN_VAULT_ERROR_INVALID_PASSWORD;
+            }
+            catch (AggregateException ex) when (ex.InnerException != null)
+            {
+                SetLastError($"Failed to change password: {ex.InnerException.Message}");
+                return TITAN_VAULT_ERROR_INTERNAL;
+            }
+            catch (UnauthorizedAccessException)
+            {
+                SetLastError("Invalid old password");
+                return TITAN_VAULT_ERROR_INVALID_PASSWORD;
+            }
+            catch (Exception ex)
+            {
+                SetLastError($"Failed to change password: {ex.Message}");
+                return TITAN_VAULT_ERROR_INTERNAL;
+            }
+        }
+
+        #endregion
+
+        #region UVF Vault Operations
+
+        /// <summary>
+        /// Create new UVF vault.
+        /// </summary>
+        [UnmanagedCallersOnly(EntryPoint = "titan_vault_create_uvf_vault")]
+        public static unsafe int CreateUvfVault(
+            IntPtr vaultPathBytes,
+            int vaultPathLength,
+            IntPtr adminPasswordBytes,
+            int adminPasswordLength,
+            int encryptFilenames,
+            int kdfMethod,
+            int kdfIterations)
+        {
+            try
+            {
+                if (vaultPathBytes == IntPtr.Zero || vaultPathLength <= 0 ||
+                    adminPasswordBytes == IntPtr.Zero || adminPasswordLength <= 0)
+                {
+                    SetLastError("Invalid parameters");
+                    return TITAN_VAULT_ERROR_INVALID_PARAMETER;
+                }
+
+                var vaultPath = GetUtf8String(vaultPathBytes, vaultPathLength);
+                var adminPasswordChars = GetPasswordChars(adminPasswordBytes, adminPasswordLength);
+
+                if (string.IsNullOrEmpty(vaultPath) || adminPasswordChars == null)
+                {
+                    SetLastError("Failed to decode parameters");
+                    return TITAN_VAULT_ERROR_INVALID_PARAMETER;
+                }
+
+                try
+                {
+                    var kdfParams = kdfMethod == TITAN_VAULT_KDF_SCRYPT
+                        ? KeyDerivationParameters.Scrypt(16384, 8, 1) // Standard scrypt parameters
+                        : KeyDerivationParameters.Pbkdf2(kdfIterations > 0 ? kdfIterations : 64000);
+
+                    var vault = VaultManager.CreateUvfVaultAsync(vaultPath, adminPasswordChars, encryptFilenames != 0, kdfParams).Result;
+                    vault.CloseVaultAsync().Wait();
+                    vault.Dispose();
+                    return TITAN_VAULT_SUCCESS;
+                }
+                finally
+                {
+                    if (adminPasswordChars != null)
+                        Array.Clear(adminPasswordChars, 0, adminPasswordChars.Length);
+                }
+            }
+            catch (AggregateException ex) when (ex.InnerException != null)
+            {
+                SetLastError($"Failed to create UVF vault: {ex.InnerException.Message}");
+                return TITAN_VAULT_ERROR_INTERNAL;
+            }
+            catch (Exception ex)
+            {
+                SetLastError($"Failed to create UVF vault: {ex.Message}");
+                return TITAN_VAULT_ERROR_INTERNAL;
+            }
+        }
+
+        /// <summary>
+        /// Load existing UVF vault.
+        /// Returns vault handle or zero on error.
+        /// </summary>
+        [UnmanagedCallersOnly(EntryPoint = "titan_vault_load_uvf_vault")]
+        public static unsafe IntPtr LoadUvfVault(
+            IntPtr vaultPathBytes,
+            int vaultPathLength,
+            IntPtr userPasswordBytes,
+            int userPasswordLength,
+            IntPtr userIdBytes,
+            int userIdLength)
+        {
+            try
+            {
+                if (vaultPathBytes == IntPtr.Zero || vaultPathLength <= 0 ||
+                    userPasswordBytes == IntPtr.Zero || userPasswordLength <= 0)
+                {
+                    SetLastError("Invalid parameters");
+                    return IntPtr.Zero;
+                }
+
+                var vaultPath = GetUtf8String(vaultPathBytes, vaultPathLength);
+                var userPasswordChars = GetPasswordChars(userPasswordBytes, userPasswordLength);
+                var userId = userIdBytes != IntPtr.Zero && userIdLength > 0 
+                    ? GetUtf8String(userIdBytes, userIdLength) 
+                    : null;
+
+                if (string.IsNullOrEmpty(vaultPath) || userPasswordChars == null)
+                {
+                    SetLastError("Failed to decode parameters");
+                    return IntPtr.Zero;
+                }
+
+                try
+                {
+                    var vault = VaultManager.LoadUvfVaultAsync(vaultPath, userPasswordChars, userId).Result;
+                    return CreateHandle(vault);
+                }
+                finally
+                {
+                    if (userPasswordChars != null)
+                        Array.Clear(userPasswordChars, 0, userPasswordChars.Length);
+                }
+            }
+            catch (AggregateException ex) when (ex.InnerException is UnauthorizedAccessException)
+            {
+                SetLastError("Invalid password");
+                return IntPtr.Zero;
+            }
+            catch (AggregateException ex) when (ex.InnerException != null)
+            {
+                SetLastError($"Failed to load UVF vault: {ex.InnerException.Message}");
+                return IntPtr.Zero;
+            }
+            catch (UnauthorizedAccessException)
+            {
+                SetLastError("Invalid password");
+                return IntPtr.Zero;
+            }
+            catch (Exception ex)
+            {
+                SetLastError($"Failed to load UVF vault: {ex.Message}");
+                return IntPtr.Zero;
+            }
+        }
+
+        /// <summary>
+        /// Add user to UVF vault.
+        /// </summary>
+        [UnmanagedCallersOnly(EntryPoint = "titan_vault_add_user")]
+        public static unsafe int AddUserToVault(
+            IntPtr vaultPathBytes,
+            int vaultPathLength,
+            IntPtr adminPasswordBytes,
+            int adminPasswordLength,
+            IntPtr newUserIdBytes,
+            int newUserIdLength,
+            IntPtr newUserPasswordBytes,
+            int newUserPasswordLength)
+        {
+            try
+            {
+                if (vaultPathBytes == IntPtr.Zero || vaultPathLength <= 0 ||
+                    adminPasswordBytes == IntPtr.Zero || adminPasswordLength <= 0 ||
+                    newUserIdBytes == IntPtr.Zero || newUserIdLength <= 0 ||
+                    newUserPasswordBytes == IntPtr.Zero || newUserPasswordLength <= 0)
+                {
+                    SetLastError("Invalid parameters");
+                    return TITAN_VAULT_ERROR_INVALID_PARAMETER;
+                }
+
+                var vaultPath = GetUtf8String(vaultPathBytes, vaultPathLength);
+                var adminPasswordChars = GetPasswordChars(adminPasswordBytes, adminPasswordLength);
+                var newUserId = GetUtf8String(newUserIdBytes, newUserIdLength);
+                var newUserPasswordChars = GetPasswordChars(newUserPasswordBytes, newUserPasswordLength);
+
+                if (string.IsNullOrEmpty(vaultPath) || adminPasswordChars == null ||
+                    string.IsNullOrEmpty(newUserId) || newUserPasswordChars == null)
+                {
+                    SetLastError("Failed to decode parameters");
+                    return TITAN_VAULT_ERROR_INVALID_PARAMETER;
+                }
+
+                try
+                {
+                    VaultManager.AddUserToVaultAsync(vaultPath, adminPasswordChars, newUserId, newUserPasswordChars).Wait();
+                    return TITAN_VAULT_SUCCESS;
+                }
+                finally
+                {
+                    if (adminPasswordChars != null)
+                        Array.Clear(adminPasswordChars, 0, adminPasswordChars.Length);
+                    if (newUserPasswordChars != null)
+                        Array.Clear(newUserPasswordChars, 0, newUserPasswordChars.Length);
+                }
+            }
+            catch (AggregateException ex) when (ex.InnerException is UnauthorizedAccessException)
+            {
+                SetLastError("Invalid admin password");
+                return TITAN_VAULT_ERROR_INVALID_PASSWORD;
+            }
+            catch (AggregateException ex) when (ex.InnerException != null)
+            {
+                SetLastError($"Failed to add user: {ex.InnerException.Message}");
+                return TITAN_VAULT_ERROR_INTERNAL;
+            }
+            catch (UnauthorizedAccessException)
+            {
+                SetLastError("Invalid admin password");
+                return TITAN_VAULT_ERROR_INVALID_PASSWORD;
+            }
+            catch (Exception ex)
+            {
+                SetLastError($"Failed to add user: {ex.Message}");
+                return TITAN_VAULT_ERROR_INTERNAL;
+            }
+        }
+
+        /// <summary>
+        /// Remove user from UVF vault.
+        /// </summary>
+        [UnmanagedCallersOnly(EntryPoint = "titan_vault_remove_user")]
+        public static unsafe int RemoveUserFromVault(
+            IntPtr vaultPathBytes,
+            int vaultPathLength,
+            IntPtr adminPasswordBytes,
+            int adminPasswordLength,
+            IntPtr userIdToRemoveBytes,
+            int userIdToRemoveLength)
+        {
+            try
+            {
+                if (vaultPathBytes == IntPtr.Zero || vaultPathLength <= 0 ||
+                    adminPasswordBytes == IntPtr.Zero || adminPasswordLength <= 0 ||
+                    userIdToRemoveBytes == IntPtr.Zero || userIdToRemoveLength <= 0)
+                {
+                    SetLastError("Invalid parameters");
+                    return TITAN_VAULT_ERROR_INVALID_PARAMETER;
+                }
+
+                var vaultPath = GetUtf8String(vaultPathBytes, vaultPathLength);
+                var adminPasswordChars = GetPasswordChars(adminPasswordBytes, adminPasswordLength);
+                var userIdToRemove = GetUtf8String(userIdToRemoveBytes, userIdToRemoveLength);
+
+                if (string.IsNullOrEmpty(vaultPath) || adminPasswordChars == null || string.IsNullOrEmpty(userIdToRemove))
+                {
+                    SetLastError("Failed to decode parameters");
+                    return TITAN_VAULT_ERROR_INVALID_PARAMETER;
+                }
+
+                try
+                {
+                    VaultManager.RemoveUserFromVaultAsync(vaultPath, adminPasswordChars, userIdToRemove).Wait();
+                    return TITAN_VAULT_SUCCESS;
+                }
+                finally
+                {
+                    if (adminPasswordChars != null)
+                        Array.Clear(adminPasswordChars, 0, adminPasswordChars.Length);
+                }
+            }
+            catch (AggregateException ex) when (ex.InnerException is UnauthorizedAccessException)
+            {
+                SetLastError("Invalid admin password");
+                return TITAN_VAULT_ERROR_INVALID_PASSWORD;
+            }
+            catch (AggregateException ex) when (ex.InnerException != null)
+            {
+                SetLastError($"Failed to remove user: {ex.InnerException.Message}");
+                return TITAN_VAULT_ERROR_INTERNAL;
+            }
+            catch (UnauthorizedAccessException)
+            {
+                SetLastError("Invalid admin password");
+                return TITAN_VAULT_ERROR_INVALID_PASSWORD;
+            }
+            catch (Exception ex)
+            {
+                SetLastError($"Failed to remove user: {ex.Message}");
+                return TITAN_VAULT_ERROR_INTERNAL;
+            }
+        }
+
+        #endregion
+
+        #region File Operations
+
+        /// <summary>
+        /// Read file from vault.
+        /// </summary>
+        [UnmanagedCallersOnly(EntryPoint = "titan_vault_read_file")]
+        public static unsafe int ReadFile(
+            IntPtr vaultHandle,
+            IntPtr filePathBytes,
+            int filePathLength,
+            IntPtr buffer,
+            IntPtr bufferSize)
+        {
+            try
+            {
+                if (vaultHandle == IntPtr.Zero || filePathBytes == IntPtr.Zero || 
+                    filePathLength <= 0 || buffer == IntPtr.Zero || bufferSize == IntPtr.Zero)
+                {
+                    SetLastError("Invalid parameters");
+                    return TITAN_VAULT_ERROR_INVALID_PARAMETER;
+                }
+
+                var vault = GetVault(vaultHandle);
+                if (vault == null)
+                {
+                    SetLastError("Invalid vault handle");
+                    return TITAN_VAULT_ERROR_INVALID_PARAMETER;
+                }
+
+                var filePath = GetUtf8String(filePathBytes, filePathLength);
+                if (string.IsNullOrEmpty(filePath))
+                {
+                    SetLastError("Failed to decode file path");
+                    return TITAN_VAULT_ERROR_INVALID_PARAMETER;
+                }
+
+                var fileData = vault.ReadAllBytesAsync(filePath).Result;
+                var requiredSize = fileData.Length;
+                var availableSize = Marshal.ReadInt32(bufferSize);
+
+                // Write the required size back
+                Marshal.WriteInt32(bufferSize, requiredSize);
+
+                if (availableSize < requiredSize)
+                {
+                    SetLastError($"Buffer too small. Required: {requiredSize}, Available: {availableSize}");
+                    return TITAN_VAULT_ERROR_INSUFFICIENT_BUFFER;
+                }
+
+                Marshal.Copy(fileData, 0, buffer, fileData.Length);
+                return TITAN_VAULT_SUCCESS;
+            }
+            catch (AggregateException ex) when (ex.InnerException is FileNotFoundException)
+            {
+                SetLastError("File not found");
+                return TITAN_VAULT_ERROR_VAULT_NOT_FOUND;
+            }
+            catch (AggregateException ex) when (ex.InnerException != null)
+            {
+                SetLastError($"Failed to read file: {ex.InnerException.Message}");
+                return TITAN_VAULT_ERROR_INTERNAL;
+            }
+            catch (FileNotFoundException)
+            {
+                SetLastError("File not found");
+                return TITAN_VAULT_ERROR_VAULT_NOT_FOUND;
+            }
+            catch (Exception ex)
+            {
+                SetLastError($"Failed to read file: {ex.Message}");
+                return TITAN_VAULT_ERROR_INTERNAL;
+            }
+        }
+
+        /// <summary>
+        /// Write file to vault.
+        /// </summary>
+        [UnmanagedCallersOnly(EntryPoint = "titan_vault_write_file")]
+        public static unsafe int WriteFile(
+            IntPtr vaultHandle,
+            IntPtr filePathBytes,
+            int filePathLength,
+            IntPtr buffer,
+            int bufferSize)
+        {
+            try
+            {
+                if (vaultHandle == IntPtr.Zero || filePathBytes == IntPtr.Zero || 
+                    filePathLength <= 0 || buffer == IntPtr.Zero || bufferSize <= 0)
+                {
+                    SetLastError("Invalid parameters");
+                    return TITAN_VAULT_ERROR_INVALID_PARAMETER;
+                }
+
+                var vault = GetVault(vaultHandle);
+                if (vault == null)
+                {
+                    SetLastError("Invalid vault handle");
+                    return TITAN_VAULT_ERROR_INVALID_PARAMETER;
+                }
+
+                var filePath = GetUtf8String(filePathBytes, filePathLength);
+                if (string.IsNullOrEmpty(filePath))
+                {
+                    SetLastError("Failed to decode file path");
+                    return TITAN_VAULT_ERROR_INVALID_PARAMETER;
+                }
+
+                var fileData = new byte[bufferSize];
+                Marshal.Copy(buffer, fileData, 0, bufferSize);
+
+                vault.WriteAllBytesAsync(filePath, fileData).Wait();
+                return TITAN_VAULT_SUCCESS;
+            }
+            catch (AggregateException ex) when (ex.InnerException != null)
+            {
+                SetLastError($"Failed to write file: {ex.InnerException.Message}");
+                return TITAN_VAULT_ERROR_INTERNAL;
+            }
+            catch (Exception ex)
+            {
+                SetLastError($"Failed to write file: {ex.Message}");
+                return TITAN_VAULT_ERROR_INTERNAL;
+            }
+        }
+
+        /// <summary>
+        /// Check if file exists in vault.
+        /// Returns 1 if exists, 0 if not, negative on error.
+        /// </summary>
+        [UnmanagedCallersOnly(EntryPoint = "titan_vault_file_exists")]
+        public static unsafe int FileExists(
+            IntPtr vaultHandle,
+            IntPtr filePathBytes,
+            int filePathLength)
+        {
+            try
+            {
+                if (vaultHandle == IntPtr.Zero || filePathBytes == IntPtr.Zero || filePathLength <= 0)
+                {
+                    SetLastError("Invalid parameters");
+                    return TITAN_VAULT_ERROR_INVALID_PARAMETER;
+                }
+
+                var vault = GetVault(vaultHandle);
+                if (vault == null)
+                {
+                    SetLastError("Invalid vault handle");
+                    return TITAN_VAULT_ERROR_INVALID_PARAMETER;
+                }
+
+                var filePath = GetUtf8String(filePathBytes, filePathLength);
+                if (string.IsNullOrEmpty(filePath))
+                {
+                    SetLastError("Failed to decode file path");
+                    return TITAN_VAULT_ERROR_INVALID_PARAMETER;
+                }
+
+                var exists = vault.FileExistsAsync(filePath).Result;
+                return exists ? 1 : 0;
+            }
+            catch (AggregateException ex) when (ex.InnerException != null)
+            {
+                SetLastError($"Failed to check file existence: {ex.InnerException.Message}");
+                return TITAN_VAULT_ERROR_INTERNAL;
+            }
+            catch (Exception ex)
+            {
+                SetLastError($"Failed to check file existence: {ex.Message}");
+                return TITAN_VAULT_ERROR_INTERNAL;
+            }
+        }
+
+        #endregion
+
+        #region Vault Handle Management
+
+        /// <summary>
+        /// Close vault and free resources.
+        /// </summary>
+        [UnmanagedCallersOnly(EntryPoint = "titan_vault_close_vault")]
+        public static unsafe int CloseVault(IntPtr vaultHandle)
+        {
+            try
+            {
+                if (vaultHandle == IntPtr.Zero)
+                {
+                    SetLastError("Invalid vault handle");
+                    return TITAN_VAULT_ERROR_INVALID_PARAMETER;
+                }
+
+                var vault = GetVault(vaultHandle);
+                if (vault == null)
+                {
+                    SetLastError("Vault handle not found");
+                    return TITAN_VAULT_ERROR_INVALID_PARAMETER;
+                }
+
+                vault.CloseVaultAsync().Wait();
+                vault.Dispose();
+                RemoveHandle(vaultHandle);
+
+                return TITAN_VAULT_SUCCESS;
+            }
+            catch (AggregateException ex) when (ex.InnerException != null)
+            {
+                SetLastError($"Failed to close vault: {ex.InnerException.Message}");
+                return TITAN_VAULT_ERROR_INTERNAL;
+            }
+            catch (Exception ex)
+            {
+                SetLastError($"Failed to close vault: {ex.Message}");
+                return TITAN_VAULT_ERROR_INTERNAL;
+            }
+        }
+
+        #endregion
+
+        #region Memory Management
+
+        /// <summary>
+        /// Free string allocated by TitanVault.
+        /// </summary>
+        [UnmanagedCallersOnly(EntryPoint = "titan_vault_free_string")]
+        public static unsafe void FreeString(IntPtr stringPtr)
+        {
+            try
+            {
+                if (stringPtr != IntPtr.Zero)
+                {
+                    NativeMemory.Free(stringPtr.ToPointer());
+                }
+            }
+            catch
+            {
+                // Ignore errors during cleanup
+            }
+        }
+
+        /// <summary>
+        /// Securely zero memory buffer.
+        /// </summary>
+        [UnmanagedCallersOnly(EntryPoint = "titan_vault_secure_zero_memory")]
+        public static unsafe void SecureZeroMemory(IntPtr buffer, int size)
+        {
+            try
+            {
+                if (buffer != IntPtr.Zero && size > 0)
+                {
+                    var span = new Span<byte>(buffer.ToPointer(), size);
+                    CryptographicOperations.ZeroMemory(span);
+                }
+            }
+            catch
+            {
+                // Ignore errors during cleanup
+            }
+        }
+
+        #endregion
+
+        #region Directory Operations
+
+        /// <summary>
+        /// Create directory in vault.
+        /// </summary>
+        [UnmanagedCallersOnly(EntryPoint = "titan_vault_create_directory")]
+        public static unsafe int CreateDirectory(
+            IntPtr vaultHandle,
+            IntPtr directoryPathBytes,
+            int directoryPathLength)
+        {
+            try
+            {
+                if (vaultHandle == IntPtr.Zero || directoryPathBytes == IntPtr.Zero || directoryPathLength <= 0)
+                {
+                    SetLastError("Invalid parameters");
+                    return TITAN_VAULT_ERROR_INVALID_PARAMETER;
+                }
+
+                var vault = GetVault(vaultHandle);
+                if (vault == null)
+                {
+                    SetLastError("Invalid vault handle");
+                    return TITAN_VAULT_ERROR_INVALID_PARAMETER;
+                }
+
+                var directoryPath = GetUtf8String(directoryPathBytes, directoryPathLength);
+                if (string.IsNullOrEmpty(directoryPath))
+                {
+                    SetLastError("Failed to decode directory path");
+                    return TITAN_VAULT_ERROR_INVALID_PARAMETER;
+                }
+
+                vault.CreateDirectoryAsync(directoryPath).Wait();
+                return TITAN_VAULT_SUCCESS;
+            }
+            catch (AggregateException ex) when (ex.InnerException != null)
+            {
+                SetLastError($"Failed to create directory: {ex.InnerException.Message}");
+                return TITAN_VAULT_ERROR_INTERNAL;
+            }
+            catch (Exception ex)
+            {
+                SetLastError($"Failed to create directory: {ex.Message}");
+                return TITAN_VAULT_ERROR_INTERNAL;
+            }
+        }
+
+        /// <summary>
+        /// Check if directory exists in vault.
+        /// Returns 1 if exists, 0 if not, negative on error.
+        /// </summary>
+        [UnmanagedCallersOnly(EntryPoint = "titan_vault_directory_exists")]
+        public static unsafe int DirectoryExists(
+            IntPtr vaultHandle,
+            IntPtr directoryPathBytes,
+            int directoryPathLength)
+        {
+            try
+            {
+                if (vaultHandle == IntPtr.Zero || directoryPathBytes == IntPtr.Zero || directoryPathLength <= 0)
+                {
+                    SetLastError("Invalid parameters");
+                    return TITAN_VAULT_ERROR_INVALID_PARAMETER;
+                }
+
+                var vault = GetVault(vaultHandle);
+                if (vault == null)
+                {
+                    SetLastError("Invalid vault handle");
+                    return TITAN_VAULT_ERROR_INVALID_PARAMETER;
+                }
+
+                var directoryPath = GetUtf8String(directoryPathBytes, directoryPathLength);
+                if (string.IsNullOrEmpty(directoryPath))
+                {
+                    SetLastError("Failed to decode directory path");
+                    return TITAN_VAULT_ERROR_INVALID_PARAMETER;
+                }
+
+                var exists = vault.DirectoryExistsAsync(directoryPath).Result;
+                return exists ? 1 : 0;
+            }
+            catch (AggregateException ex) when (ex.InnerException != null)
+            {
+                SetLastError($"Failed to check directory existence: {ex.InnerException.Message}");
+                return TITAN_VAULT_ERROR_INTERNAL;
+            }
+            catch (Exception ex)
+            {
+                SetLastError($"Failed to check directory existence: {ex.Message}");
+                return TITAN_VAULT_ERROR_INTERNAL;
+            }
+        }
+
+        /// <summary>
+        /// Delete directory from vault.
+        /// </summary>
+        [UnmanagedCallersOnly(EntryPoint = "titan_vault_delete_directory")]
+        public static unsafe int DeleteDirectory(
+            IntPtr vaultHandle,
+            IntPtr directoryPathBytes,
+            int directoryPathLength)
+        {
+            try
+            {
+                if (vaultHandle == IntPtr.Zero || directoryPathBytes == IntPtr.Zero || directoryPathLength <= 0)
+                {
+                    SetLastError("Invalid parameters");
+                    return TITAN_VAULT_ERROR_INVALID_PARAMETER;
+                }
+
+                var vault = GetVault(vaultHandle);
+                if (vault == null)
+                {
+                    SetLastError("Invalid vault handle");
+                    return TITAN_VAULT_ERROR_INVALID_PARAMETER;
+                }
+
+                var directoryPath = GetUtf8String(directoryPathBytes, directoryPathLength);
+                if (string.IsNullOrEmpty(directoryPath))
+                {
+                    SetLastError("Failed to decode directory path");
+                    return TITAN_VAULT_ERROR_INVALID_PARAMETER;
+                }
+
+                vault.DeleteDirectoryAsync(directoryPath).Wait();
+                return TITAN_VAULT_SUCCESS;
+            }
+            catch (AggregateException ex) when (ex.InnerException != null)
+            {
+                SetLastError($"Failed to delete directory: {ex.InnerException.Message}");
+                return TITAN_VAULT_ERROR_INTERNAL;
+            }
+            catch (Exception ex)
+            {
+                SetLastError($"Failed to delete directory: {ex.Message}");
+                return TITAN_VAULT_ERROR_INTERNAL;
+            }
+        }
+
+        /// <summary>
+        /// Delete file from vault.
+        /// </summary>
+        [UnmanagedCallersOnly(EntryPoint = "titan_vault_delete_file")]
+        public static unsafe int DeleteFile(
+            IntPtr vaultHandle,
+            IntPtr filePathBytes,
+            int filePathLength)
+        {
+            try
+            {
+                if (vaultHandle == IntPtr.Zero || filePathBytes == IntPtr.Zero || filePathLength <= 0)
+                {
+                    SetLastError("Invalid parameters");
+                    return TITAN_VAULT_ERROR_INVALID_PARAMETER;
+                }
+
+                var vault = GetVault(vaultHandle);
+                if (vault == null)
+                {
+                    SetLastError("Invalid vault handle");
+                    return TITAN_VAULT_ERROR_INVALID_PARAMETER;
+                }
+
+                var filePath = GetUtf8String(filePathBytes, filePathLength);
+                if (string.IsNullOrEmpty(filePath))
+                {
+                    SetLastError("Failed to decode file path");
+                    return TITAN_VAULT_ERROR_INVALID_PARAMETER;
+                }
+
+                vault.DeleteFileAsync(filePath).Wait();
+                return TITAN_VAULT_SUCCESS;
+            }
+            catch (AggregateException ex) when (ex.InnerException != null)
+            {
+                SetLastError($"Failed to delete file: {ex.InnerException.Message}");
+                return TITAN_VAULT_ERROR_INTERNAL;
+            }
+            catch (Exception ex)
+            {
+                SetLastError($"Failed to delete file: {ex.Message}");
+                return TITAN_VAULT_ERROR_INTERNAL;
+            }
+        }
+
+        #endregion
+
+        #region Stream Operations
+
+        private static readonly ConcurrentDictionary<IntPtr, Stream> _streamHandles = new();
+        private static long _nextStreamHandle = 1000;
+
+        private static IntPtr CreateStreamHandle(Stream stream)
+        {
+            var handle = new IntPtr(Interlocked.Increment(ref _nextStreamHandle));
+            _streamHandles[handle] = stream;
+            return handle;
+        }
+
+        private static Stream? GetStream(IntPtr handle)
+        {
+            return _streamHandles.TryGetValue(handle, out var stream) ? stream : null;
+        }
+
+        private static bool RemoveStreamHandle(IntPtr handle)
+        {
+            return _streamHandles.TryRemove(handle, out _);
+        }
+
+        /// <summary>
+        /// Open file for reading as stream.
+        /// Returns stream handle or zero on error.
+        /// </summary>
+        [UnmanagedCallersOnly(EntryPoint = "titan_vault_open_read_stream")]
+        public static unsafe IntPtr OpenReadStream(
+            IntPtr vaultHandle,
+            IntPtr filePathBytes,
+            int filePathLength)
+        {
+            try
+            {
+                if (vaultHandle == IntPtr.Zero || filePathBytes == IntPtr.Zero || filePathLength <= 0)
+                {
+                    SetLastError("Invalid parameters");
+                    return IntPtr.Zero;
+                }
+
+                var vault = GetVault(vaultHandle);
+                if (vault == null)
+                {
+                    SetLastError("Invalid vault handle");
+                    return IntPtr.Zero;
+                }
+
+                var filePath = GetUtf8String(filePathBytes, filePathLength);
+                if (string.IsNullOrEmpty(filePath))
+                {
+                    SetLastError("Failed to decode file path");
+                    return IntPtr.Zero;
+                }
+
+                var stream = vault.OpenReadAsync(filePath).Result;
+                return CreateStreamHandle(stream);
+            }
+            catch (AggregateException ex) when (ex.InnerException is FileNotFoundException)
+            {
+                SetLastError("File not found");
+                return IntPtr.Zero;
+            }
+            catch (AggregateException ex) when (ex.InnerException != null)
+            {
+                SetLastError($"Failed to open read stream: {ex.InnerException.Message}");
+                return IntPtr.Zero;
+            }
+            catch (FileNotFoundException)
+            {
+                SetLastError("File not found");
+                return IntPtr.Zero;
+            }
+            catch (Exception ex)
+            {
+                SetLastError($"Failed to open read stream: {ex.Message}");
+                return IntPtr.Zero;
+            }
+        }
+
+        /// <summary>
+        /// Open file for writing as stream.
+        /// Returns stream handle or zero on error.
+        /// </summary>
+        [UnmanagedCallersOnly(EntryPoint = "titan_vault_open_write_stream")]
+        public static unsafe IntPtr OpenWriteStream(
+            IntPtr vaultHandle,
+            IntPtr filePathBytes,
+            int filePathLength)
+        {
+            try
+            {
+                if (vaultHandle == IntPtr.Zero || filePathBytes == IntPtr.Zero || filePathLength <= 0)
+                {
+                    SetLastError("Invalid parameters");
+                    return IntPtr.Zero;
+                }
+
+                var vault = GetVault(vaultHandle);
+                if (vault == null)
+                {
+                    SetLastError("Invalid vault handle");
+                    return IntPtr.Zero;
+                }
+
+                var filePath = GetUtf8String(filePathBytes, filePathLength);
+                if (string.IsNullOrEmpty(filePath))
+                {
+                    SetLastError("Failed to decode file path");
+                    return IntPtr.Zero;
+                }
+
+                var stream = vault.OpenWriteAsync(filePath).Result;
+                return CreateStreamHandle(stream);
+            }
+            catch (AggregateException ex) when (ex.InnerException != null)
+            {
+                SetLastError($"Failed to open write stream: {ex.InnerException.Message}");
+                return IntPtr.Zero;
+            }
+            catch (Exception ex)
+            {
+                SetLastError($"Failed to open write stream: {ex.Message}");
+                return IntPtr.Zero;
+            }
+        }
+
+        /// <summary>
+        /// Read from stream.
+        /// Returns number of bytes read, or negative on error.
+        /// </summary>
+        [UnmanagedCallersOnly(EntryPoint = "titan_vault_stream_read")]
+        public static unsafe int StreamRead(
+            IntPtr streamHandle,
+            IntPtr buffer,
+            int count)
+        {
+            try
+            {
+                if (streamHandle == IntPtr.Zero || buffer == IntPtr.Zero || count <= 0)
+                {
+                    SetLastError("Invalid parameters");
+                    return TITAN_VAULT_ERROR_INVALID_PARAMETER;
+                }
+
+                var stream = GetStream(streamHandle);
+                if (stream == null)
+                {
+                    SetLastError("Invalid stream handle");
+                    return TITAN_VAULT_ERROR_INVALID_PARAMETER;
+                }
+
+                var managedBuffer = new byte[count];
+                var bytesRead = stream.Read(managedBuffer, 0, count);
+                
+                if (bytesRead > 0)
+                {
+                    Marshal.Copy(managedBuffer, 0, buffer, bytesRead);
+                }
+
+                return bytesRead;
+            }
+            catch (Exception ex)
+            {
+                SetLastError($"Failed to read from stream: {ex.Message}");
+                return TITAN_VAULT_ERROR_INTERNAL;
+            }
+        }
+
+        /// <summary>
+        /// Write to stream.
+        /// Returns number of bytes written, or negative on error.
+        /// </summary>
+        [UnmanagedCallersOnly(EntryPoint = "titan_vault_stream_write")]
+        public static unsafe int StreamWrite(
+            IntPtr streamHandle,
+            IntPtr buffer,
+            int count)
+        {
+            try
+            {
+                if (streamHandle == IntPtr.Zero || buffer == IntPtr.Zero || count <= 0)
+                {
+                    SetLastError("Invalid parameters");
+                    return TITAN_VAULT_ERROR_INVALID_PARAMETER;
+                }
+
+                var stream = GetStream(streamHandle);
+                if (stream == null)
+                {
+                    SetLastError("Invalid stream handle");
+                    return TITAN_VAULT_ERROR_INVALID_PARAMETER;
+                }
+
+                var managedBuffer = new byte[count];
+                Marshal.Copy(buffer, managedBuffer, 0, count);
+                
+                stream.Write(managedBuffer, 0, count);
+                return count;
+            }
+            catch (Exception ex)
+            {
+                SetLastError($"Failed to write to stream: {ex.Message}");
+                return TITAN_VAULT_ERROR_INTERNAL;
+            }
+        }
+
+        /// <summary>
+        /// Close stream and free resources.
+        /// </summary>
+        [UnmanagedCallersOnly(EntryPoint = "titan_vault_close_stream")]
+        public static unsafe int CloseStream(IntPtr streamHandle)
+        {
+            try
+            {
+                if (streamHandle == IntPtr.Zero)
+                {
+                    SetLastError("Invalid stream handle");
+                    return TITAN_VAULT_ERROR_INVALID_PARAMETER;
+                }
+
+                var stream = GetStream(streamHandle);
+                if (stream == null)
+                {
+                    SetLastError("Stream handle not found");
+                    return TITAN_VAULT_ERROR_INVALID_PARAMETER;
+                }
+
+                stream.Dispose();
+                RemoveStreamHandle(streamHandle);
+
+                return TITAN_VAULT_SUCCESS;
+            }
+            catch (Exception ex)
+            {
+                SetLastError($"Failed to close stream: {ex.Message}");
+                return TITAN_VAULT_ERROR_INTERNAL;
+            }
+        }
+
+        #endregion
+
+        #region Advanced File Operations
+
+        /// <summary>
+        /// List directory contents in vault.
+        /// Returns number of entries found, or negative error code.
+        /// </summary>
+        [UnmanagedCallersOnly(EntryPoint = "titan_vault_list_directory")]
+        public static unsafe int ListDirectory(
+            IntPtr vaultHandle,
+            IntPtr directoryPathBytes,
+            int directoryPathLength,
+            IntPtr entriesBuffer,
+            IntPtr maxEntries)
+        {
+            try
+            {
+                if (vaultHandle == IntPtr.Zero || directoryPathBytes == IntPtr.Zero || directoryPathLength <= 0)
+                {
+                    SetLastError("Invalid parameters");
+                    return TITAN_VAULT_ERROR_INVALID_PARAMETER;
+                }
+
+                var vault = GetVault(vaultHandle);
+                if (vault == null)
+                {
+                    SetLastError("Invalid vault handle");
+                    return TITAN_VAULT_ERROR_INVALID_PARAMETER;
+                }
+
+                var directoryPath = GetUtf8String(directoryPathBytes, directoryPathLength);
+                if (string.IsNullOrEmpty(directoryPath))
+                {
+                    SetLastError("Failed to decode directory path");
+                    return TITAN_VAULT_ERROR_INVALID_PARAMETER;
+                }
+
+                var entries = vault.ListDirectoryAsync(directoryPath).Result;
+                var entryList = entries.ToList();
+                int maxEntriesCount = Marshal.ReadInt32(maxEntries);
+                int actualCount = Math.Min(entryList.Count, maxEntriesCount);
+
+                // Write entry names to buffer as null-terminated UTF-8 strings
+                IntPtr* entryPtrs = (IntPtr*)entriesBuffer;
+                for (int i = 0; i < actualCount; i++)
+                {
+                    entryPtrs[i] = AllocateUtf8String(entryList[i].Filename);
+                }
+
+                return actualCount;
+            }
+            catch (AggregateException ex) when (ex.InnerException != null)
+            {
+                SetLastError($"Failed to list directory: {ex.InnerException.Message}");
+                return TITAN_VAULT_ERROR_INTERNAL;
+            }
+            catch (Exception ex)
+            {
+                SetLastError($"Failed to list directory: {ex.Message}");
+                return TITAN_VAULT_ERROR_INTERNAL;
+            }
+        }
+
+        /// <summary>
+        /// Get file information (size, modified time, etc.).
+        /// </summary>
+        [UnmanagedCallersOnly(EntryPoint = "titan_vault_get_file_info")]
+        public static unsafe int GetFileInfo(
+            IntPtr vaultHandle,
+            IntPtr filePathBytes,
+            int filePathLength,
+            IntPtr fileSizePtr,
+            IntPtr lastModifiedPtr)
+        {
+            try
+            {
+                if (vaultHandle == IntPtr.Zero || filePathBytes == IntPtr.Zero || filePathLength <= 0)
+                {
+                    SetLastError("Invalid parameters");
+                    return TITAN_VAULT_ERROR_INVALID_PARAMETER;
+                }
+
+                var vault = GetVault(vaultHandle);
+                if (vault == null)
+                {
+                    SetLastError("Invalid vault handle");
+                    return TITAN_VAULT_ERROR_INVALID_PARAMETER;
+                }
+
+                var filePath = GetUtf8String(filePathBytes, filePathLength);
+                if (string.IsNullOrEmpty(filePath))
+                {
+                    SetLastError("Failed to decode file path");
+                    return TITAN_VAULT_ERROR_INVALID_PARAMETER;
+                }
+
+                var fileInfo = vault.GetFileInfoAsync(filePath).Result;
+                if (fileInfo == null)
+                {
+                    SetLastError("File not found");
+                    return TITAN_VAULT_ERROR_VAULT_NOT_FOUND;
+                }
+
+                if (fileSizePtr != IntPtr.Zero)
+                {
+                    Marshal.WriteInt64(fileSizePtr, fileInfo.Size);
+                }
+
+                if (lastModifiedPtr != IntPtr.Zero)
+                {
+                    // Write as Unix timestamp (seconds since epoch)
+                    var unixTime = ((DateTimeOffset)fileInfo.LastModified).ToUnixTimeSeconds();
+                    Marshal.WriteInt64(lastModifiedPtr, unixTime);
+                }
+
+                return TITAN_VAULT_SUCCESS;
+            }
+            catch (AggregateException ex) when (ex.InnerException != null)
+            {
+                SetLastError($"Failed to get file info: {ex.InnerException.Message}");
+                return TITAN_VAULT_ERROR_INTERNAL;
+            }
+            catch (Exception ex)
+            {
+                SetLastError($"Failed to get file info: {ex.Message}");
+                return TITAN_VAULT_ERROR_INTERNAL;
+            }
+        }
+
+        /// <summary>
+        /// Move/rename file or directory in vault.
+        /// </summary>
+        [UnmanagedCallersOnly(EntryPoint = "titan_vault_move")]
+        public static unsafe int MoveEntry(
+            IntPtr vaultHandle,
+            IntPtr sourcePathBytes,
+            int sourcePathLength,
+            IntPtr destinationPathBytes,
+            int destinationPathLength)
+        {
+            try
+            {
+                if (vaultHandle == IntPtr.Zero || sourcePathBytes == IntPtr.Zero || sourcePathLength <= 0 ||
+                    destinationPathBytes == IntPtr.Zero || destinationPathLength <= 0)
+                {
+                    SetLastError("Invalid parameters");
+                    return TITAN_VAULT_ERROR_INVALID_PARAMETER;
+                }
+
+                var vault = GetVault(vaultHandle);
+                if (vault == null)
+                {
+                    SetLastError("Invalid vault handle");
+                    return TITAN_VAULT_ERROR_INVALID_PARAMETER;
+                }
+
+                var sourcePath = GetUtf8String(sourcePathBytes, sourcePathLength);
+                var destinationPath = GetUtf8String(destinationPathBytes, destinationPathLength);
+
+                if (string.IsNullOrEmpty(sourcePath) || string.IsNullOrEmpty(destinationPath))
+                {
+                    SetLastError("Failed to decode paths");
+                    return TITAN_VAULT_ERROR_INVALID_PARAMETER;
+                }
+
+                vault.MoveAsync(sourcePath, destinationPath, true).Wait(); // overwrite = true
+                return TITAN_VAULT_SUCCESS;
+            }
+            catch (AggregateException ex) when (ex.InnerException != null)
+            {
+                SetLastError($"Failed to move entry: {ex.InnerException.Message}");
+                return TITAN_VAULT_ERROR_INTERNAL;
+            }
+            catch (Exception ex)
+            {
+                SetLastError($"Failed to move entry: {ex.Message}");
+                return TITAN_VAULT_ERROR_INTERNAL;
+            }
+        }
+
+        /// <summary>
+        /// Get list of users in UVF vault.
+        /// Returns number of users found, or negative error code.
+        /// </summary>
+        [UnmanagedCallersOnly(EntryPoint = "titan_vault_get_vault_users")]
+        public static unsafe int GetVaultUsers(
+            IntPtr vaultPathBytes,
+            int vaultPathLength,
+            IntPtr adminPasswordBytes,
+            int adminPasswordLength,
+            IntPtr usersBuffer,
+            IntPtr maxUsers)
+        {
+            try
+            {
+                if (vaultPathBytes == IntPtr.Zero || vaultPathLength <= 0 ||
+                    adminPasswordBytes == IntPtr.Zero || adminPasswordLength <= 0)
+                {
+                    SetLastError("Invalid parameters");
+                    return TITAN_VAULT_ERROR_INVALID_PARAMETER;
+                }
+
+                var vaultPath = GetUtf8String(vaultPathBytes, vaultPathLength);
+                var adminPasswordChars = GetPasswordChars(adminPasswordBytes, adminPasswordLength);
+
+                if (string.IsNullOrEmpty(vaultPath) || adminPasswordChars == null)
+                {
+                    SetLastError("Failed to decode parameters");
+                    return TITAN_VAULT_ERROR_INVALID_PARAMETER;
+                }
+
+                try
+                {
+                    var users = VaultManager.GetVaultUsersAsync(vaultPath, adminPasswordChars).Result;
+                    int maxUsersCount = Marshal.ReadInt32(maxUsers);
+                    int actualCount = Math.Min(users.Count, maxUsersCount);
+
+                    // Write user IDs to buffer as null-terminated UTF-8 strings
+                    IntPtr* userPtrs = (IntPtr*)usersBuffer;
+                    for (int i = 0; i < actualCount; i++)
+                    {
+                        userPtrs[i] = AllocateUtf8String(users[i].UserId);
+                    }
+
+                    return actualCount;
+                }
+                finally
+                {
+                    if (adminPasswordChars != null)
+                        Array.Clear(adminPasswordChars, 0, adminPasswordChars.Length);
+                }
+            }
+            catch (AggregateException ex) when (ex.InnerException is UnauthorizedAccessException)
+            {
+                SetLastError("Invalid admin password");
+                return TITAN_VAULT_ERROR_INVALID_PASSWORD;
+            }
+            catch (AggregateException ex) when (ex.InnerException != null)
+            {
+                SetLastError($"Failed to get vault users: {ex.InnerException.Message}");
+                return TITAN_VAULT_ERROR_INTERNAL;
+            }
+            catch (UnauthorizedAccessException)
+            {
+                SetLastError("Invalid admin password");
+                return TITAN_VAULT_ERROR_INVALID_PASSWORD;
+            }
+            catch (Exception ex)
+            {
+                SetLastError($"Failed to get vault users: {ex.Message}");
+                return TITAN_VAULT_ERROR_INTERNAL;
+            }
+        }
+
+        /// <summary>
+        /// Read text file from vault as UTF-8 string.
+        /// </summary>
+        [UnmanagedCallersOnly(EntryPoint = "titan_vault_read_all_text")]
+        public static unsafe IntPtr ReadAllText(
+            IntPtr vaultHandle,
+            IntPtr filePathBytes,
+            int filePathLength)
+        {
+            try
+            {
+                if (vaultHandle == IntPtr.Zero || filePathBytes == IntPtr.Zero || filePathLength <= 0)
+                {
+                    SetLastError("Invalid parameters");
+                    return IntPtr.Zero;
+                }
+
+                var vault = GetVault(vaultHandle);
+                if (vault == null)
+                {
+                    SetLastError("Invalid vault handle");
+                    return IntPtr.Zero;
+                }
+
+                var filePath = GetUtf8String(filePathBytes, filePathLength);
+                if (string.IsNullOrEmpty(filePath))
+                {
+                    SetLastError("Failed to decode file path");
+                    return IntPtr.Zero;
+                }
+
+                var text = vault.ReadAllTextAsync(filePath).Result;
+                return AllocateUtf8String(text);
+            }
+            catch (AggregateException ex) when (ex.InnerException != null)
+            {
+                SetLastError($"Failed to read text file: {ex.InnerException.Message}");
+                return IntPtr.Zero;
+            }
+            catch (Exception ex)
+            {
+                SetLastError($"Failed to read text file: {ex.Message}");
+                return IntPtr.Zero;
+            }
+        }
+
+        /// <summary>
+        /// Write text to file in vault as UTF-8.
+        /// </summary>
+        [UnmanagedCallersOnly(EntryPoint = "titan_vault_write_all_text")]
+        public static unsafe int WriteAllText(
+            IntPtr vaultHandle,
+            IntPtr filePathBytes,
+            int filePathLength,
+            IntPtr textBytes,
+            int textLength)
+        {
+            try
+            {
+                if (vaultHandle == IntPtr.Zero || filePathBytes == IntPtr.Zero || filePathLength <= 0 ||
+                    textBytes == IntPtr.Zero || textLength < 0)
+                {
+                    SetLastError("Invalid parameters");
+                    return TITAN_VAULT_ERROR_INVALID_PARAMETER;
+                }
+
+                var vault = GetVault(vaultHandle);
+                if (vault == null)
+                {
+                    SetLastError("Invalid vault handle");
+                    return TITAN_VAULT_ERROR_INVALID_PARAMETER;
+                }
+
+                var filePath = GetUtf8String(filePathBytes, filePathLength);
+                var text = GetUtf8String(textBytes, textLength);
+
+                if (string.IsNullOrEmpty(filePath) || text == null)
+                {
+                    SetLastError("Failed to decode parameters");
+                    return TITAN_VAULT_ERROR_INVALID_PARAMETER;
+                }
+
+                vault.WriteAllTextAsync(filePath, text).Wait();
+                return TITAN_VAULT_SUCCESS;
+            }
+            catch (AggregateException ex) when (ex.InnerException != null)
+            {
+                SetLastError($"Failed to write text file: {ex.InnerException.Message}");
+                return TITAN_VAULT_ERROR_INTERNAL;
+            }
+            catch (Exception ex)
+            {
+                SetLastError($"Failed to write text file: {ex.Message}");
+                return TITAN_VAULT_ERROR_INTERNAL;
+            }
+        }
+
+        /// <summary>
+        /// Append text to file in vault as UTF-8.
+        /// </summary>
+        [UnmanagedCallersOnly(EntryPoint = "titan_vault_append_all_text")]
+        public static unsafe int AppendAllText(
+            IntPtr vaultHandle,
+            IntPtr filePathBytes,
+            int filePathLength,
+            IntPtr textBytes,
+            int textLength)
+        {
+            try
+            {
+                if (vaultHandle == IntPtr.Zero || filePathBytes == IntPtr.Zero || filePathLength <= 0 ||
+                    textBytes == IntPtr.Zero || textLength < 0)
+                {
+                    SetLastError("Invalid parameters");
+                    return TITAN_VAULT_ERROR_INVALID_PARAMETER;
+                }
+
+                var vault = GetVault(vaultHandle);
+                if (vault == null)
+                {
+                    SetLastError("Invalid vault handle");
+                    return TITAN_VAULT_ERROR_INVALID_PARAMETER;
+                }
+
+                var filePath = GetUtf8String(filePathBytes, filePathLength);
+                var text = GetUtf8String(textBytes, textLength);
+
+                if (string.IsNullOrEmpty(filePath) || text == null)
+                {
+                    SetLastError("Failed to decode parameters");
+                    return TITAN_VAULT_ERROR_INVALID_PARAMETER;
+                }
+
+                vault.AppendAllTextAsync(filePath, text).Wait();
+                return TITAN_VAULT_SUCCESS;
+            }
+            catch (AggregateException ex) when (ex.InnerException != null)
+            {
+                SetLastError($"Failed to append text file: {ex.InnerException.Message}");
+                return TITAN_VAULT_ERROR_INTERNAL;
+            }
+            catch (Exception ex)
+            {
+                SetLastError($"Failed to append text file: {ex.Message}");
+                return TITAN_VAULT_ERROR_INTERNAL;
+            }
+        }
+
+        #endregion
+
+        #region Helper Methods
+
+        private static unsafe IntPtr AllocateUtf8String(string str)
+        {
+            if (string.IsNullOrEmpty(str))
+                return IntPtr.Zero;
+
+            var bytes = Encoding.UTF8.GetBytes(str + '\0');
+            var ptr = NativeMemory.Alloc((nuint)bytes.Length);
+            fixed (byte* src = bytes)
+            {
+                Buffer.MemoryCopy(src, ptr, bytes.Length, bytes.Length);
+            }
+            return new IntPtr(ptr);
+        }
+
+        private static unsafe string? GetUtf8String(IntPtr ptr, int length)
+        {
+            if (ptr == IntPtr.Zero || length <= 0)
+                return null;
+
+            var bytes = new byte[length];
+            Marshal.Copy(ptr, bytes, 0, length);
+            return Encoding.UTF8.GetString(bytes);
+        }
+
+        private static unsafe char[]? GetPasswordChars(IntPtr ptr, int length)
+        {
+            if (ptr == IntPtr.Zero || length <= 0)
+                return null;
+
+            var bytes = new byte[length];
+            Marshal.Copy(ptr, bytes, 0, length);
+            
+            try
+            {
+                return Encoding.UTF8.GetChars(bytes);
+            }
+            finally
+            {
+                // Clear the temporary byte array
+                CryptographicOperations.ZeroMemory(bytes);
+            }
+        }
+
+        #endregion
+    }
+} 

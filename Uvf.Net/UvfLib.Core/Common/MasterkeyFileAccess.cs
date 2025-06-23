@@ -385,7 +385,7 @@ namespace UvfLib.Core.Common
             // Deserialize using System.Text.Json
             try
             {
-                var masterkeyFile = System.Text.Json.JsonSerializer.Deserialize<MasterkeyFile>(masterkey);
+                var masterkeyFile = System.Text.Json.JsonSerializer.Deserialize<MasterkeyFile>(masterkey, UvfJsonContext.Default.MasterkeyFile);
                 // Check for null before accessing VaultVersion
                 return masterkeyFile?.VaultVersion ?? 0; // Return 0 or throw if null is invalid?
             }
@@ -437,7 +437,7 @@ namespace UvfLib.Core.Common
                 using (var reader = new StreamReader(stream, Encoding.UTF8))
                 {
                     string json = reader.ReadToEnd();
-                    var masterkeyFile = System.Text.Json.JsonSerializer.Deserialize<MasterkeyFile>(json);
+                    var masterkeyFile = System.Text.Json.JsonSerializer.Deserialize<MasterkeyFile>(json, UvfJsonContext.Default.MasterkeyFile);
 
                     if (masterkeyFile == null)
                     {
@@ -783,10 +783,7 @@ namespace UvfLib.Core.Common
                 var masterkeyFile = Lock(masterkey, passphrase, vaultVersion, scryptCostParam);
 
                 // Serialize to JSON and write to the stream
-                var json = System.Text.Json.JsonSerializer.Serialize(masterkeyFile, new System.Text.Json.JsonSerializerOptions
-                {
-                    WriteIndented = true
-                });
+                var json = System.Text.Json.JsonSerializer.Serialize(masterkeyFile, UvfJsonContext.Default.MasterkeyFile);
 
                 var bytes = Encoding.UTF8.GetBytes(json);
                 stream.Write(bytes, 0, bytes.Length);
@@ -859,7 +856,7 @@ namespace UvfLib.Core.Common
             {
                 // Deserialize the masterkey file
                 var masterkeyFile = System.Text.Json.JsonSerializer.Deserialize<MasterkeyFile>(
-                    Encoding.UTF8.GetString(serializedMasterkeyFile));
+                    Encoding.UTF8.GetString(serializedMasterkeyFile), UvfJsonContext.Default.MasterkeyFile);
 
                 if (masterkeyFile == null)
                 {
@@ -870,10 +867,7 @@ namespace UvfLib.Core.Common
                 var newMasterkeyFile = ChangePassphrase(masterkeyFile, oldPassphrase, newPassphrase);
 
                 // Serialize the new masterkey file
-                var json = System.Text.Json.JsonSerializer.Serialize(newMasterkeyFile, new System.Text.Json.JsonSerializerOptions
-                {
-                    WriteIndented = true
-                });
+                var json = System.Text.Json.JsonSerializer.Serialize(newMasterkeyFile, UvfJsonContext.Default.MasterkeyFile);
 
                 return Encoding.UTF8.GetBytes(json);
             }

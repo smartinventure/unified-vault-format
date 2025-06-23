@@ -1,6 +1,6 @@
 using StorageLib.Abstractions;
-using UvfLib.Storage;
-using UvfLib.Storage.Decorators;
+using UvfLib.Master;
+using UvfLib.Master.Decorators;
 using UvfLib.Vault;
 using System.Diagnostics;
 using System.Security.Cryptography;

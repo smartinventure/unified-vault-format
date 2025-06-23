@@ -8,7 +8,7 @@ namespace UvfLib.Core.CryptomatorV8
     /// Helper class for Cryptomator filename shortening functionality.
     /// Implements the name shortening algorithm as described in Cryptomator documentation.
     /// </summary>
-    internal static class NameShorteningHelper
+    public static class NameShorteningHelper
     {
         /// <summary>
         /// Checks if a filename needs shortening based on the threshold.

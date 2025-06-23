@@ -3,6 +3,7 @@ using System.IO;
 using System.Text;
 using System.Text.Json;
 using UvfLib.Core.Api;
+using UvfLib.Core.Common;
 using UvfLib.Core.Jwe;
 using UvfLib.Core.V3;
 
@@ -66,7 +67,7 @@ namespace UvfLib.Core.Common // Or UvfLib.Jwe, depending on preference
                 
                 // Serialize payload back to JSON string to pass to UVFMasterkey.FromDecryptedPayload
                 // (as UVFMasterkeyImpl expects a JSON string)
-                string jsonPayloadString = JsonSerializer.Serialize(payload);
+                string jsonPayloadString = JsonSerializer.Serialize(payload, UvfJsonContext.Default.UvfMasterkeyPayload);
                 
                 // The static method on the interface delegates to the concrete implementation (UVFMasterkeyImpl)
                 return Api.UVFMasterkey.FromDecryptedPayload(jsonPayloadString);

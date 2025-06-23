@@ -1,0 +1,41 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <PlatformTarget>x64</PlatformTarget>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+  </PropertyGroup>
+
+  <!-- Only UvfLib.Core needed for basic types -->
+
+  <!-- Native AOT Library from UvfLib.Master publish output -->
+  <ItemGroup>
+    <None Include="..\UvfLib.Master\bin\Release\net8.0\win-x64\publish\TitanVault.dll">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+    <None Include="..\UvfLib.Master\bin\Release\net8.0\win-x64\publish\TitanVault.pdb">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+  </ItemGroup>
+
+  <!-- Post-build step to replace managed DLL with native AOT DLL -->
+  <Target Name="CopyNativeAotLibrary" AfterTargets="Build">
+    <PropertyGroup>
+      <NativeAotPath>..\UvfLib.Master\bin\Release\net8.0\win-x64\publish\TitanVault.dll</NativeAotPath>
+      <TargetPath>$(OutputPath)TitanVault.dll</TargetPath>
+    </PropertyGroup>
+    
+    <Message Text="🔧 Checking for native AOT library..." Importance="high" />
+    
+    <!-- Only copy if native AOT library exists and is larger than managed version -->
+    <Copy SourceFiles="$(NativeAotPath)" DestinationFiles="$(TargetPath)" Condition="Exists('$(NativeAotPath)')" OverwriteReadOnlyFiles="true" />
+      
+    <Message Text="✅ Native AOT library copied to output directory" Importance="high" Condition="Exists('$(NativeAotPath)')" />
+      
+    <Message Text="⚠️ Native AOT library not found. Run: dotnet publish -c Release in UvfLib.Master" Importance="high" Condition="!Exists('$(NativeAotPath)')" />
+  </Target>
+
+</Project>

@@ -8,7 +8,7 @@
 .PARAMETER Configuration
     Build configuration (Debug or Release). Default: Release
 .PARAMETER Platforms
-    Target platforms to build. Default: All platforms
+    Target platforms to build. Default: Current platform
 .PARAMETER Projects
     Specific projects to build. Default: All core projects
 .PARAMETER OutputPath
@@ -27,7 +27,7 @@ param(
     [ValidateSet("Debug", "Release")]
     [string]$Configuration = "Release",
     
-    [string[]]$Platforms = @("win-x64", "win-arm64", "linux-x64", "linux-arm64", "osx-x64", "osx-arm64"),
+    [string[]]$Platforms = @(),
     
     [string[]]$Projects = @("UvfLib.Core", "UvfLib.Storage", "UvfLib.Vault"),
     
@@ -46,6 +46,19 @@ Set-StrictMode -Version Latest
 $ScriptRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 $ProjectRoot = Split-Path -Parent (Split-Path -Parent $ScriptRoot)
 $UvfNetRoot = Join-Path $ProjectRoot "Uvf.Net"
+
+# Default platforms if none specified
+if ($Platforms.Count -eq 0) {
+    if ($IsWindows -or $PSVersionTable.PSEdition -eq "Desktop") {
+        $Platforms = @("win-x64")
+    } elseif ($IsLinux) {
+        $Platforms = @("linux-x64")
+    } elseif ($IsMacOS) {
+        $Platforms = @("osx-x64")
+    } else {
+        $Platforms = @("win-x64")  # Default fallback
+    }
+}
 
 # Logging functions
 function Write-Header {
@@ -75,32 +88,6 @@ function Write-Info {
     }
 }
 
-# Resolve StorageLib for AOT compilation
-function Resolve-StorageLibForAOT {
-    Write-Header "Resolving StorageLib Source for AOT"
-    
-    $resolveScript = Join-Path $ScriptRoot "resolve-storagelib.ps1"
-    
-    if (Test-Path $resolveScript) {
-        Write-Info "Running StorageLib resolution..."
-        try {
-            & $resolveScript
-            if ($LASTEXITCODE -ne 0) {
-                Write-Error "StorageLib resolution failed"
-                exit 1
-            }
-            Write-Success "StorageLib source resolved for AOT compilation"
-        }
-        catch {
-            Write-Error "Exception during StorageLib resolution: $_"
-            exit 1
-        }
-    } else {
-        Write-Warning "StorageLib resolution script not found: $resolveScript"
-        Write-Warning "AOT compilation may fail if StorageLib source is not available"
-    }
-}
-
 # Prerequisite checks
 function Test-Prerequisites {
     Write-Header "Checking Prerequisites"
@@ -113,17 +100,6 @@ function Test-Prerequisites {
     catch {
         Write-Error ".NET SDK not found. Please install .NET 8.0 SDK or later."
         exit 1
-    }
-    
-    # Check for required workloads
-    $workloads = dotnet workload list --machine-readable | ConvertFrom-Json
-    $requiredWorkloads = @("microsoft-net-sdk-blazorwebassembly-aot")
-    
-    foreach ($workload in $requiredWorkloads) {
-        if ($workloads.installed -notcontains $workload) {
-            Write-Warning "Installing required workload: $workload"
-            dotnet workload install $workload
-        }
     }
     
     # Verify project paths
@@ -217,47 +193,30 @@ function Build-ProjectForPlatform {
             
             # Copy important files to organized structure
             $libName = "$ProjectName.dll"
-            $nativeLibName = "$ProjectName.so"
-            if ($Platform.StartsWith("win")) {
-                $nativeLibName = "$ProjectName.dll"
-            } elseif ($Platform.StartsWith("osx")) {
-                $nativeLibName = "$ProjectName.dylib"
+            $pdbName = "$ProjectName.pdb"
+            $xmlName = "$ProjectName.xml"
+            
+            # Source files in output directory
+            $libPath = Join-Path $outputDir $libName
+            $pdbPath = Join-Path $outputDir $pdbName
+            $xmlPath = Join-Path $outputDir $xmlName
+            
+            # Verify the main library was created
+            if (Test-Path $libPath) {
+                $fileSize = (Get-Item $libPath).Length
+                $fileSizeKB = [math]::Round($fileSize / 1024, 1)
+                Write-Info "Created native library: $libName ($fileSizeKB KB)"
+            } else {
+                Write-Warning "Native library not found: $libName"
             }
             
-            # Create organized output structure
-            $platformOutputDir = Join-Path $OutputPath $Platform
-            $projectOutputDir = Join-Path $platformOutputDir $ProjectName
-            
-            if (-not (Test-Path $projectOutputDir)) {
-                New-Item -ItemType Directory -Path $projectOutputDir -Force | Out-Null
-            }
-            
-            # Copy native library if it exists
-            $nativeLibPath = Join-Path $outputDir $nativeLibName
-            if (Test-Path $nativeLibPath) {
-                Copy-Item $nativeLibPath $projectOutputDir -Force
-                Write-Info "Copied native library: $nativeLibName"
-            }
-            
-            # Copy managed assembly
-            $managedLibPath = Join-Path $outputDir $libName
-            if (Test-Path $managedLibPath) {
-                Copy-Item $managedLibPath $projectOutputDir -Force
-                Write-Info "Copied managed library: $libName"
-            }
-            
-            # Copy PDB files for debugging
-            $pdbPath = Join-Path $outputDir "$ProjectName.pdb"
+            # Log additional files
             if (Test-Path $pdbPath) {
-                Copy-Item $pdbPath $projectOutputDir -Force
-                Write-Info "Copied debug symbols: $ProjectName.pdb"
+                Write-Info "Created debug symbols: $pdbName"
             }
             
-            # Copy XML documentation
-            $xmlPath = Join-Path $outputDir "$ProjectName.xml"
             if (Test-Path $xmlPath) {
-                Copy-Item $xmlPath $projectOutputDir -Force
-                Write-Info "Copied documentation: $ProjectName.xml"
+                Write-Info "Created documentation: $xmlName"
             }
         }
         else {
@@ -266,7 +225,7 @@ function Build-ProjectForPlatform {
         }
     }
     catch {
-        Write-Error "Exception building $ProjectName for $Platform: $($_.Exception.Message)"
+        Write-Error "Exception building $ProjectName for $Platform : $($_.Exception.Message)"
         return $false
     }
     
@@ -291,19 +250,14 @@ function New-BuildManifest {
         if (Test-Path $platformDir) {
             $manifest.Libraries[$platform] = @{}
             
-            foreach ($project in $Projects) {
-                $projectDir = Join-Path $platformDir $project
-                if (Test-Path $projectDir) {
-                    $files = Get-ChildItem $projectDir -File | ForEach-Object {
-                        @{
-                            Name = $_.Name
-                            Size = $_.Length
-                            Hash = (Get-FileHash $_.FullName -Algorithm SHA256).Hash
-                        }
-                    }
-                    $manifest.Libraries[$platform][$project] = $files
+            $files = Get-ChildItem $platformDir -File | ForEach-Object {
+                @{
+                    Name = $_.Name
+                    Size = $_.Length
+                    Hash = (Get-FileHash $_.FullName -Algorithm SHA256).Hash
                 }
             }
+            $manifest.Libraries[$platform] = $files
         }
     }
     
@@ -326,10 +280,7 @@ function Main {
         # Step 1: Prerequisites
         Test-Prerequisites
         
-        # Step 2: Resolve StorageLib
-        Resolve-StorageLibForAOT
-        
-        # Step 3: Clean
+        # Step 2: Clean
         Clear-OutputDirectories
         
         # Step 3: Create output structure

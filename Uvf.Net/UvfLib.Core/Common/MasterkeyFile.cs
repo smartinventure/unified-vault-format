@@ -157,7 +157,7 @@ namespace UvfLib.Core.Common
             
             try
             {
-                var masterkeyFile = JsonSerializer.Deserialize<MasterkeyFile>(json);
+                var masterkeyFile = JsonSerializer.Deserialize<MasterkeyFile>(json, UvfJsonContext.Default.MasterkeyFile);
                 if (masterkeyFile == null)
                 {
                     throw new JsonException("Failed to deserialize masterkey file");
@@ -197,10 +197,7 @@ namespace UvfLib.Core.Common
         {
             try
             {
-                return JsonSerializer.SerializeToUtf8Bytes(this, new JsonSerializerOptions
-                {
-                    WriteIndented = true
-                });
+                return JsonSerializer.SerializeToUtf8Bytes(this, UvfJsonContext.Default.MasterkeyFile);
             }
             catch (JsonException ex)
             {

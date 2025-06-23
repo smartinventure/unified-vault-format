@@ -34,15 +34,26 @@ namespace UvfLib.Vault.VaultHelpers
         /// <summary>
         /// Creates the encrypted master key file content for a new vault.
         /// </summary>
-        public static byte[] CreateNewVaultKeyFileContentInternal(string password, byte[]? pepper)
+        public static byte[] CreateNewVaultKeyFileContentInternal(byte[] passwordBytes, byte[]? pepper)
         {
-            if (string.IsNullOrEmpty(password)) throw new ArgumentNullException(nameof(password));
+            if (passwordBytes == null) throw new ArgumentNullException(nameof(passwordBytes));
             
             // For Cryptomator V8, we need to create a traditional JSON masterkey file, not JWE
             // Use MasterkeyFileAccess to create the proper format
             try
             {
-                var masterkeyFile = MasterkeyFileAccess.CreateFromPassphrase(password);
+                // TODO: Update MasterkeyFileAccess.CreateFromPassphrase to use byte[] passwords
+                string passwordString = System.Text.Encoding.UTF8.GetString(passwordBytes);
+                MasterkeyFile masterkeyFile;
+                try
+                {
+                    masterkeyFile = MasterkeyFileAccess.CreateFromPassphrase(passwordString);
+                }
+                finally
+                {
+                    // Clear temporary string from memory (best effort)
+                    passwordString = null;
+                }
                 
                 // Create a Cryptomator-compatible object with ONLY the fields Cryptomator expects
                 // This excludes all UVF-specific fields that cause Cryptomator to reject the file
@@ -75,22 +86,22 @@ namespace UvfLib.Vault.VaultHelpers
         /// <summary>
         /// Changes the password for an existing vault's master key file content.
         /// </summary>
-        public static byte[] ChangeVaultPasswordInternal(byte[] encryptedKeyFileContent, string oldPassword, string newPassword, byte[]? pepper)
+        public static byte[] ChangeVaultPasswordInternal(byte[] encryptedKeyFileContent, byte[] oldPasswordBytes, byte[] newPasswordBytes, byte[]? pepper)
         {
             if (encryptedKeyFileContent == null || encryptedKeyFileContent.Length == 0) throw new ArgumentNullException(nameof(encryptedKeyFileContent));
-            if (string.IsNullOrEmpty(oldPassword)) throw new ArgumentNullException(nameof(oldPassword));
-            if (string.IsNullOrEmpty(newPassword)) throw new ArgumentNullException(nameof(newPassword));
+            if (oldPasswordBytes == null) throw new ArgumentNullException(nameof(oldPasswordBytes));
+            if (newPasswordBytes == null) throw new ArgumentNullException(nameof(newPasswordBytes));
             // Pepper usage remains for future consideration.
 
             string jweStringOld = Encoding.UTF8.GetString(encryptedKeyFileContent);
 
             // 1. Load the existing payload using the old password
             // LoadVaultPayload returns the UvfMasterkeyPayload directly.
-            UvfMasterkeyPayload existingPayload = MultiUserJweVaultManager.LoadSingleUserVault(jweStringOld, oldPassword);
+            UvfMasterkeyPayload existingPayload = MultiUserJweVaultManager.LoadSingleUserVault(jweStringOld, oldPasswordBytes);
 
             // 2. Create a new JWE vault with the existing payload and the new password
             // This re-encrypts the same master key material with a new KEK derived from the new password.
-            string jweStringNew = MultiUserJweVaultManager.CreateSingleUserVault(existingPayload, newPassword);
+            string jweStringNew = MultiUserJweVaultManager.CreateSingleUserVault(existingPayload, newPasswordBytes);
 
             return Encoding.UTF8.GetBytes(jweStringNew);
         }

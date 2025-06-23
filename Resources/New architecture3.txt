@@ -11,13 +11,7 @@
 ## 2. Current Implementation Status
 
 *   ✅ **Cryptomator V8:** Fully implemented and production-ready. A working example demonstrating its usage can be found in the `ExampleVaultApp.csproj` project.
-*   ⚠️ **Unified Vault Format (UVF):** The core cryptographic and vault-handling logic is implemented. However, its integration into the high-level `VaultManager.cs` is not fully complete or tested. The `ExampleVaultApp.csproj` does **not** yet contain examples for creating or using UVF vaults. Future work is required to finalize and verify this implementation.
-The ExampleVaultApp.csproj has a Program as an entry point with then subclasses for:
-1. DirectCryptomatorTest: an example to encrypt from a source folder to a vault folder, and back to a decrypted folder with using the more difficult to use IntPtr IStorage implementation
-2. SimpleCryptomatorTest: the same as DirectCryptomatorTest, just by using the simpler Stream interface
-3. A ChangePwCryptomatorTest: shows how to change the password of a vault
-
-We will need these also for UVF (the classes are created, but dont work yet). 
+*   ✅ **Unified Vault Format (UVF):** Also implemented
 
 ## 3. Core Architecture: A Layered Approach
 

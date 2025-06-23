@@ -4,8 +4,10 @@ using System.Linq;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Serialization.Metadata;
 using Jose;
 using UvfLib.Core.Api;
+using UvfLib.Core.Common;
 using Org.BouncyCastle.Crypto.Generators;
 
 namespace UvfLib.Core.Jwe
@@ -26,14 +28,14 @@ namespace UvfLib.Core.Jwe
         /// Creates a single-user JWE vault (UVF-compliant with admin recipient).
         /// </summary>
         /// <param name="payload">The UVF masterkey payload to encrypt</param>
-        /// <param name="password">Password for the vault</param>
+        /// <param name="passwordBytes">Password as UTF-8 encoded bytes</param>
         /// <param name="kdfParams">Key derivation parameters (optional, defaults to PBKDF2)</param>
         /// <returns>JWE JSON serialization string</returns>
-        public static string CreateSingleUserVault(UvfMasterkeyPayload payload, string password, KeyDerivationParameters? kdfParams = null)
+        public static string CreateSingleUserVault(UvfMasterkeyPayload payload, byte[] passwordBytes, KeyDerivationParameters? kdfParams = null)
         {
-            if (string.IsNullOrEmpty(password)) throw new ArgumentNullException(nameof(password));
+            if (passwordBytes == null) throw new ArgumentNullException(nameof(passwordBytes));
             
-            char[] passwordChars = password.ToCharArray();
+            char[] passwordChars = System.Text.Encoding.UTF8.GetChars(passwordBytes);
             try
             {
                 var emptyUsers = new Dictionary<string, char[]>();
@@ -63,7 +65,7 @@ namespace UvfLib.Core.Jwe
             if (adminPassword == null) throw new ArgumentNullException(nameof(adminPassword));
 
             int iterationsToUse = pbkdf2Iterations ?? DefaultPbkdf2Iterations;
-            string payloadJson = JsonSerializer.Serialize(payload);
+            string payloadJson = JsonSerializer.Serialize(payload, UvfJsonContext.Default.UvfMasterkeyPayload);
 
             // Generate a random CEK (Content Encryption Key)
             byte[] cek = new byte[32]; // 256-bit key for A256GCM
@@ -106,16 +108,16 @@ namespace UvfLib.Core.Jwe
                 }
 
                 // Create JWE JSON structure
-                var jweJson = new
+                var jweJson = new JweJson
                 {
-                    @protected = CreateProtectedHeader(),
-                    recipients = recipients,
-                    iv = Jose.Base64Url.Encode(iv),
-                    ciphertext = Jose.Base64Url.Encode(ciphertext),
-                    tag = Jose.Base64Url.Encode(tag)
+                    Protected = CreateProtectedHeader(),
+                    Recipients = recipients,
+                    Iv = Jose.Base64Url.Encode(iv),
+                    Ciphertext = Jose.Base64Url.Encode(ciphertext),
+                    Tag = Jose.Base64Url.Encode(tag)
                 };
 
-                return JsonSerializer.Serialize(jweJson);
+                return JsonSerializer.Serialize(jweJson, UvfJsonContext.Default.JweJson);
             }
             finally
             {
@@ -156,13 +158,13 @@ namespace UvfLib.Core.Jwe
         /// Loads a single-user vault (admin recipient).
         /// </summary>
         /// <param name="jweJsonString">JWE JSON serialization string</param>
-        /// <param name="password">Password for the vault</param>
+        /// <param name="passwordBytes">Password as UTF-8 encoded bytes</param>
         /// <returns>Decrypted UVF masterkey payload</returns>
-        public static UvfMasterkeyPayload LoadSingleUserVault(string jweJsonString, string password)
+        public static UvfMasterkeyPayload LoadSingleUserVault(string jweJsonString, byte[] passwordBytes)
         {
-            if (string.IsNullOrEmpty(password)) throw new ArgumentNullException(nameof(password));
+            if (passwordBytes == null) throw new ArgumentNullException(nameof(passwordBytes));
             
-            char[] passwordChars = password.ToCharArray();
+            char[] passwordChars = System.Text.Encoding.UTF8.GetChars(passwordBytes);
             try
             {
                 return LoadMultiUserVault(jweJsonString, passwordChars, "admin");
@@ -228,8 +230,7 @@ namespace UvfLib.Core.Jwe
                             }
 
                             string payloadJson = Encoding.UTF8.GetString(decryptedPayload);
-                            var options = new JsonSerializerOptions { PropertyNameCaseInsensitive = true };
-                            return JsonSerializer.Deserialize<UvfMasterkeyPayload>(payloadJson, options)!;
+                            return JsonSerializer.Deserialize<UvfMasterkeyPayload>(payloadJson, UvfJsonContext.Default.UvfMasterkeyPayload)!;
                         }
                         finally
                         {
@@ -289,7 +290,7 @@ namespace UvfLib.Core.Jwe
                 var existingRecipients = new List<object>();
                 foreach (var recipient in recipients)
                 {
-                    existingRecipients.Add(JsonSerializer.Deserialize<object>(recipient.GetRawText())!);
+                    existingRecipients.Add(JsonSerializer.Deserialize<object>(recipient.GetRawText(), UvfJsonContext.Default.Object)!);
                 }
                 existingRecipients.Add(newRecipient);
 
@@ -303,7 +304,7 @@ namespace UvfLib.Core.Jwe
                     tag = root.GetProperty("tag").GetString()
                 };
 
-                return JsonSerializer.Serialize(updatedJwe);
+                return JsonSerializer.Serialize(updatedJwe, (JsonTypeInfo<object>)UvfJsonContext.Default.Object);
             }
             finally
             {
@@ -352,7 +353,7 @@ namespace UvfLib.Core.Jwe
                 }
                 
                 // Keep this recipient
-                newRecipients.Add(JsonSerializer.Deserialize<object>(recipient.GetRawText())!);
+                newRecipients.Add(JsonSerializer.Deserialize<object>(recipient.GetRawText(), UvfJsonContext.Default.Object)!);
             }
 
             // Recreate JWE with updated recipients
@@ -365,7 +366,7 @@ namespace UvfLib.Core.Jwe
                 tag = root.GetProperty("tag").GetString()
             };
 
-            return JsonSerializer.Serialize(updatedJwe);
+            return JsonSerializer.Serialize(updatedJwe, (JsonTypeInfo<object>)UvfJsonContext.Default.Object);
         }
 
         /// <summary>
@@ -421,11 +422,11 @@ namespace UvfLib.Core.Jwe
                 ["uvf.spec.version"] = 1
             };
             
-            string headerJson = JsonSerializer.Serialize(header);
+            string headerJson = JsonSerializer.Serialize(header, UvfJsonContext.Default.DictionaryStringObject);
             return Jose.Base64Url.Encode(Encoding.UTF8.GetBytes(headerJson));
         }
 
-        private static object CreateRecipient(string keyId, char[] password, byte[] cek, int iterations)
+        private static JweRecipient CreateRecipient(string keyId, char[] password, byte[] cek, int iterations)
         {
             // Generate salt for this recipient
             byte[] salt = new byte[12]; // 96-bit salt
@@ -447,16 +448,16 @@ namespace UvfLib.Core.Jwe
                 // Encrypt CEK with KEK using AES Key Wrap
                 byte[] encryptedKey = AesKeyWrap.WrapKey(kek, cek);
 
-                return new
+                return new JweRecipient
                 {
-                    header = new
+                    Header = new JweRecipientHeader
                     {
-                        alg = "PBES2-HS512+A256KW",
-                        kid = keyId,
-                        p2s = Jose.Base64Url.Encode(salt),
-                        p2c = iterations
+                        Algorithm = "PBES2-HS512+A256KW",
+                        KeyId = keyId,
+                        Salt = Jose.Base64Url.Encode(salt),
+                        Iterations = iterations
                     },
-                    encrypted_key = Jose.Base64Url.Encode(encryptedKey)
+                    EncryptedKey = Jose.Base64Url.Encode(encryptedKey)
                 };
             }
             finally
@@ -525,7 +526,7 @@ namespace UvfLib.Core.Jwe
             if (adminPassword == null) throw new ArgumentNullException(nameof(adminPassword));
             if (kdfParams?.Method != KeyDerivationMethod.Scrypt) throw new ArgumentException("KDF parameters must be for Scrypt method");
 
-            string payloadJson = JsonSerializer.Serialize(payload);
+            string payloadJson = JsonSerializer.Serialize(payload, UvfJsonContext.Default.UvfMasterkeyPayload);
 
             // Generate a random CEK (Content Encryption Key)
             byte[] cek = new byte[32]; // 256-bit key for A256GCM
@@ -568,16 +569,16 @@ namespace UvfLib.Core.Jwe
                 }
 
                 // Create JWE JSON structure with Scrypt marker
-                var jweJson = new
+                var jweJson = new JweJson
                 {
-                    @protected = CreateScryptProtectedHeader(payload.UvfSpecVersion),
-                    recipients = recipients,
-                    iv = Jose.Base64Url.Encode(iv),
-                    ciphertext = Jose.Base64Url.Encode(ciphertext),
-                    tag = Jose.Base64Url.Encode(tag)
+                    Protected = CreateScryptProtectedHeader(payload.UvfSpecVersion),
+                    Recipients = recipients,
+                    Iv = Jose.Base64Url.Encode(iv),
+                    Ciphertext = Jose.Base64Url.Encode(ciphertext),
+                    Tag = Jose.Base64Url.Encode(tag)
                 };
 
-                return JsonSerializer.Serialize(jweJson);
+                return JsonSerializer.Serialize(jweJson, UvfJsonContext.Default.JweJson);
             }
             finally
             {
@@ -592,7 +593,7 @@ namespace UvfLib.Core.Jwe
         /// <summary>
         /// Creates a Scrypt-based recipient for multi-user vaults.
         /// </summary>
-        private static object CreateScryptRecipient(string keyId, char[] password, byte[] cek, KeyDerivationParameters kdfParams)
+        private static JweScryptRecipient CreateScryptRecipient(string keyId, char[] password, byte[] cek, KeyDerivationParameters kdfParams)
         {
             // Generate salt for this recipient
             byte[] salt = new byte[12]; // 96-bit salt
@@ -625,18 +626,18 @@ namespace UvfLib.Core.Jwe
                 // Encrypt CEK with KEK using AES Key Wrap
                 byte[] encryptedKey = AesKeyWrap.WrapKey(kek, cek);
 
-                return new
+                return new JweScryptRecipient
                 {
-                    header = new
+                    Header = new JweScryptRecipientHeader
                     {
-                        alg = "uvf.scrypt+A256KW", // Custom algorithm identifier
-                        kid = keyId,
-                        uvf_kdf_scrypt_n = kdfParams.ScryptN,
-                        uvf_kdf_scrypt_r = kdfParams.ScryptR,
-                        uvf_kdf_scrypt_p = kdfParams.ScryptP,
-                        uvf_kdf_scrypt_salt = Jose.Base64Url.Encode(salt)
+                        Algorithm = "uvf.scrypt+A256KW", // Custom algorithm identifier
+                        KeyId = keyId,
+                        ScryptN = kdfParams.ScryptN,
+                        ScryptR = kdfParams.ScryptR,
+                        ScryptP = kdfParams.ScryptP,
+                        ScryptSalt = Jose.Base64Url.Encode(salt)
                     },
-                    encrypted_key = Jose.Base64Url.Encode(encryptedKey)
+                    EncryptedKey = Jose.Base64Url.Encode(encryptedKey)
                 };
             }
             finally
@@ -659,7 +660,7 @@ namespace UvfLib.Core.Jwe
                 ["uvf.kdf.method"] = "scrypt"
             };
             
-            string headerJson = JsonSerializer.Serialize(header);
+            string headerJson = JsonSerializer.Serialize(header, UvfJsonContext.Default.DictionaryStringObject);
             return Jose.Base64Url.Encode(Encoding.UTF8.GetBytes(headerJson));
         }
 

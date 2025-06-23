@@ -6,7 +6,7 @@
     Creates distribution packages for different programming languages using the AOT-compiled libraries.
     Supports NuGet, NPM, PyPI, Maven, and other package formats.
 .PARAMETER Languages
-    Target languages to create packages for. Default: All supported languages
+    Target languages to create packages for. Default: CSharp,Python,NodeJs
 .PARAMETER Version
     Package version. Default: Auto-detect from project
 .PARAMETER OutputPath
@@ -15,16 +15,14 @@
     Path to AOT-compiled native libraries. Default: ./Dist/Native
 .PARAMETER Configuration
     Build configuration used for native libraries. Default: Release
-.PARAMETER PublishToRegistry
-    Publish packages to their respective registries
 .EXAMPLE
     .\package-bindings.ps1
     .\package-bindings.ps1 -Languages "CSharp,Python" -Version "1.0.0"
-    .\package-bindings.ps1 -PublishToRegistry
+    .\package-bindings.ps1 -Languages "NodeJs" -OutputPath "./MyPackages"
 #>
 
 param(
-    [string[]]$Languages = @("CSharp", "Python", "NodeJs", "Java", "Cpp", "Go", "PHP"),
+    [string[]]$Languages = @("CSharp", "Python", "NodeJs"),
     
     [string]$Version = "",
     
@@ -34,8 +32,6 @@ param(
     
     [ValidateSet("Debug", "Release")]
     [string]$Configuration = "Release",
-    
-    [switch]$PublishToRegistry,
     
     [switch]$Verbose
 )
@@ -96,7 +92,7 @@ function Get-ProjectVersion {
         }
     }
     catch {
-        Write-Warning "Could not auto-detect version: $_"
+        Write-Warning "Could not auto-detect version: $($_.Exception.Message)"
     }
     
     return "1.0.0"
@@ -119,7 +115,22 @@ function New-CSharpPackages {
         if (Test-Path $platformDir) {
             Write-Info "Creating NuGet package for $platform"
             
-            # Create platform-specific NuGet package
+            # Create platform-specific NuGet package structure
+            $packageDir = Join-Path $nugetDir "UvfLib.Native.$platform"
+            $runtimeDir = Join-Path $packageDir "runtimes/$platform/native"
+            
+            if (-not (Test-Path $runtimeDir)) {
+                New-Item -ItemType Directory -Path $runtimeDir -Force | Out-Null
+            }
+            
+            # Copy native libraries
+            $files = Get-ChildItem $platformDir -File -Include "*.dll", "*.so", "*.dylib"
+            foreach ($file in $files) {
+                Copy-Item $file.FullName $runtimeDir -Force
+                Write-Info "Copied: $($file.Name)"
+            }
+            
+            # Create nuspec file
             $nuspecContent = @"
 <?xml version="1.0" encoding="utf-8"?>
 <package xmlns="http://schemas.microsoft.com/packaging/2010/07/nuspec.xsd">
@@ -137,65 +148,16 @@ function New-CSharpPackages {
     </dependencies>
   </metadata>
   <files>
-    <file src="$platformDir\**\*" target="runtimes\$platform\native" />
+    <file src="runtimes\**\*" target="runtimes" />
   </files>
 </package>
 "@
             
-            $nuspecPath = Join-Path $nugetDir "UvfLib.Native.$platform.nuspec"
+            $nuspecPath = Join-Path $packageDir "UvfLib.Native.$platform.nuspec"
             Set-Content $nuspecPath -Value $nuspecContent -Encoding UTF8
             
-            # Create package
-            try {
-                & nuget pack $nuspecPath -OutputDirectory $nugetDir
-                if ($LASTEXITCODE -eq 0) {
-                    Write-Success "Created NuGet package: UvfLib.Native.$platform.$packageVersion.nupkg"
-                }
-            }
-            catch {
-                Write-Warning "Failed to create NuGet package for $platform"
-            }
+            Write-Success "Created NuGet package structure for $platform"
         }
-    }
-    
-    # Create main package that depends on all platforms
-    $mainNuspecContent = @"
-<?xml version="1.0" encoding="utf-8"?>
-<package xmlns="http://schemas.microsoft.com/packaging/2010/07/nuspec.xsd">
-  <metadata>
-    <id>UvfLib.Native</id>
-    <version>$packageVersion</version>
-    <authors>UVF.NET Team</authors>
-    <description>Native AOT libraries for UVF.NET vault format - All platforms</description>
-    <projectUrl>https://github.com/your-org/uvf.net</projectUrl>
-    <license type="expression">MIT</license>
-    <requireLicenseAcceptance>false</requireLicenseAcceptance>
-    <tags>uvf cryptomator vault encryption native aot cross-platform</tags>
-    <dependencies>
-      <group targetFramework="net8.0">
-        <dependency id="UvfLib.Native.win-x64" version="$packageVersion" />
-        <dependency id="UvfLib.Native.win-arm64" version="$packageVersion" />
-        <dependency id="UvfLib.Native.linux-x64" version="$packageVersion" />
-        <dependency id="UvfLib.Native.linux-arm64" version="$packageVersion" />
-        <dependency id="UvfLib.Native.osx-x64" version="$packageVersion" />
-        <dependency id="UvfLib.Native.osx-arm64" version="$packageVersion" />
-      </group>
-    </dependencies>
-  </metadata>
-</package>
-"@
-    
-    $mainNuspecPath = Join-Path $nugetDir "UvfLib.Native.nuspec"
-    Set-Content $mainNuspecPath -Value $mainNuspecContent -Encoding UTF8
-    
-    try {
-        & nuget pack $mainNuspecPath -OutputDirectory $nugetDir
-        if ($LASTEXITCODE -eq 0) {
-            Write-Success "Created main NuGet package: UvfLib.Native.$packageVersion.nupkg"
-        }
-    }
-    catch {
-        Write-Warning "Failed to create main NuGet package"
     }
 }
 
@@ -203,9 +165,9 @@ function New-CSharpPackages {
 function New-PythonPackages {
     Write-Header "Creating Python Packages"
     
-    $pythonDir = Join-Path $OutputPath "pip"
-    if (-not (Test-Path $pythonDir)) {
-        New-Item -ItemType Directory -Path $pythonDir -Force | Out-Null
+    $pipDir = Join-Path $OutputPath "pip"
+    if (-not (Test-Path $pipDir)) {
+        New-Item -ItemType Directory -Path $pipDir -Force | Out-Null
     }
     
     $packageVersion = Get-ProjectVersion
@@ -216,87 +178,97 @@ from setuptools import setup, find_packages
 import os
 import platform
 
-# Determine platform-specific wheel
-system = platform.system().lower()
-machine = platform.machine().lower()
-
-if system == "windows":
-    if machine in ["amd64", "x86_64"]:
-        platform_tag = "win-x64"
-    elif machine in ["arm64", "aarch64"]:
-        platform_tag = "win-arm64"
-elif system == "linux":
-    if machine in ["x86_64", "amd64"]:
-        platform_tag = "linux-x64"
-    elif machine in ["arm64", "aarch64"]:
-        platform_tag = "linux-arm64"
-elif system == "darwin":
-    if machine in ["x86_64", "amd64"]:
-        platform_tag = "osx-x64"
-    elif machine in ["arm64", "aarch64"]:
-        platform_tag = "osx-arm64"
-else:
-    raise RuntimeError(f"Unsupported platform: {system}-{machine}")
+# Determine platform-specific library
+def get_native_lib():
+    system = platform.system().lower()
+    machine = platform.machine().lower()
+    
+    if system == 'windows':
+        if machine in ['amd64', 'x86_64']:
+            return 'win-x64'
+        elif machine in ['arm64', 'aarch64']:
+            return 'win-arm64'
+    elif system == 'linux':
+        if machine in ['x86_64', 'amd64']:
+            return 'linux-x64'
+        elif machine in ['arm64', 'aarch64']:
+            return 'linux-arm64'
+    elif system == 'darwin':
+        if machine in ['x86_64']:
+            return 'osx-x64'
+        elif machine in ['arm64', 'aarch64']:
+            return 'osx-arm64'
+    
+    return None
 
 setup(
-    name="uvf-vault",
-    version="$packageVersion",
-    author="UVF.NET Team",
-    author_email="team@uvf.net",
-    description="Python bindings for UVF.NET vault format with native performance",
-    long_description=open("README.md").read(),
-    long_description_content_type="text/markdown",
-    url="https://github.com/your-org/uvf.net",
+    name='uvf-vault',
+    version='$packageVersion',
+    description='UVF.NET vault format library for Python',
+    long_description='Native bindings for UVF.NET cryptographic vault format',
+    author='UVF.NET Team',
     packages=find_packages(),
-    classifiers=[
-        "Development Status :: 4 - Beta",
-        "Intended Audience :: Developers",
-        "License :: OSI Approved :: MIT License",
-        "Operating System :: OS Independent",
-        "Programming Language :: Python :: 3",
-        "Programming Language :: Python :: 3.8",
-        "Programming Language :: Python :: 3.9",
-        "Programming Language :: Python :: 3.10",
-        "Programming Language :: Python :: 3.11",
-        "Programming Language :: Python :: 3.12",
-        "Topic :: Security :: Cryptography",
-        "Topic :: System :: Archiving",
-    ],
-    python_requires=">=3.8",
-    install_requires=[
-        "cffi>=1.15.0",
-    ],
-    package_data={
-        "uvf_vault": ["native/*"],
-    },
     include_package_data=True,
+    package_data={
+        'uvf_vault': ['native/*'],
+    },
+    classifiers=[
+        'Development Status :: 4 - Beta',
+        'Intended Audience :: Developers',
+        'License :: OSI Approved :: MIT License',
+        'Programming Language :: Python :: 3',
+        'Programming Language :: Python :: 3.8',
+        'Programming Language :: Python :: 3.9',
+        'Programming Language :: Python :: 3.10',
+        'Programming Language :: Python :: 3.11',
+        'Programming Language :: Python :: 3.12',
+    ],
+    python_requires='>=3.8',
 )
 "@
     
-    $setupPyPath = Join-Path $pythonDir "setup.py"
+    $setupPyPath = Join-Path $pipDir "setup.py"
     Set-Content $setupPyPath -Value $setupPyContent -Encoding UTF8
     
     # Create package structure
-    $packageDir = Join-Path $pythonDir "uvf_vault"
-    if (-not (Test-Path $packageDir)) {
-        New-Item -ItemType Directory -Path $packageDir -Force | Out-Null
-    }
-    
-    # Copy native libraries
+    $packageDir = Join-Path $pipDir "uvf_vault"
     $nativeDir = Join-Path $packageDir "native"
+    
     if (-not (Test-Path $nativeDir)) {
         New-Item -ItemType Directory -Path $nativeDir -Force | Out-Null
     }
     
-    $platforms = @("win-x64", "win-arm64", "linux-x64", "linux-arm64", "osx-x64", "osx-arm64")
+    # Copy native libraries for all platforms
+    $platforms = @("win-x64", "linux-x64", "osx-x64")
     foreach ($platform in $platforms) {
-        $sourcePlatformDir = Join-Path $NativePath $platform
-        if (Test-Path $sourcePlatformDir) {
-            $targetPlatformDir = Join-Path $nativeDir $platform
-            Copy-Item $sourcePlatformDir $targetPlatformDir -Recurse -Force
-            Write-Info "Copied native libraries for $platform"
+        $platformDir = Join-Path $NativePath $platform
+        if (Test-Path $platformDir) {
+            $platformNativeDir = Join-Path $nativeDir $platform
+            if (-not (Test-Path $platformNativeDir)) {
+                New-Item -ItemType Directory -Path $platformNativeDir -Force | Out-Null
+            }
+            
+            $files = Get-ChildItem $platformDir -File -Include "*.dll", "*.so", "*.dylib"
+            foreach ($file in $files) {
+                Copy-Item $file.FullName $platformNativeDir -Force
+                Write-Info "Copied $($file.Name) for $platform"
+            }
         }
     }
+    
+    # Create __init__.py
+    $initPyContent = @"
+"""
+UVF Vault - Python bindings for UVF.NET
+"""
+
+__version__ = '$packageVersion'
+
+from .uvf_vault import *
+"@
+    
+    $initPyPath = Join-Path $packageDir "__init__.py"
+    Set-Content $initPyPath -Value $initPyContent -Encoding UTF8
     
     Write-Success "Created Python package structure"
 }
@@ -313,173 +285,133 @@ function New-NodeJsPackages {
     $packageVersion = Get-ProjectVersion
     
     # Create package.json
-    $packageJsonContent = @{
-        name = "uvf-vault"
-        version = $packageVersion
-        description = "Node.js bindings for UVF.NET vault format with native performance"
-        main = "index.js"
-        types = "index.d.ts"
-        scripts = @{
-            test = "node test/test.js"
-            install = "node-pre-gyp install --fallback-to-build"
-        }
-        keywords = @("uvf", "cryptomator", "vault", "encryption", "native")
-        author = "UVF.NET Team"
-        license = "MIT"
-        repository = @{
-            type = "git"
-            url = "https://github.com/your-org/uvf.net.git"
-        }
-        dependencies = @{
-            "node-addon-api" = "^7.0.0"
-            "node-pre-gyp" = "^0.17.0"
-        }
-        devDependencies = @{
-            "@types/node" = "^20.0.0"
-        }
-        binary = @{
-            module_name = "uvf_vault"
-            module_path = "./lib/binding/{configuration}/{node_abi}-{platform}-{arch}/"
-            remote_path = "./releases/download/{version}/"
-            package_name = "{module_name}-v{version}-{node_abi}-{platform}-{arch}.tar.gz"
-            host = "https://github.com/your-org/uvf.net"
-        }
-    }
-    
-    $packageJsonPath = Join-Path $npmDir "package.json"
-    $packageJsonContent | ConvertTo-Json -Depth 10 | Set-Content $packageJsonPath -Encoding UTF8
-    
-    Write-Success "Created Node.js package.json"
+    $packageJsonContent = @"
+{
+  "name": "uvf-vault",
+  "version": "$packageVersion",
+  "description": "UVF.NET vault format library for Node.js",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [
+    "uvf",
+    "vault",
+    "encryption",
+    "cryptomator",
+    "native"
+  ],
+  "author": "UVF.NET Team",
+  "license": "MIT",
+  "engines": {
+    "node": ">=16.0.0"
+  },
+  "os": [
+    "win32",
+    "linux",
+    "darwin"
+  ],
+  "cpu": [
+    "x64",
+    "arm64"
+  ]
 }
-
-# Create Java packages
-function New-JavaPackages {
-    Write-Header "Creating Java Packages"
-    
-    $mavenDir = Join-Path $OutputPath "maven"
-    if (-not (Test-Path $mavenDir)) {
-        New-Item -ItemType Directory -Path $mavenDir -Force | Out-Null
-    }
-    
-    $packageVersion = Get-ProjectVersion
-    
-    # Create pom.xml
-    $pomXmlContent = @"
-<?xml version="1.0" encoding="UTF-8"?>
-<project xmlns="http://maven.apache.org/POM/4.0.0"
-         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
-         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 
-         http://maven.apache.org/xsd/maven-4.0.0.xsd">
-    <modelVersion>4.0.0</modelVersion>
-    
-    <groupId>net.uvf</groupId>
-    <artifactId>uvf-vault-native</artifactId>
-    <version>$packageVersion</version>
-    <packaging>jar</packaging>
-    
-    <name>UVF Vault Native</name>
-    <description>Java bindings for UVF.NET vault format with native performance</description>
-    <url>https://github.com/your-org/uvf.net</url>
-    
-    <licenses>
-        <license>
-            <name>MIT License</name>
-            <url>https://opensource.org/licenses/MIT</url>
-        </license>
-    </licenses>
-    
-    <developers>
-        <developer>
-            <name>UVF.NET Team</name>
-            <email>team@uvf.net</email>
-        </developer>
-    </developers>
-    
-    <properties>
-        <maven.compiler.source>11</maven.compiler.source>
-        <maven.compiler.target>11</maven.compiler.target>
-        <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
-    </properties>
-    
-    <dependencies>
-        <dependency>
-            <groupId>net.java.dev.jna</groupId>
-            <artifactId>jna</artifactId>
-            <version>5.13.0</version>
-        </dependency>
-        <dependency>
-            <groupId>net.java.dev.jna</groupId>
-            <artifactId>jna-platform</artifactId>
-            <version>5.13.0</version>
-        </dependency>
-    </dependencies>
-    
-    <build>
-        <plugins>
-            <plugin>
-                <groupId>org.apache.maven.plugins</groupId>
-                <artifactId>maven-compiler-plugin</artifactId>
-                <version>3.11.0</version>
-            </plugin>
-            <plugin>
-                <groupId>org.apache.maven.plugins</groupId>
-                <artifactId>maven-resources-plugin</artifactId>
-                <version>3.3.1</version>
-                <configuration>
-                    <includeEmptyDirs>true</includeEmptyDirs>
-                </configuration>
-            </plugin>
-        </plugins>
-    </build>
-</project>
 "@
     
-    $pomXmlPath = Join-Path $mavenDir "pom.xml"
-    Set-Content $pomXmlPath -Value $pomXmlContent -Encoding UTF8
+    $packageJsonPath = Join-Path $npmDir "package.json"
+    Set-Content $packageJsonPath -Value $packageJsonContent -Encoding UTF8
     
-    Write-Success "Created Java Maven pom.xml"
+    # Create index.js
+    $indexJsContent = @"
+const path = require('path');
+const os = require('os');
+
+// Determine platform-specific library
+function getNativeLibPath() {
+    const platform = os.platform();
+    const arch = os.arch();
+    
+    let platformId;
+    if (platform === 'win32') {
+        platformId = arch === 'x64' ? 'win-x64' : 'win-arm64';
+    } else if (platform === 'linux') {
+        platformId = arch === 'x64' ? 'linux-x64' : 'linux-arm64';
+    } else if (platform === 'darwin') {
+        platformId = arch === 'x64' ? 'osx-x64' : 'osx-arm64';
+    } else {
+        throw new Error('Unsupported platform: ' + platform + '-' + arch);
+    }
+    
+    return path.join(__dirname, 'native', platformId);
+}
+
+module.exports = {
+    getNativeLibPath,
+    version: '$packageVersion'
+};
+"@
+    
+    $indexJsPath = Join-Path $npmDir "index.js"
+    Set-Content $indexJsPath -Value $indexJsContent -Encoding UTF8
+    
+    # Copy native libraries
+    $nativeDir = Join-Path $npmDir "native"
+    if (-not (Test-Path $nativeDir)) {
+        New-Item -ItemType Directory -Path $nativeDir -Force | Out-Null
+    }
+    
+    $platforms = @("win-x64", "linux-x64", "osx-x64")
+    foreach ($platform in $platforms) {
+        $platformDir = Join-Path $NativePath $platform
+        if (Test-Path $platformDir) {
+            $platformNativeDir = Join-Path $nativeDir $platform
+            if (-not (Test-Path $platformNativeDir)) {
+                New-Item -ItemType Directory -Path $platformNativeDir -Force | Out-Null
+            }
+            
+            $files = Get-ChildItem $platformDir -File -Include "*.dll", "*.so", "*.dylib"
+            foreach ($file in $files) {
+                Copy-Item $file.FullName $platformNativeDir -Force
+                Write-Info "Copied $($file.Name) for $platform"
+            }
+        }
+    }
+    
+    Write-Success "Created Node.js package structure"
 }
 
 # Main execution
 function Main {
     $startTime = Get-Date
     
-    Write-Header "UVF.NET Binding Package Creator"
+    Write-Header "UVF.NET Language Binding Packager"
     Write-Host "Languages: $($Languages -join ', ')" -ForegroundColor White
     Write-Host "Version: $(Get-ProjectVersion)" -ForegroundColor White
     Write-Host "Native Path: $NativePath" -ForegroundColor White
     Write-Host "Output Path: $OutputPath" -ForegroundColor White
     
-    # Verify native libraries exist
-    if (-not (Test-Path $NativePath)) {
-        Write-Error "Native libraries not found at: $NativePath"
-        Write-Info "Run the AOT build scripts first: .\build-aot.ps1"
-        exit 1
-    }
-    
-    # Create output directories
-    if (-not (Test-Path $OutputPath)) {
-        New-Item -ItemType Directory -Path $OutputPath -Force | Out-Null
-    }
-    
     try {
+        # Verify native libraries exist
+        if (-not (Test-Path $NativePath)) {
+            Write-Error "Native libraries path not found: $NativePath"
+            Write-Error "Please run build-aot.ps1 first to create AOT libraries"
+            exit 1
+        }
+        
+        # Create output directory
+        if (-not (Test-Path $OutputPath)) {
+            New-Item -ItemType Directory -Path $OutputPath -Force | Out-Null
+        }
+        
         # Create packages for each language
         foreach ($language in $Languages) {
-            switch ($language) {
-                "CSharp" {
-                    New-CSharpPackages
-                }
-                "Python" {
-                    New-PythonPackages
-                }
-                "NodeJs" {
-                    New-NodeJsPackages
-                }
-                "Java" {
-                    New-JavaPackages
-                }
-                default {
-                    Write-Warning "Package creation for $language not yet implemented"
+            switch ($language.ToLower()) {
+                "csharp" { New-CSharpPackages }
+                "python" { New-PythonPackages }
+                "nodejs" { New-NodeJsPackages }
+                default { 
+                    Write-Warning "Unsupported language: $language"
+                    Write-Warning "Supported languages: CSharp, Python, NodeJs"
                 }
             }
         }
@@ -487,17 +419,17 @@ function Main {
         $endTime = Get-Date
         $duration = $endTime - $startTime
         
-        Write-Header "Package Creation Summary"
-        Write-Host "Completed in $($duration.TotalSeconds.ToString('F1')) seconds" -ForegroundColor Cyan
-        Write-Success "Packages available in: $OutputPath"
+        Write-Header "Packaging Complete! 🎉"
+        Write-Host "Total packaging time: $($duration.ToString('mm\:ss'))" -ForegroundColor Cyan
+        Write-Success "All packages available in: $OutputPath"
         
-        if ($PublishToRegistry) {
-            Write-Warning "Registry publishing not yet implemented"
-            Write-Info "Packages are ready for manual publishing"
-        }
+        Write-Host "`nNext steps:" -ForegroundColor Yellow
+        Write-Host "1. Test the language packages" -ForegroundColor White
+        Write-Host "2. Publish packages to their respective registries" -ForegroundColor White
+        
     }
     catch {
-        Write-Error "Package creation failed: $_"
+        Write-Error "Packaging failed: $($_.Exception.Message)"
         exit 1
     }
 }

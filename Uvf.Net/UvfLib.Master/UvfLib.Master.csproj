@@ -1,0 +1,65 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <Description>TitanVault - High-performance native vault library for UVF and Cryptomator formats</Description>
+    <AssemblyName>TitanVault</AssemblyName>
+  </PropertyGroup>
+  
+  <!-- Release-only AOT Configuration -->
+  <PropertyGroup Condition="'$(Configuration)' == 'Release'">
+    <PublishAot>true</PublishAot>
+    <OutputType>Library</OutputType>
+    <EnableDynamicLoading>true</EnableDynamicLoading>
+    <IsAotCompatible>true</IsAotCompatible>
+    <NativeLib>Shared</NativeLib>
+    <SelfContained>true</SelfContained>
+    <RuntimeIdentifier Condition="'$(RuntimeIdentifier)' == ''">win-x64</RuntimeIdentifier>
+    <Optimize>true</Optimize>
+    <DebugType>embedded</DebugType>
+    <TrimMode>full</TrimMode>
+    <SuppressTrimAnalysisWarnings>true</SuppressTrimAnalysisWarnings>
+  </PropertyGroup>
+  
+  <!-- Debug-only Configuration - Fast builds -->
+  <PropertyGroup Condition="'$(Configuration)' == 'Debug'">
+    <PublishAot>false</PublishAot>
+    <OutputType>Library</OutputType>
+    <Optimize>false</Optimize>
+    <DebugType>full</DebugType>
+    <DefineConstants>DEBUG;TRACE</DefineConstants>
+  </PropertyGroup>
+  
+  <ItemGroup>
+    <ProjectReference Include="..\..\..\FolderMagic\FolderMagic\StorageLib\StorageLib.csproj" />
+    <ProjectReference Include="..\UvfLib.Core\UvfLib.Core.csproj" />
+    <ProjectReference Include="..\UvfLib.Vault\UvfLib.Vault.csproj" />
+  </ItemGroup>
+  
+  <!-- Native AOT Analyzer for export validation - Release only -->
+  <ItemGroup Condition="'$(Configuration)' == 'Release'">
+    <PackageReference Include="Microsoft.DotNet.ILCompiler" Version="8.0.0" />
+  </ItemGroup>
+
+  <!-- Auto-copy AOT DLL to distribution directory after publish -->
+  <Target Name="CopyToDistribution" AfterTargets="Publish" Condition="'$(PublishAot)' == 'true'">
+    <PropertyGroup>
+      <DistPath>..\..\Dist\Native\$(RuntimeIdentifier)</DistPath>
+    </PropertyGroup>
+    
+    <Message Text="📂 Setting up distribution directory: $(DistPath)" Importance="high" />
+    <MakeDir Directories="$(DistPath)" />
+    
+    <ItemGroup>
+      <FilesToCopy Include="$(PublishDir)TitanVault.dll" />
+      <FilesToCopy Include="$(PublishDir)TitanVault.pdb" Condition="Exists('$(PublishDir)TitanVault.pdb')" />
+    </ItemGroup>
+    
+    <Copy SourceFiles="@(FilesToCopy)" DestinationFolder="$(DistPath)" />
+    <Message Text="✅ Copied TitanVault native library to $(DistPath)" Importance="high" />
+    <Message Text="🎯 DemoApp is now ready to use the native AOT library!" Importance="high" />
+  </Target>
+
+</Project>

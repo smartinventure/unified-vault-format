@@ -1,221 +1,218 @@
-# UVF.NET Build Scripts
+# UVF.NET Build System
 
-This directory contains PowerShell scripts for building UVF.NET as AOT-compiled native libraries and creating language bindings.
+This directory contains the streamlined build system for creating AOT-compiled native libraries and multi-language bindings for UVF.NET.
 
-## 🚨 Important: StorageLib Dependency
+## Overview
 
-UVF.NET depends on **StorageLib** from your **FolderMagic** solution. For AOT compilation to work, we need **source code**, not just NuGet packages.
+The build system transforms the .NET UVF library into native libraries for multiple platforms and creates language-specific packages for easy distribution and consumption.
 
-### Quick Setup (Local Development)
+```
+Source Code (.NET) → AOT Compilation → Native Libraries → Language Bindings → Distribution Packages
+```
 
-```bash
-# 1. Resolve StorageLib source code
-.\Scripts\resolve-storagelib.ps1
+## Quick Start
 
-# 2. Build everything
+### Build Everything (Recommended)
+```powershell
+# Build for current platform with all language packages
 .\Scripts\build-all.ps1
+
+# Build for specific platforms
+.\Scripts\build-all.ps1 -Platforms "win-x64,linux-x64,osx-x64"
+
+# Debug build with verbose output
+.\Scripts\build-all.ps1 -Configuration Debug -Verbose -Clean
 ```
 
-This will:
-- ✅ Find your local StorageLib at `D:\__PROGRAMMING\FolderMagic\FolderMagic\StorageLib\StorageLib.csproj`
-- ✅ Replace NuGet references with project references
-- ✅ Enable full AOT compilation with StorageLib source
+### AOT Libraries Only
+```powershell
+# Build native libraries for current platform
+.\Scripts\build-aot.ps1
 
-### Restore NuGet References (After AOT Build)
-
-```bash
-# Restore original NuGet references for normal development
-.\Scripts\resolve-storagelib.ps1 -Restore
+# Build for multiple platforms
+.\Scripts\build-aot.ps1 -Platforms "win-x64,linux-x64" -Clean
 ```
 
-## Build Scripts Overview
+### Language Packages Only
+```powershell
+# Create packages for all supported languages
+.\Scripts\package-bindings.ps1
 
-### Core Scripts
+# Specific languages only
+.\Scripts\package-bindings.ps1 -Languages "CSharp,Python"
+```
 
-| Script | Purpose | When to Use |
-|--------|---------|-------------|
-| `resolve-storagelib.ps1` | Resolve StorageLib source for AOT | Before any AOT build |
-| `build-all.ps1` | Complete build pipeline | Main entry point |
-| `build-aot.ps1` | AOT native libraries only | AOT compilation only |
-| `package-bindings.ps1` | Language-specific packages | After AOT build |
+## Build Scripts
 
-### Platform-Specific Scripts
+### Essential Scripts
 
 | Script | Purpose | Platforms |
 |--------|---------|-----------|
-| `build-windows.ps1` | Windows optimizations | win-x64, win-arm64 |
-| `build-linux.ps1` | Linux builds | linux-x64, linux-arm64 |
-| `build-macos.ps1` | macOS builds | osx-x64, osx-arm64 |
-
-## Usage Examples
-
-### 🏃‍♂️ Quick Start (Local Development)
-
-```bash
-# Build for current platform only
-.\Scripts\build-all.ps1
-
-# Build with specific configuration
-.\Scripts\build-all.ps1 -Configuration Debug
-```
-
-### 🌍 Cross-Platform Build
-
-```bash
-# Build for multiple platforms
-.\Scripts\build-all.ps1 -Platforms "win-x64,linux-x64,osx-x64" -Parallel
-
-# Build for all platforms
-.\Scripts\build-aot.ps1 -Platforms "win-x64,win-arm64,linux-x64,linux-arm64,osx-x64,osx-arm64"
-```
-
-### 🧪 Development Workflow
-
-```bash
-# 1. Set up StorageLib for AOT
-.\Scripts\resolve-storagelib.ps1
-
-# 2. Build and test
-.\Scripts\build-all.ps1 -Configuration Debug
-
-# 3. Create language bindings
-.\Scripts\package-bindings.ps1 -Languages "Python,NodeJs"
-
-# 4. Restore NuGet for normal development
-.\Scripts\resolve-storagelib.ps1 -Restore
-```
-
-### 🏗️ CI/CD Pipeline
-
-For Azure DevOps, use multi-repo checkout:
-
-```yaml
-# azure-pipelines.yml
-resources:
-  repositories:
-  - repository: FolderMagic
-    type: git
-    name: YourProject/FolderMagic
-
-steps:
-- checkout: self
-- checkout: FolderMagic
-  path: FolderMagic
-
-- pwsh: |
-    .\Scripts\resolve-storagelib.ps1 -UseAzureDevOps
-    .\Scripts\build-all.ps1 -Platforms "win-x64,linux-x64"
-```
-
-## StorageLib Resolution Details
-
-### How It Works
-
-1. **Local Development**: Uses `D:\__PROGRAMMING\FolderMagic\FolderMagic\StorageLib\StorageLib.csproj`
-2. **Azure DevOps**: Looks for `../FolderMagic/StorageLib/StorageLib.csproj` (multi-repo checkout)
-3. **Git Submodule**: Falls back to `External/FolderMagic/StorageLib/StorageLib.csproj`
-
-### What It Does
-
-**Before (NuGet Reference)**:
-```xml
-<PackageReference Include="FolderMagic.StorageLib" Version="1.0.250613.1337-dev" />
-```
-
-**After (Project Reference)**:
-```xml
-<ProjectReference Include="..\..\..\..\FolderMagic\FolderMagic\StorageLib\StorageLib.csproj" />
-```
-
-This enables the AOT compiler to:
-- ✅ Inline StorageLib methods
-- ✅ Perform whole-program optimization
-- ✅ Generate truly native libraries
-- ✅ Eliminate reflection dependencies
-
-### Affected Projects
-
-- `UvfLib.Storage/UvfLib.Storage.csproj`
-- `UvfLib.FileSystem/UvfLib.FileSystem.csproj`
+| `build-all.ps1` | **Master build script** - orchestrates everything | All |
+| `build-aot.ps1` | AOT compilation for native libraries | All |
+| `package-bindings.ps1` | Creates language-specific packages | All |
+| `resolve-storagelib-simple.ps1` | Resolves StorageLib dependencies | All |
 
 ## Output Structure
 
 ```
 Dist/
-├── Native/                    # AOT-compiled libraries
+├── Native/                    # AOT-compiled native libraries
 │   ├── win-x64/
-│   │   ├── UvfLib.Core/
-│   │   │   ├── lib/          # .dll files
-│   │   │   ├── bin/          # executables
-│   │   │   └── docs/         # XML documentation
-│   │   ├── UvfLib.Storage/   # ← Includes StorageLib code!
-│   │   └── UvfLib.Vault/
-│   ├── linux-x64/           # .so files
-│   └── osx-x64/              # .dylib files
-└── build-report.md           # Build summary
+│   │   ├── UvfLib.Core.dll   # Main library (1.36 MB)
+│   │   ├── UvfLib.Core.pdb   # Debug symbols
+│   │   ├── UvfLib.Core.xml   # API documentation
+│   │   ├── UvfLib.Storage.dll
+│   │   └── UvfLib.Vault.dll
+│   ├── linux-x64/
+│   ├── osx-x64/
+│   └── build-manifest.json   # Build metadata
+└── Packages/                  # Language-specific packages
+    ├── nuget/                # .NET NuGet packages
+    ├── npm/                  # Node.js packages
+    └── pip/                  # Python packages
 ```
+
+## Supported Platforms
+
+### Native Compilation Targets
+
+| Platform | Architecture | Status | Notes |
+|----------|-------------|---------|-------|
+| `win-x64` | Windows x64 | ✅ Full | Optimized for Windows |
+| `win-arm64` | Windows ARM64 | ✅ Full | Surface Pro X, etc. |
+| `linux-x64` | Linux x64 | ✅ Full | Most Linux distributions |
+| `linux-arm64` | Linux ARM64 | ✅ Full | Raspberry Pi, ARM servers |
+| `osx-x64` | macOS Intel | ✅ Full | Intel Macs |
+| `osx-arm64` | macOS Apple Silicon | ✅ Full | M1/M2/M3 Macs |
+
+### Language Bindings
+
+| Language | Package Manager | Status | Package Name |
+|----------|----------------|---------|--------------|
+| **C#/.NET** | NuGet | ✅ Ready | `UvfLib.Native` |
+| **Python** | PyPI | ✅ Ready | `uvf-vault` |
+| **Node.js** | NPM | ✅ Ready | `uvf-vault` |
+
+## Prerequisites
+
+### All Platforms
+- **.NET 8.0 SDK** or later
+- **PowerShell 7.0+** (cross-platform)
+- **Git** (for version detection)
+
+### Windows
+- **Visual Studio 2022** or **Build Tools for Visual Studio 2022**
+- **Windows SDK** (latest)
+
+### Linux
+- **GCC** or **Clang**
+- **Build essentials**: `sudo apt-get install build-essential libc6-dev libicu-dev libssl-dev`
+
+### macOS
+- **Xcode Command Line Tools**: `xcode-select --install`
+
+## Build Options
+
+### Common Parameters
+
+| Parameter | Description | Default | Example |
+|-----------|-------------|---------|---------|
+| `-Configuration` | Build configuration | `Release` | `-Configuration Debug` |
+| `-Platforms` | Target platforms | Current platform | `-Platforms "win-x64,linux-x64"` |
+| `-Languages` | Language packages to create | CSharp,Python,NodeJs | `-Languages "CSharp,Python"` |
+| `-Clean` | Clean before building | `false` | `-Clean` |
+| `-Verbose` | Detailed logging | `false` | `-Verbose` |
+
+### Advanced Options
+
+| Parameter | Description | Scripts | Example |
+|-----------|-------------|---------|---------|
+| `-SkipTests` | Skip running tests | `build-all.ps1` | `-SkipTests` |
+| `-SkipNativeLibraries` | Skip AOT compilation | `build-all.ps1` | `-SkipNativeLibraries` |
+| `-Projects` | Specific projects to build | `build-aot.ps1` | `-Projects "UvfLib.Core"` |
+| `-OutputPath` | Custom output directory | `build-aot.ps1`, `package-bindings.ps1` | `-OutputPath "./MyDist"` |
+
+## Usage Examples
+
+### Development Workflow
+```powershell
+# Quick development build for current platform
+.\Scripts\build-all.ps1 -Configuration Debug
+
+# Full release build for distribution
+.\Scripts\build-all.ps1 -Configuration Release -Clean
+
+# Test specific project only
+.\Scripts\build-aot.ps1 -Projects "UvfLib.Core" -Configuration Debug
+```
+
+### CI/CD Pipeline
+```powershell
+# Complete build for all platforms
+.\Scripts\build-all.ps1 -Platforms "win-x64,win-arm64,linux-x64,linux-arm64,osx-x64,osx-arm64" -Clean
+
+# Create and test packages
+.\Scripts\package-bindings.ps1 -Languages "CSharp,Python,NodeJs"
+```
+
+### Cross-Platform Development
+```powershell
+# Build for multiple platforms from Windows
+.\Scripts\build-aot.ps1 -Platforms "win-x64,linux-x64,osx-x64"
+
+# Create Python packages only
+.\Scripts\package-bindings.ps1 -Languages "Python"
+```
+
+## Performance Optimizations
+
+### AOT Compilation Features
+- **Native code generation** - No JIT overhead
+- **Trimming** - Removes unused code
+- **Speed optimization** - Optimized for performance
+- **Small binary size** - 1.36 MB for UvfLib.Core
+
+### Key Benefits
+- **Fast startup** - No JIT compilation delay
+- **Cross-platform** - Single codebase, multiple targets
+- **Language agnostic** - C-compatible exports
+- **Production ready** - Optimized release builds
 
 ## Troubleshooting
 
-### ❌ "StorageLib source not found"
+### Common Issues
 
-**Problem**: `resolve-storagelib.ps1` can't find StorageLib source code.
+1. **StorageLib not found**
+   ```powershell
+   .\Scripts\resolve-storagelib-simple.ps1
+   ```
 
-**Solutions**:
-1. **Check local path**: Ensure `D:\__PROGRAMMING\FolderMagic\FolderMagic\StorageLib\StorageLib.csproj` exists
-2. **Use Azure DevOps**: Run with `-UseAzureDevOps` flag
-3. **Set up submodule**: Add FolderMagic as git submodule
+2. **Build failures**
+   ```powershell
+   # Clean and rebuild
+   .\Scripts\build-all.ps1 -Clean -Verbose
+   ```
 
-### ❌ "AOT compilation failed"
+3. **Missing platforms**
+   ```powershell
+   # Check available platforms
+   dotnet --list-runtimes
+   ```
 
-**Problem**: Build fails during AOT compilation.
+### Getting Help
 
-**Solutions**:
-1. **Resolve StorageLib first**: Run `.\Scripts\resolve-storagelib.ps1`
-2. **Check dependencies**: Ensure all NuGet packages support AOT
-3. **Clean build**: Use `-Clean` flag
+- Check build logs with `-Verbose` flag
+- Ensure all prerequisites are installed
+- Verify .NET 8.0 SDK is available
+- Check platform-specific requirements
 
-### ❌ "Project reference not found"
+## Version Information
 
-**Problem**: Build can't find StorageLib project reference.
-
-**Solutions**:
-1. **Verify path**: Check that relative path to StorageLib is correct
-2. **Restore NuGet**: Run `.\Scripts\resolve-storagelib.ps1 -Restore`
-3. **Rebuild**: Clean and rebuild solution
-
-## Advanced Usage
-
-### Custom StorageLib Path
-
-```bash
-# If StorageLib is in a different location
-$env:STORAGELIB_PATH = "C:\MyProjects\StorageLib\StorageLib.csproj"
-.\Scripts\resolve-storagelib.ps1
-```
-
-### Container Builds
-
-```bash
-# Use Docker for isolated Linux builds
-.\Scripts\build-linux.ps1 -UseContainer
-```
-
-### Performance Optimization
-
-```bash
-# Optimize for speed vs size
-.\Scripts\build-windows.ps1 -OptimizeFor Speed
-.\Scripts\build-windows.ps1 -OptimizeFor Size
-```
-
-## Next Steps
-
-1. **Test AOT libraries**: Verify native libraries work correctly
-2. **Create bindings**: Use `package-bindings.ps1` for language wrappers  
-3. **Deploy**: Distribute native libraries and language packages
-4. **CI/CD**: Set up automated builds with Azure DevOps
+- **Build System Version**: 2.0 (Streamlined)
+- **Target .NET Version**: 8.0
+- **Supported PowerShell**: 7.0+
+- **AOT Compatibility**: Full support
 
 ---
-
-💡 **Pro Tip**: Always run `resolve-storagelib.ps1 -Restore` after AOT builds to return to normal NuGet-based development workflow. 
+*Generated by UVF.NET Build System - Streamlined Edition* 

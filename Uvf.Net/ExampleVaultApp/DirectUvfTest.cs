@@ -1,7 +1,7 @@
 using StorageLib.Abstractions;
 using StorageLib.Streaming;
-using UvfLib.Storage;
-using UvfLib.Storage.Decorators;
+using UvfLib.Master;
+using UvfLib.Master.Decorators;
 using UvfLib.Vault;
 using UvfLib.Core.Api;
 using System.Diagnostics;

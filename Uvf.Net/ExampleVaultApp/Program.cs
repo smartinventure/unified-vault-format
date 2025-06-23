@@ -1,5 +1,5 @@
 ﻿using ExampleVaultApp;
-using UvfLib.Storage;
+using UvfLib.Master;
 using UvfLib.Vault;
 using UvfLib.Core.Api;
 
@@ -16,7 +16,7 @@ namespace ExampleVaultApp
 
         public static async Task Main(string[] args)
         {
-            Console.WriteLine("ExampleVaultApp - Testing UvfLib.Storage Implementation");
+            Console.WriteLine("ExampleVaultApp - Testing UvfLib.Master Implementation");
             
             if (args.Length == 0)
             {

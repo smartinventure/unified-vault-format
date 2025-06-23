@@ -132,33 +132,8 @@ function Test-BuildPrerequisites {
         Write-Info "Windows build environment detected"
     } elseif ($CurrentPlatform.StartsWith("linux")) {
         Write-Info "Linux build environment detected"
-        
-        # Check for build tools
-        $tools = @("gcc", "make")
-        foreach ($tool in $tools) {
-            try {
-                $toolPath = which $tool 2>$null
-                if ($toolPath) {
-                    Write-Success "Tool: $tool"
-                } else {
-                    Write-Warning "Tool not found: $tool (may be needed for native compilation)"
-                }
-            }
-            catch {
-                Write-Warning "Could not check tool: $tool"
-            }
-        }
     } elseif ($CurrentPlatform.StartsWith("osx")) {
         Write-Info "macOS build environment detected"
-        
-        # Check Xcode tools
-        try {
-            $xcodeVersion = xcode-select --version 2>$null
-            Write-Success "Xcode Command Line Tools: $xcodeVersion"
-        }
-        catch {
-            Write-Warning "Xcode Command Line Tools not found. May be needed for native compilation."
-        }
     }
 }
 
@@ -191,7 +166,7 @@ function Build-ManagedLibraries {
         }
     }
     catch {
-        Write-Error "Exception building managed libraries: $_"
+        Write-Error "Exception building managed libraries: $($_.Exception.Message)"
         exit 1
     }
 }
@@ -219,7 +194,7 @@ function Invoke-Tests {
         }
     }
     catch {
-        Write-Error "Exception running tests: $_"
+        Write-Error "Exception running tests: $($_.Exception.Message)"
         exit 1
     }
 }
@@ -256,32 +231,7 @@ function Build-AotLibraries {
         
         Write-Info "Executing AOT build: $buildScript $($buildArgs -join ' ')"
         
-        if ($Parallel -and $Platforms.Count -gt 1) {
-            # Build platforms in parallel
-            Write-Info "Building platforms in parallel..."
-            
-            $jobs = @()
-            foreach ($platform in $Platforms) {
-                $job = Start-Job -ScriptBlock {
-                    param($ScriptPath, $Config, $Platform, $CleanFlag, $VerboseFlag)
-                    
-                    $args = @("-Configuration", $Config, "-Platforms", $Platform)
-                    if ($CleanFlag) { $args += "-Clean" }
-                    if ($VerboseFlag) { $args += "-Verbose" }
-                    
-                    & $ScriptPath @args
-                } -ArgumentList $buildScript, $Configuration, $platform, $Clean, $Verbose
-                
-                $jobs += $job
-            }
-            
-            # Wait for all jobs to complete
-            $jobs | Wait-Job | Receive-Job
-            $jobs | Remove-Job
-        } else {
-            # Sequential build
-            & $buildScript @buildArgs
-        }
+        & $buildScript @buildArgs
         
         if ($LASTEXITCODE -eq 0) {
             Write-Success "AOT libraries built successfully"
@@ -291,13 +241,10 @@ function Build-AotLibraries {
         }
     }
     catch {
-        Write-Error "Exception building AOT libraries: $_"
+        Write-Error "Exception building AOT libraries: $($_.Exception.Message)"
         exit 1
     }
 }
-
-# Note: Language binding creation is separate from AOT compilation
-# Use .\package-bindings.ps1 separately to create language-specific wrappers
 
 # Generate build report
 function New-BuildReport {
@@ -338,38 +285,20 @@ function New-BuildReport {
             if (Test-Path $platformDir) {
                 $report += "`n#### $platform`n`n"
                 
-                $projects = Get-ChildItem $platformDir -Directory
-                foreach ($project in $projects) {
-                    $report += "- **$($project.Name)**`n"
-                    
-                    $libDir = Join-Path $project.FullName "lib"
-                    if (Test-Path $libDir) {
-                        $libs = Get-ChildItem $libDir -File
-                        foreach ($lib in $libs) {
-                            $sizeKB = [math]::Round($lib.Length / 1024, 1)
-                            $report += "  - $($lib.Name) ($sizeKB KB)`n"
-                        }
-                    }
+                $files = Get-ChildItem $platformDir -File
+                foreach ($file in $files) {
+                    $sizeKB = [math]::Round($file.Length / 1024, 1)
+                    $report += "- $($file.Name) ($sizeKB KB)`n"
                 }
             }
         }
     }
-    
-    # Note: Language packages created separately by package-bindings.ps1
     
     $report += @"
 
 ## Usage
 
 The AOT libraries provide C-compatible exports that can be used from any language.
-
-### Direct C-style usage
-```c
-// Example C header usage (generated during AOT build)
-#include "uvflib_native.h"
-
-int result = uvf_create_vault("/path/to/vault", "password");
-```
 
 ### Language Bindings
 Create language-specific wrappers using:
@@ -401,7 +330,7 @@ function Main {
         Test-BuildPrerequisites
         
         # Step 2: Resolve StorageLib for AOT
-        $resolveScript = Join-Path $ScriptRoot "resolve-storagelib.ps1"
+        $resolveScript = Join-Path $ScriptRoot "resolve-storagelib-simple.ps1"
         if (Test-Path $resolveScript) {
             Write-Step "Resolving StorageLib for AOT Compilation"
             & $resolveScript
@@ -438,7 +367,7 @@ function Main {
         
     }
     catch {
-        Write-Error "Build failed: $_"
+        Write-Error "Build failed: $($_.Exception.Message)"
         exit 1
     }
 }

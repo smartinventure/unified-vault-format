@@ -7,12 +7,12 @@
     <Nullable>enable</Nullable>
   </PropertyGroup>
 
-  <!-- StorageLib dependency removed - now accessed through UvfLib.Storage -->
+  <!-- StorageLib dependency removed - now accessed through UvfLib.Master -->
 
   <ItemGroup>
     <ProjectReference Include="..\UvfLib.Core\UvfLib.Core.csproj" />
+    <ProjectReference Include="..\UvfLib.Master\UvfLib.Master.csproj" />
     <ProjectReference Include="..\UvfLib.Vault\UvfLib.Vault.csproj" />
-    <ProjectReference Include="..\UvfLib.Storage\UvfLib.Storage.csproj" />
   </ItemGroup>
 
 </Project>

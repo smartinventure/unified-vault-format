@@ -24,7 +24,7 @@ namespace UvfLib.Vault.VaultHelpers
     public class CryptomatorVault : IDisposable
     {
         private readonly string _vaultFolder;
-        private readonly string _password;
+        private readonly byte[] _passwordBytes;
         private VaultHandler? _vault;
         private bool _disposed;
 
@@ -33,10 +33,10 @@ namespace UvfLib.Vault.VaultHelpers
         private const string VAULT_CONFIG_FILE = "vault.cryptomator";
         private const string ROOT_PATH = "/";
 
-        private CryptomatorVault(string vaultFolder, string password)
+        private CryptomatorVault(string vaultFolder, byte[] passwordBytes)
         {
             _vaultFolder = NormalizePath(vaultFolder);
-            _password = password;
+            _passwordBytes = passwordBytes ?? throw new ArgumentNullException(nameof(passwordBytes));
         }
 
         #region Factory Methods
@@ -45,12 +45,12 @@ namespace UvfLib.Vault.VaultHelpers
         /// Creates a new Cryptomator V8 vault in the specified folder.
         /// </summary>
         /// <param name="vaultFolder">Path to the vault folder</param>
-        /// <param name="password">Vault password</param>
+        /// <param name="passwordBytes">Vault password as UTF-8 encoded bytes</param>
         /// <returns>New CryptomatorVault instance</returns>
         /// <exception cref="InvalidOperationException">If vault already exists</exception>
-        public static CryptomatorVault Create(string vaultFolder, string password)
+        public static CryptomatorVault Create(string vaultFolder, byte[] passwordBytes)
         {
-            var vault = new CryptomatorVault(vaultFolder, password);
+            var vault = new CryptomatorVault(vaultFolder, passwordBytes);
             vault.CreateVaultFiles();
             vault.LoadVault();
             return vault;
@@ -60,12 +60,12 @@ namespace UvfLib.Vault.VaultHelpers
         /// Loads an existing Cryptomator V8 vault from the specified folder.
         /// </summary>
         /// <param name="vaultFolder">Path to the vault folder</param>
-        /// <param name="password">Vault password</param>
+        /// <param name="passwordBytes">Vault password as UTF-8 encoded bytes</param>
         /// <returns>Loaded CryptomatorVault instance</returns>
         /// <exception cref="InvalidOperationException">If vault doesn't exist or is invalid</exception>
-        public static CryptomatorVault Load(string vaultFolder, string password)
+        public static CryptomatorVault Load(string vaultFolder, byte[] passwordBytes)
         {
-            var vault = new CryptomatorVault(vaultFolder, password);
+            var vault = new CryptomatorVault(vaultFolder, passwordBytes);
             vault.ValidateVaultExists();
             vault.LoadVault();
             return vault;
@@ -75,11 +75,11 @@ namespace UvfLib.Vault.VaultHelpers
         /// Loads an existing vault or creates a new one if it doesn't exist.
         /// </summary>
         /// <param name="vaultFolder">Path to the vault folder</param>
-        /// <param name="password">Vault password</param>
+        /// <param name="passwordBytes">Vault password as UTF-8 encoded bytes</param>
         /// <returns>CryptomatorVault instance</returns>
-        public static CryptomatorVault LoadOrCreate(string vaultFolder, string password)
+        public static CryptomatorVault LoadOrCreate(string vaultFolder, byte[] passwordBytes)
         {
-            var vault = new CryptomatorVault(vaultFolder, password);
+            var vault = new CryptomatorVault(vaultFolder, passwordBytes);
             
             if (vault.VaultExists())
             {
@@ -563,8 +563,8 @@ namespace UvfLib.Vault.VaultHelpers
         /// <summary>
         /// Changes the vault password.
         /// </summary>
-        /// <param name="newPassword">New password</param>
-        public void ChangePassword(string newPassword)
+        /// <param name="newPasswordBytes">New password as UTF-8 encoded bytes</param>
+        public void ChangePassword(byte[] newPasswordBytes)
         {
             // TODO: Implementation
             // Re-encrypt masterkey.cryptomator with new password
@@ -585,10 +585,8 @@ namespace UvfLib.Vault.VaultHelpers
 
             Directory.CreateDirectory(_vaultFolder);
 
-            // TODO: Use our knowledge from IdenticalVaultCreator to create proper vault files
-            // 1. Create masterkey.cryptomator
-            // 2. Create vault.cryptomator with proper JWT signature
-            // 3. Create root directory structure
+            // Use VaultHandler to create proper Cryptomator V8 vault files
+            VaultHandler.CreateNewCryptomatorV8VaultComplete(_vaultFolder, _passwordBytes);
         }
 
         private void LoadVault()
@@ -598,7 +596,7 @@ namespace UvfLib.Vault.VaultHelpers
             // Load the vault using our existing Vault class
             var masterkeyPath = Path.Combine(_vaultFolder, MASTERKEY_FILE);
             var masterkeyBytes = File.ReadAllBytes(masterkeyPath);
-            _vault = VaultHandler.LoadCryptomatorV8Vault(masterkeyBytes, _password);
+            _vault = VaultHandler.LoadCryptomatorV8Vault(masterkeyBytes, _passwordBytes);
         }
 
         private void ValidateVaultExists()

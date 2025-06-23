@@ -1,6 +1,8 @@
 using System;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using UvfLib.Core.Api;
+using UvfLib.Core.Jwe;
 
 namespace UvfLib.Core.Common
 {
@@ -27,6 +29,15 @@ namespace UvfLib.Core.Common
             if (obj == null)
                 throw new ArgumentNullException(nameof(obj));
 
+            // For AOT compatibility, try to use UvfJsonContext first for known types
+            if (typeof(T) == typeof(UvfMasterkeyPayload))
+                return JsonSerializer.Serialize((UvfMasterkeyPayload)(object)obj!, UvfJsonContext.Default.UvfMasterkeyPayload);
+            if (typeof(T) == typeof(MasterkeyFile))
+                return JsonSerializer.Serialize((MasterkeyFile)(object)obj!, UvfJsonContext.Default.MasterkeyFile);
+            if (typeof(T) == typeof(KeyDerivationParameters))
+                return JsonSerializer.Serialize((KeyDerivationParameters)(object)obj!, UvfJsonContext.Default.KeyDerivationParameters);
+
+            // Fallback to reflection-based serialization with warning suppression
             return JsonSerializer.Serialize(obj, _options);
         }
 
@@ -41,6 +52,18 @@ namespace UvfLib.Core.Common
             if (string.IsNullOrEmpty(json))
                 throw new ArgumentNullException(nameof(json));
 
+            // For AOT compatibility, try to use UvfJsonContext first for known types
+            if (typeof(T) == typeof(UvfMasterkeyPayload))
+                return (T)(object)(JsonSerializer.Deserialize<UvfMasterkeyPayload>(json, UvfJsonContext.Default.UvfMasterkeyPayload) ?? 
+                    throw new InvalidOperationException("Deserialization returned null"));
+            if (typeof(T) == typeof(MasterkeyFile))
+                return (T)(object)(JsonSerializer.Deserialize<MasterkeyFile>(json, UvfJsonContext.Default.MasterkeyFile) ?? 
+                    throw new InvalidOperationException("Deserialization returned null"));
+            if (typeof(T) == typeof(KeyDerivationParameters))
+                return (T)(object)(JsonSerializer.Deserialize<KeyDerivationParameters>(json, UvfJsonContext.Default.KeyDerivationParameters) ?? 
+                    throw new InvalidOperationException("Deserialization returned null"));
+
+            // Fallback to reflection-based deserialization
             return JsonSerializer.Deserialize<T>(json, _options) ??
                 throw new InvalidOperationException("Deserialization returned null");
         }

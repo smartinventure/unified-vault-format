@@ -209,11 +209,7 @@ namespace UvfLib.Core.V3
 
             try
             {
-                var options = new JsonSerializerOptions
-                {
-                    PropertyNameCaseInsensitive = true // Helpful if casing mismatches UVF spec
-                };
-                UvfMasterkeyPayload? payload = JsonSerializer.Deserialize<UvfMasterkeyPayload>(jsonPayload, options);
+                UvfMasterkeyPayload? payload = JsonSerializer.Deserialize<UvfMasterkeyPayload>(jsonPayload, UvfJsonContext.Default.UvfMasterkeyPayload);
 
                 if (payload == null)
                 {

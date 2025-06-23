@@ -3,7 +3,7 @@ using System.IO;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
-using UvfLib.Storage;
+using UvfLib.Master;
 using StorageLib.Abstractions;
 
 namespace ExampleVaultApp
