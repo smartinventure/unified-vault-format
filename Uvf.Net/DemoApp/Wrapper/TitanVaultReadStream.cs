@@ -4,26 +4,26 @@ using System.IO;
 namespace DemoApp.Wrapper
 {
     /// <summary>
-    /// Stream implementation for writing to TitanVault files using native streaming exports.
-    /// Supports small buffer operations for large files without loading everything into memory.
+    /// Stream implementation for reading from TitanVault files using native streaming exports.
+    /// Supports random access and small buffer operations for large files.
     /// </summary>
-    public class TitanVaultWriteStream : Stream
+    public class TitanVaultReadStream : Stream
     {
         private readonly IntPtr _streamHandle;
         private readonly TitanVault _vault;
         private long _position;
         private bool _disposed;
 
-        internal TitanVaultWriteStream(IntPtr streamHandle, TitanVault vault)
+        internal TitanVaultReadStream(IntPtr streamHandle, TitanVault vault)
         {
             _streamHandle = streamHandle;
             _vault = vault ?? throw new ArgumentNullException(nameof(vault));
             _position = 0;
         }
 
-        public override bool CanRead => false;
+        public override bool CanRead => !_disposed;
         public override bool CanSeek => false; // Native streaming doesn't support seeking
-        public override bool CanWrite => !_disposed;
+        public override bool CanWrite => false;
         public override long Length => throw new NotSupportedException("Length is not supported for streaming operations");
         
         public override long Position 
@@ -34,53 +34,48 @@ namespace DemoApp.Wrapper
 
         public override int Read(byte[] buffer, int offset, int count)
         {
-            throw new NotSupportedException("Read is not supported on write-only stream");
-        }
-
-        public override void Write(byte[] buffer, int offset, int count)
-        {
             if (_disposed)
-                throw new ObjectDisposedException(nameof(TitanVaultWriteStream));
+                throw new ObjectDisposedException(nameof(TitanVaultReadStream));
             if (buffer == null)
                 throw new ArgumentNullException(nameof(buffer));
             if (offset < 0 || count < 0 || offset + count > buffer.Length)
                 throw new ArgumentOutOfRangeException();
 
             if (count == 0)
-                return;
+                return 0;
 
             unsafe
             {
                 // Create a temporary buffer for the native call
                 var tempBuffer = new byte[count];
-                Array.Copy(buffer, offset, tempBuffer, 0, count);
-                
                 fixed (byte* tempPtr = tempBuffer)
                 {
-                    var bytesWritten = TitanVaultNativeMethods.StreamWrite(_streamHandle, tempPtr, count);
+                    var bytesRead = TitanVaultNativeMethods.StreamRead(_streamHandle, tempPtr, count);
                     
-                    if (bytesWritten < 0)
+                    if (bytesRead < 0)
                     {
-                        throw new IOException($"Failed to write to stream: {TitanVaultUtils.GetLastErrorString()}");
+                        throw new IOException($"Failed to read from stream: {TitanVaultUtils.GetLastErrorString()}");
                     }
 
-                    if (bytesWritten != count)
+                    if (bytesRead > 0)
                     {
-                        throw new IOException($"Partial write: expected {count} bytes, wrote {bytesWritten} bytes");
+                        Array.Copy(tempBuffer, 0, buffer, offset, bytesRead);
+                        _position += bytesRead;
                     }
 
-                    _position += bytesWritten;
+                    return bytesRead;
                 }
             }
         }
 
+        public override void Write(byte[] buffer, int offset, int count)
+        {
+            throw new NotSupportedException("Write is not supported on read-only stream");
+        }
+
         public override void Flush()
         {
-            if (_disposed)
-                throw new ObjectDisposedException(nameof(TitanVaultWriteStream));
-            
-            // Native streaming handles flushing automatically
-            // No explicit flush operation needed
+            // No-op for read stream
         }
 
         public override long Seek(long offset, SeekOrigin origin)
@@ -90,7 +85,7 @@ namespace DemoApp.Wrapper
 
         public override void SetLength(long value)
         {
-            throw new NotSupportedException("SetLength is not supported for streaming operations");
+            throw new NotSupportedException("SetLength is not supported on read-only stream");
         }
 
         protected override void Dispose(bool disposing)

@@ -1696,6 +1696,298 @@ namespace UvfLib.Master.Exports
 
         #endregion
 
+        #region Advanced Vault Operations
+
+        /// <summary>
+        /// Change UVF admin password.
+        /// </summary>
+        [UnmanagedCallersOnly(EntryPoint = "titan_vault_change_uvf_admin_password")]
+        public static unsafe int ChangeUvfAdminPassword(
+            IntPtr vaultPathBytes,
+            int vaultPathLength,
+            IntPtr oldPasswordBytes,
+            int oldPasswordLength,
+            IntPtr newPasswordBytes,
+            int newPasswordLength)
+        {
+            try
+            {
+                if (vaultPathBytes == IntPtr.Zero || vaultPathLength <= 0 ||
+                    oldPasswordBytes == IntPtr.Zero || oldPasswordLength <= 0 ||
+                    newPasswordBytes == IntPtr.Zero || newPasswordLength <= 0)
+                {
+                    SetLastError("Invalid parameters");
+                    return TITAN_VAULT_ERROR_INVALID_PARAMETER;
+                }
+
+                var vaultPath = GetUtf8String(vaultPathBytes, vaultPathLength);
+                var oldPasswordChars = GetPasswordChars(oldPasswordBytes, oldPasswordLength);
+                var newPasswordChars = GetPasswordChars(newPasswordBytes, newPasswordLength);
+
+                if (string.IsNullOrEmpty(vaultPath) || oldPasswordChars == null || newPasswordChars == null)
+                {
+                    SetLastError("Failed to decode parameters");
+                    return TITAN_VAULT_ERROR_INVALID_PARAMETER;
+                }
+
+                try
+                {
+                    VaultManager.ChangeUvfAdminPasswordAsync(vaultPath, oldPasswordChars, newPasswordChars).Wait();
+                    return TITAN_VAULT_SUCCESS;
+                }
+                finally
+                {
+                    if (oldPasswordChars != null)
+                        Array.Clear(oldPasswordChars, 0, oldPasswordChars.Length);
+                    if (newPasswordChars != null)
+                        Array.Clear(newPasswordChars, 0, newPasswordChars.Length);
+                }
+            }
+            catch (AggregateException ex) when (ex.InnerException is UnauthorizedAccessException)
+            {
+                SetLastError("Invalid old password");
+                return TITAN_VAULT_ERROR_INVALID_PASSWORD;
+            }
+            catch (AggregateException ex) when (ex.InnerException != null)
+            {
+                SetLastError($"Failed to change admin password: {ex.InnerException.Message}");
+                return TITAN_VAULT_ERROR_INTERNAL;
+            }
+            catch (UnauthorizedAccessException)
+            {
+                SetLastError("Invalid old password");
+                return TITAN_VAULT_ERROR_INVALID_PASSWORD;
+            }
+            catch (Exception ex)
+            {
+                SetLastError($"Failed to change admin password: {ex.Message}");
+                return TITAN_VAULT_ERROR_INTERNAL;
+            }
+        }
+
+        /// <summary>
+        /// Change UVF user password.
+        /// </summary>
+        [UnmanagedCallersOnly(EntryPoint = "titan_vault_change_uvf_user_password")]
+        public static unsafe int ChangeUvfUserPassword(
+            IntPtr vaultPathBytes,
+            int vaultPathLength,
+            IntPtr adminPasswordBytes,
+            int adminPasswordLength,
+            IntPtr userIdBytes,
+            int userIdLength,
+            IntPtr newUserPasswordBytes,
+            int newUserPasswordLength)
+        {
+            try
+            {
+                if (vaultPathBytes == IntPtr.Zero || vaultPathLength <= 0 ||
+                    adminPasswordBytes == IntPtr.Zero || adminPasswordLength <= 0 ||
+                    userIdBytes == IntPtr.Zero || userIdLength <= 0 ||
+                    newUserPasswordBytes == IntPtr.Zero || newUserPasswordLength <= 0)
+                {
+                    SetLastError("Invalid parameters");
+                    return TITAN_VAULT_ERROR_INVALID_PARAMETER;
+                }
+
+                var vaultPath = GetUtf8String(vaultPathBytes, vaultPathLength);
+                var adminPasswordChars = GetPasswordChars(adminPasswordBytes, adminPasswordLength);
+                var userId = GetUtf8String(userIdBytes, userIdLength);
+                var newUserPasswordChars = GetPasswordChars(newUserPasswordBytes, newUserPasswordLength);
+
+                if (string.IsNullOrEmpty(vaultPath) || adminPasswordChars == null ||
+                    string.IsNullOrEmpty(userId) || newUserPasswordChars == null)
+                {
+                    SetLastError("Failed to decode parameters");
+                    return TITAN_VAULT_ERROR_INVALID_PARAMETER;
+                }
+
+                try
+                {
+                    VaultManager.ChangeUvfUserPasswordAsync(vaultPath, adminPasswordChars, userId, newUserPasswordChars).Wait();
+                    return TITAN_VAULT_SUCCESS;
+                }
+                finally
+                {
+                    if (adminPasswordChars != null)
+                        Array.Clear(adminPasswordChars, 0, adminPasswordChars.Length);
+                    if (newUserPasswordChars != null)
+                        Array.Clear(newUserPasswordChars, 0, newUserPasswordChars.Length);
+                }
+            }
+            catch (AggregateException ex) when (ex.InnerException is UnauthorizedAccessException)
+            {
+                SetLastError("Invalid admin password");
+                return TITAN_VAULT_ERROR_INVALID_PASSWORD;
+            }
+            catch (AggregateException ex) when (ex.InnerException != null)
+            {
+                SetLastError($"Failed to change user password: {ex.InnerException.Message}");
+                return TITAN_VAULT_ERROR_INTERNAL;
+            }
+            catch (UnauthorizedAccessException)
+            {
+                SetLastError("Invalid admin password");
+                return TITAN_VAULT_ERROR_INVALID_PASSWORD;
+            }
+            catch (Exception ex)
+            {
+                SetLastError($"Failed to change user password: {ex.Message}");
+                return TITAN_VAULT_ERROR_INTERNAL;
+            }
+        }
+
+        /// <summary>
+        /// Rotate vault keys (regenerate encryption keys).
+        /// </summary>
+        [UnmanagedCallersOnly(EntryPoint = "titan_vault_rotate_keys")]
+        public static unsafe int RotateVaultKeys(
+            IntPtr vaultPathBytes,
+            int vaultPathLength,
+            IntPtr adminPasswordBytes,
+            int adminPasswordLength,
+            int vaultFormat)
+        {
+            try
+            {
+                if (vaultPathBytes == IntPtr.Zero || vaultPathLength <= 0 ||
+                    adminPasswordBytes == IntPtr.Zero || adminPasswordLength <= 0)
+                {
+                    SetLastError("Invalid parameters");
+                    return TITAN_VAULT_ERROR_INVALID_PARAMETER;
+                }
+
+                var vaultPath = GetUtf8String(vaultPathBytes, vaultPathLength);
+                var adminPasswordChars = GetPasswordChars(adminPasswordBytes, adminPasswordLength);
+
+                if (string.IsNullOrEmpty(vaultPath) || adminPasswordChars == null)
+                {
+                    SetLastError("Failed to decode parameters");
+                    return TITAN_VAULT_ERROR_INVALID_PARAMETER;
+                }
+
+                try
+                {
+                    VaultManager.RotateVaultKeysAsync(vaultPath, adminPasswordChars).Wait();
+                    return TITAN_VAULT_SUCCESS;
+                }
+                finally
+                {
+                    if (adminPasswordChars != null)
+                        Array.Clear(adminPasswordChars, 0, adminPasswordChars.Length);
+                }
+            }
+            catch (AggregateException ex) when (ex.InnerException is UnauthorizedAccessException)
+            {
+                SetLastError("Invalid admin password");
+                return TITAN_VAULT_ERROR_INVALID_PASSWORD;
+            }
+            catch (AggregateException ex) when (ex.InnerException is NotImplementedException)
+            {
+                SetLastError("Key rotation not implemented for this vault type");
+                return TITAN_VAULT_ERROR_UNSUPPORTED_FORMAT;
+            }
+            catch (AggregateException ex) when (ex.InnerException != null)
+            {
+                SetLastError($"Failed to rotate keys: {ex.InnerException.Message}");
+                return TITAN_VAULT_ERROR_INTERNAL;
+            }
+            catch (UnauthorizedAccessException)
+            {
+                SetLastError("Invalid admin password");
+                return TITAN_VAULT_ERROR_INVALID_PASSWORD;
+            }
+            catch (NotImplementedException)
+            {
+                SetLastError("Key rotation not implemented for this vault type");
+                return TITAN_VAULT_ERROR_UNSUPPORTED_FORMAT;
+            }
+            catch (Exception ex)
+            {
+                SetLastError($"Failed to rotate keys: {ex.Message}");
+                return TITAN_VAULT_ERROR_INTERNAL;
+            }
+        }
+
+        /// <summary>
+        /// Backup vault files to specified directory.
+        /// </summary>
+        [UnmanagedCallersOnly(EntryPoint = "titan_vault_backup_files")]
+        public static unsafe int BackupVaultFiles(
+            IntPtr vaultPathBytes,
+            int vaultPathLength,
+            IntPtr backupPathBytes,
+            int backupPathLength,
+            int overwriteExisting)
+        {
+            try
+            {
+                if (vaultPathBytes == IntPtr.Zero || vaultPathLength <= 0 ||
+                    backupPathBytes == IntPtr.Zero || backupPathLength <= 0)
+                {
+                    SetLastError("Invalid parameters");
+                    return TITAN_VAULT_ERROR_INVALID_PARAMETER;
+                }
+
+                var vaultPath = GetUtf8String(vaultPathBytes, vaultPathLength);
+                var backupPath = GetUtf8String(backupPathBytes, backupPathLength);
+
+                if (string.IsNullOrEmpty(vaultPath) || string.IsNullOrEmpty(backupPath))
+                {
+                    SetLastError("Failed to decode parameters");
+                    return TITAN_VAULT_ERROR_INVALID_PARAMETER;
+                }
+
+                try
+                {
+                    VaultManager.BackupVaultFilesAsync(vaultPath, backupPath, overwriteExisting != 0).Wait();
+                    return TITAN_VAULT_SUCCESS;
+                }
+                catch (AggregateException ex) when (ex.InnerException is DirectoryNotFoundException)
+                {
+                    SetLastError("Vault directory not found");
+                    return TITAN_VAULT_ERROR_VAULT_NOT_FOUND;
+                }
+                catch (AggregateException ex) when (ex.InnerException is FileNotFoundException)
+                {
+                    SetLastError("Required vault files not found");
+                    return TITAN_VAULT_ERROR_VAULT_NOT_FOUND;
+                }
+                catch (AggregateException ex) when (ex.InnerException is IOException)
+                {
+                    SetLastError($"I/O error during backup: {ex.InnerException.Message}");
+                    return TITAN_VAULT_ERROR_ACCESS_DENIED;
+                }
+                catch (AggregateException ex) when (ex.InnerException != null)
+                {
+                    SetLastError($"Failed to backup vault files: {ex.InnerException.Message}");
+                    return TITAN_VAULT_ERROR_INTERNAL;
+                }
+            }
+            catch (DirectoryNotFoundException)
+            {
+                SetLastError("Vault directory not found");
+                return TITAN_VAULT_ERROR_VAULT_NOT_FOUND;
+            }
+            catch (FileNotFoundException)
+            {
+                SetLastError("Required vault files not found");
+                return TITAN_VAULT_ERROR_VAULT_NOT_FOUND;
+            }
+            catch (IOException ex)
+            {
+                SetLastError($"I/O error during backup: {ex.Message}");
+                return TITAN_VAULT_ERROR_ACCESS_DENIED;
+            }
+            catch (Exception ex)
+            {
+                SetLastError($"Failed to backup vault files: {ex.Message}");
+                return TITAN_VAULT_ERROR_INTERNAL;
+            }
+        }
+
+        #endregion
+
         #region Helper Methods
 
         private static unsafe IntPtr AllocateUtf8String(string str)

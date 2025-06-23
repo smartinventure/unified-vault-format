@@ -100,6 +100,43 @@ namespace DemoApp.Wrapper
             byte* adminPasswordBytes, int adminPasswordLength,
             byte* userIdToRemoveBytes, int userIdToRemoveLength);
 
+        /// <summary>
+        /// Change UVF admin password
+        /// </summary>
+        [DllImport(LibraryName, CallingConvention = CallingConvention.Cdecl, EntryPoint = "titan_vault_change_uvf_admin_password")]
+        public static extern unsafe int ChangeUvfAdminPassword(
+            byte* vaultPathBytes, int vaultPathLength,
+            byte* oldPasswordBytes, int oldPasswordLength,
+            byte* newPasswordBytes, int newPasswordLength);
+
+        /// <summary>
+        /// Change UVF user password
+        /// </summary>
+        [DllImport(LibraryName, CallingConvention = CallingConvention.Cdecl, EntryPoint = "titan_vault_change_uvf_user_password")]
+        public static extern unsafe int ChangeUvfUserPassword(
+            byte* vaultPathBytes, int vaultPathLength,
+            byte* adminPasswordBytes, int adminPasswordLength,
+            byte* userIdBytes, int userIdLength,
+            byte* newUserPasswordBytes, int newUserPasswordLength);
+
+        /// <summary>
+        /// Rotate vault keys (regenerate encryption keys)
+        /// </summary>
+        [DllImport(LibraryName, CallingConvention = CallingConvention.Cdecl, EntryPoint = "titan_vault_rotate_keys")]
+        public static extern unsafe int RotateVaultKeys(
+            byte* vaultPathBytes, int vaultPathLength,
+            byte* adminPasswordBytes, int adminPasswordLength,
+            int vaultFormat); // 1 = Cryptomator, 2 = UVF
+
+        /// <summary>
+        /// Backup vault files to specified directory
+        /// </summary>
+        [DllImport(LibraryName, CallingConvention = CallingConvention.Cdecl, EntryPoint = "titan_vault_backup_files")]
+        public static extern unsafe int BackupVaultFiles(
+            byte* vaultPathBytes, int vaultPathLength,
+            byte* backupPathBytes, int backupPathLength,
+            int overwriteExisting); // 1 = overwrite, 0 = don't overwrite
+
         #endregion
 
         #region File Operations

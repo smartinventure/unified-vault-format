@@ -132,7 +132,7 @@ namespace DemoApp
             /// Change the password of a Cryptomator vault
             /// </summary>
             public static void ChangeCryptomatorPassword(string vaultPath, char[] oldPassword, char[] newPassword)
-                => Wrapper.TitanVaultStatic.ChangeCryptomatorPassword(vaultPath, oldPassword, newPassword);
+                => Wrapper.TitanVaultStatic.ChangeCryptomatorVaultPassword(vaultPath, oldPassword, newPassword);
         }
 
         /// <summary>

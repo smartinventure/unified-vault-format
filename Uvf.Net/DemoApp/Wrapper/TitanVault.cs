@@ -360,25 +360,60 @@ namespace DemoApp.Wrapper
 
         #endregion
 
-        #region Stream Operations (Placeholder)
+        #region Stream Operations
 
         /// <summary>
-        /// Opens a file for reading as a stream (placeholder - streams not yet implemented)
+        /// Opens a file for reading as a stream using native streaming exports.
+        /// Supports small buffer reads for large files.
         /// </summary>
         public Stream OpenReadStream(string filePath)
         {
-            // For now, use ReadAllBytes and return a MemoryStream
-            var data = ReadAllBytes(filePath);
-            return new MemoryStream(data, false);
+            EnsureOpen();
+            if (string.IsNullOrEmpty(filePath))
+                throw new ArgumentNullException(nameof(filePath));
+
+            unsafe
+            {
+                var filePathBytes = TitanVaultUtils.StringToUtf8Bytes(filePath);
+                fixed (byte* filePathPtr = filePathBytes)
+                {
+                    var streamHandle = TitanVaultNativeMethods.OpenReadStream(_vaultHandle, filePathPtr, filePathBytes.Length);
+                    
+                    if (streamHandle == IntPtr.Zero)
+                    {
+                        throw new InvalidOperationException($"Failed to open read stream: {TitanVaultUtils.GetLastErrorString()}");
+                    }
+
+                    return new TitanVaultReadStream(streamHandle, this);
+                }
+            }
         }
 
         /// <summary>
-        /// Opens a file for writing as a stream (placeholder - streams not yet implemented)
+        /// Opens a file for writing as a stream using native streaming exports.
+        /// Supports small buffer writes for large files.
         /// </summary>
         public Stream OpenWriteStream(string filePath)
         {
-            // For now, return a MemoryStream that will be written back when disposed
-            return new TitanVaultWriteStream(this, filePath);
+            EnsureOpen();
+            if (string.IsNullOrEmpty(filePath))
+                throw new ArgumentNullException(nameof(filePath));
+
+            unsafe
+            {
+                var filePathBytes = TitanVaultUtils.StringToUtf8Bytes(filePath);
+                fixed (byte* filePathPtr = filePathBytes)
+                {
+                    var streamHandle = TitanVaultNativeMethods.OpenWriteStream(_vaultHandle, filePathPtr, filePathBytes.Length);
+                    
+                    if (streamHandle == IntPtr.Zero)
+                    {
+                        throw new InvalidOperationException($"Failed to open write stream: {TitanVaultUtils.GetLastErrorString()}");
+                    }
+
+                    return new TitanVaultWriteStream(streamHandle, this);
+                }
+            }
         }
 
         /// <summary>
@@ -646,6 +681,66 @@ namespace DemoApp.Wrapper
                     }
                 }
             }
+        }
+
+        #endregion
+
+        #region Async Wrapper Methods
+
+        /// <summary>
+        /// Async wrapper for RemoveUserFromVault static method
+        /// </summary>
+        public static Task RemoveUserFromVaultAsync(string vaultPath, char[] adminPassword, string userIdToRemove)
+        {
+            return Task.Run(() => TitanVaultStatic.RemoveUserFromVault(vaultPath, adminPassword, userIdToRemove));
+        }
+
+        /// <summary>
+        /// Async wrapper for RotateVaultKeys static method
+        /// </summary>
+        public static Task RotateVaultKeysAsync(string vaultPath, char[] adminPassword, TitanVaultUtils.VaultFormat vaultFormat)
+        {
+            return Task.Run(() => TitanVaultStatic.RotateVaultKeys(vaultPath, adminPassword, vaultFormat));
+        }
+
+        /// <summary>
+        /// Async wrapper for BackupVaultFiles static method
+        /// </summary>
+        public static Task BackupVaultFilesAsync(string vaultPath, string backupPath, bool overwriteExisting = false)
+        {
+            return Task.Run(() => TitanVaultStatic.BackupVaultFiles(vaultPath, backupPath, overwriteExisting));
+        }
+
+        /// <summary>
+        /// Async wrapper for ChangeCryptomatorVaultPassword static method
+        /// </summary>
+        public static Task ChangeCryptomatorVaultPasswordAsync(string vaultPath, char[] oldPassword, char[] newPassword)
+        {
+            return Task.Run(() => TitanVaultStatic.ChangeCryptomatorVaultPassword(vaultPath, oldPassword, newPassword));
+        }
+
+        /// <summary>
+        /// Async wrapper for ChangeUvfAdminPassword static method
+        /// </summary>
+        public static Task ChangeUvfAdminPasswordAsync(string vaultPath, char[] oldPassword, char[] newPassword)
+        {
+            return Task.Run(() => TitanVaultStatic.ChangeUvfAdminPassword(vaultPath, oldPassword, newPassword));
+        }
+
+        /// <summary>
+        /// Async wrapper for ChangeUvfUserPassword static method
+        /// </summary>
+        public static Task ChangeUvfUserPasswordAsync(string vaultPath, char[] adminPassword, string userId, char[] newUserPassword)
+        {
+            return Task.Run(() => TitanVaultStatic.ChangeUvfUserPassword(vaultPath, adminPassword, userId, newUserPassword));
+        }
+
+        /// <summary>
+        /// Close the vault asynchronously
+        /// </summary>
+        public Task CloseVaultAsync()
+        {
+            return Task.Run(() => Close());
         }
 
         #endregion

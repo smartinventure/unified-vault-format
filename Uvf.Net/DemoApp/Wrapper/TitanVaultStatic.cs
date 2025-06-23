@@ -97,37 +97,36 @@ namespace DemoApp.Wrapper
             {
                 var vaultPathBytes = TitanVaultUtils.StringToUtf8Bytes(vaultPath);
                 var adminPasswordBytes = Encoding.UTF8.GetBytes(adminPassword);
-                var userIdToRemoveBytes = TitanVaultUtils.StringToUtf8Bytes(userIdToRemove);
+                var userIdBytes = TitanVaultUtils.StringToUtf8Bytes(userIdToRemove);
 
                 try
                 {
                     fixed (byte* vaultPathPtr = vaultPathBytes)
                     fixed (byte* adminPasswordPtr = adminPasswordBytes)
-                    fixed (byte* userIdToRemovePtr = userIdToRemoveBytes)
+                    fixed (byte* userIdPtr = userIdBytes)
                     {
                         var result = TitanVaultNativeMethods.RemoveUser(
                             vaultPathPtr, vaultPathBytes.Length,
                             adminPasswordPtr, adminPasswordBytes.Length,
-                            userIdToRemovePtr, userIdToRemoveBytes.Length);
+                            userIdPtr, userIdBytes.Length);
 
                         if (result != TitanVaultUtils.ReturnCodes.Success)
                         {
-                            throw new InvalidOperationException($"Failed to remove user: {TitanVaultUtils.GetLastErrorString()}");
+                            throw new InvalidOperationException($"Failed to remove user from vault: {TitanVaultUtils.GetLastErrorString()}");
                         }
                     }
                 }
                 finally
                 {
-                    // Clear sensitive data
                     Array.Clear(adminPasswordBytes, 0, adminPasswordBytes.Length);
                 }
             }
         }
 
         /// <summary>
-        /// Change the password of a Cryptomator vault
+        /// Change Cryptomator vault password
         /// </summary>
-        public static void ChangeCryptomatorPassword(string vaultPath, char[] oldPassword, char[] newPassword)
+        public static void ChangeCryptomatorVaultPassword(string vaultPath, char[] oldPassword, char[] newPassword)
         {
             if (string.IsNullOrEmpty(vaultPath))
                 throw new ArgumentNullException(nameof(vaultPath));
@@ -155,15 +154,181 @@ namespace DemoApp.Wrapper
 
                         if (result != TitanVaultUtils.ReturnCodes.Success)
                         {
-                            throw new InvalidOperationException($"Failed to change password: {TitanVaultUtils.GetLastErrorString()}");
+                            throw new InvalidOperationException($"Failed to change Cryptomator vault password: {TitanVaultUtils.GetLastErrorString()}");
                         }
                     }
                 }
                 finally
                 {
-                    // Clear sensitive data
                     Array.Clear(oldPasswordBytes, 0, oldPasswordBytes.Length);
                     Array.Clear(newPasswordBytes, 0, newPasswordBytes.Length);
+                }
+            }
+        }
+
+        /// <summary>
+        /// Change UVF admin password
+        /// </summary>
+        public static void ChangeUvfAdminPassword(string vaultPath, char[] oldPassword, char[] newPassword)
+        {
+            if (string.IsNullOrEmpty(vaultPath))
+                throw new ArgumentNullException(nameof(vaultPath));
+            if (oldPassword == null)
+                throw new ArgumentNullException(nameof(oldPassword));
+            if (newPassword == null)
+                throw new ArgumentNullException(nameof(newPassword));
+
+            unsafe
+            {
+                var vaultPathBytes = TitanVaultUtils.StringToUtf8Bytes(vaultPath);
+                var oldPasswordBytes = Encoding.UTF8.GetBytes(oldPassword);
+                var newPasswordBytes = Encoding.UTF8.GetBytes(newPassword);
+
+                try
+                {
+                    fixed (byte* vaultPathPtr = vaultPathBytes)
+                    fixed (byte* oldPasswordPtr = oldPasswordBytes)
+                    fixed (byte* newPasswordPtr = newPasswordBytes)
+                    {
+                        var result = TitanVaultNativeMethods.ChangeUvfAdminPassword(
+                            vaultPathPtr, vaultPathBytes.Length,
+                            oldPasswordPtr, oldPasswordBytes.Length,
+                            newPasswordPtr, newPasswordBytes.Length);
+
+                        if (result != TitanVaultUtils.ReturnCodes.Success)
+                        {
+                            throw new InvalidOperationException($"Failed to change UVF admin password: {TitanVaultUtils.GetLastErrorString()}");
+                        }
+                    }
+                }
+                finally
+                {
+                    Array.Clear(oldPasswordBytes, 0, oldPasswordBytes.Length);
+                    Array.Clear(newPasswordBytes, 0, newPasswordBytes.Length);
+                }
+            }
+        }
+
+        /// <summary>
+        /// Change UVF user password
+        /// </summary>
+        public static void ChangeUvfUserPassword(string vaultPath, char[] adminPassword, string userId, char[] newUserPassword)
+        {
+            if (string.IsNullOrEmpty(vaultPath))
+                throw new ArgumentNullException(nameof(vaultPath));
+            if (adminPassword == null)
+                throw new ArgumentNullException(nameof(adminPassword));
+            if (string.IsNullOrEmpty(userId))
+                throw new ArgumentNullException(nameof(userId));
+            if (newUserPassword == null)
+                throw new ArgumentNullException(nameof(newUserPassword));
+
+            unsafe
+            {
+                var vaultPathBytes = TitanVaultUtils.StringToUtf8Bytes(vaultPath);
+                var adminPasswordBytes = Encoding.UTF8.GetBytes(adminPassword);
+                var userIdBytes = TitanVaultUtils.StringToUtf8Bytes(userId);
+                var newUserPasswordBytes = Encoding.UTF8.GetBytes(newUserPassword);
+
+                try
+                {
+                    fixed (byte* vaultPathPtr = vaultPathBytes)
+                    fixed (byte* adminPasswordPtr = adminPasswordBytes)
+                    fixed (byte* userIdPtr = userIdBytes)
+                    fixed (byte* newUserPasswordPtr = newUserPasswordBytes)
+                    {
+                        var result = TitanVaultNativeMethods.ChangeUvfUserPassword(
+                            vaultPathPtr, vaultPathBytes.Length,
+                            adminPasswordPtr, adminPasswordBytes.Length,
+                            userIdPtr, userIdBytes.Length,
+                            newUserPasswordPtr, newUserPasswordBytes.Length);
+
+                        if (result != TitanVaultUtils.ReturnCodes.Success)
+                        {
+                            throw new InvalidOperationException($"Failed to change UVF user password: {TitanVaultUtils.GetLastErrorString()}");
+                        }
+                    }
+                }
+                finally
+                {
+                    Array.Clear(adminPasswordBytes, 0, adminPasswordBytes.Length);
+                    Array.Clear(newUserPasswordBytes, 0, newUserPasswordBytes.Length);
+                }
+            }
+        }
+
+        /// <summary>
+        /// Rotate vault keys (regenerate encryption keys)
+        /// </summary>
+        public static void RotateVaultKeys(string vaultPath, char[] adminPassword, TitanVaultUtils.VaultFormat vaultFormat)
+        {
+            if (string.IsNullOrEmpty(vaultPath))
+                throw new ArgumentNullException(nameof(vaultPath));
+            if (adminPassword == null)
+                throw new ArgumentNullException(nameof(adminPassword));
+
+            unsafe
+            {
+                var vaultPathBytes = TitanVaultUtils.StringToUtf8Bytes(vaultPath);
+                var adminPasswordBytes = Encoding.UTF8.GetBytes(adminPassword);
+
+                try
+                {
+                    fixed (byte* vaultPathPtr = vaultPathBytes)
+                    fixed (byte* adminPasswordPtr = adminPasswordBytes)
+                    {
+                        int formatCode = vaultFormat switch
+                        {
+                            TitanVaultUtils.VaultFormat.CryptomatorV8 => 1,
+                            TitanVaultUtils.VaultFormat.UVF => 2,
+                            _ => throw new ArgumentException($"Unsupported vault format: {vaultFormat}")
+                        };
+
+                        var result = TitanVaultNativeMethods.RotateVaultKeys(
+                            vaultPathPtr, vaultPathBytes.Length,
+                            adminPasswordPtr, adminPasswordBytes.Length,
+                            formatCode);
+
+                        if (result != TitanVaultUtils.ReturnCodes.Success)
+                        {
+                            throw new InvalidOperationException($"Failed to rotate vault keys: {TitanVaultUtils.GetLastErrorString()}");
+                        }
+                    }
+                }
+                finally
+                {
+                    Array.Clear(adminPasswordBytes, 0, adminPasswordBytes.Length);
+                }
+            }
+        }
+
+        /// <summary>
+        /// Backup vault files to specified directory
+        /// </summary>
+        public static void BackupVaultFiles(string vaultPath, string backupPath, bool overwriteExisting = false)
+        {
+            if (string.IsNullOrEmpty(vaultPath))
+                throw new ArgumentNullException(nameof(vaultPath));
+            if (string.IsNullOrEmpty(backupPath))
+                throw new ArgumentNullException(nameof(backupPath));
+
+            unsafe
+            {
+                var vaultPathBytes = TitanVaultUtils.StringToUtf8Bytes(vaultPath);
+                var backupPathBytes = TitanVaultUtils.StringToUtf8Bytes(backupPath);
+
+                fixed (byte* vaultPathPtr = vaultPathBytes)
+                fixed (byte* backupPathPtr = backupPathBytes)
+                {
+                    var result = TitanVaultNativeMethods.BackupVaultFiles(
+                        vaultPathPtr, vaultPathBytes.Length,
+                        backupPathPtr, backupPathBytes.Length,
+                        overwriteExisting ? 1 : 0);
+
+                    if (result != TitanVaultUtils.ReturnCodes.Success)
+                    {
+                        throw new InvalidOperationException($"Failed to backup vault files: {TitanVaultUtils.GetLastErrorString()}");
+                    }
                 }
             }
         }
@@ -220,7 +385,6 @@ namespace DemoApp.Wrapper
                 }
                 finally
                 {
-                    // Clear sensitive data
                     Array.Clear(adminPasswordBytes, 0, adminPasswordBytes.Length);
                 }
             }
