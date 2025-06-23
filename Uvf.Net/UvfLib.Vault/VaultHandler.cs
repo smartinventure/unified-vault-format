@@ -211,7 +211,7 @@ namespace UvfLib.Vault
                 }
             };
 
-            string jweString = JweVaultManager.CreateVault(payload, password, (int?)null);
+            string jweString = MultiUserJweVaultManager.CreateSingleUserVault(payload, password);
             return Encoding.UTF8.GetBytes(jweString);
         }
 
@@ -246,7 +246,7 @@ namespace UvfLib.Vault
             {
                 string jweString = Encoding.UTF8.GetString(uvfFileContent);
                 // Use KDF-aware loading that auto-detects PBKDF2 vs Scrypt
-                UvfMasterkeyPayload payload = JweVaultManager.LoadVaultPayload(jweString, password, (KeyDerivationParameters?)null);
+                UvfMasterkeyPayload payload = MultiUserJweVaultManager.LoadSingleUserVault(jweString, password);
                 
                 // Check for the custom config field
                 if (payload.Config?.EncryptFilenames.HasValue == true)
@@ -279,7 +279,7 @@ namespace UvfLib.Vault
             UvfLib.Core.Api.Cryptor? cryptor = null;
             try
             {
-                UvfMasterkeyPayload payload = JweVaultManager.LoadVaultPayload(jweString, password, (int?)null);
+                UvfMasterkeyPayload payload = MultiUserJweVaultManager.LoadSingleUserVault(jweString, password);
                 
                 // Instead of re-serializing, pass the payload object directly if UVFMasterkeyImpl can accept it.
                 // For now, assuming FromDecryptedPayload expects JSON string as per current V3.UVFMasterkeyImpl.
@@ -363,8 +363,8 @@ namespace UvfLib.Vault
         {
             // This reuses JweVaultManager which is correct.
             string oldJwe = Encoding.UTF8.GetString(encryptedUvfFileContent);
-            UvfMasterkeyPayload payload = JweVaultManager.LoadVaultPayload(oldJwe, oldPassword, (int?)null); // Decrypt with old
-            string newJwe = JweVaultManager.CreateVault(payload, newPassword, (int?)null); // Re-encrypt with new
+            UvfMasterkeyPayload payload = MultiUserJweVaultManager.LoadSingleUserVault(oldJwe, oldPassword); // Decrypt with old
+            string newJwe = MultiUserJweVaultManager.CreateSingleUserVault(payload, newPassword); // Re-encrypt with new
             return Encoding.UTF8.GetBytes(newJwe);
         }
 
@@ -986,7 +986,7 @@ namespace UvfLib.Vault
             {
                 // 1. Load the current vault payload
                 string jweString = Encoding.UTF8.GetString(encryptedUvfFileContent);
-                UvfMasterkeyPayload currentPayload = JweVaultManager.LoadVaultPayload(jweString, password, (int?)null);
+                UvfMasterkeyPayload currentPayload = MultiUserJweVaultManager.LoadSingleUserVault(jweString, password);
 
                 // 2. Generate a new seed
                 byte[] newSeedValue = new byte[32]; // 256-bit seed
@@ -1052,7 +1052,7 @@ namespace UvfLib.Vault
                 updatedPayload.Seeds.Add(newSeed);
 
                 // 6. Re-encrypt the vault with the updated payload
-                string rotatedJweString = JweVaultManager.CreateVault(updatedPayload, password, (int?)null);
+                string rotatedJweString = MultiUserJweVaultManager.CreateSingleUserVault(updatedPayload, password);
                 byte[] rotatedVaultContent = Encoding.UTF8.GetBytes(rotatedJweString);
 
                 // 7. Clean up sensitive data

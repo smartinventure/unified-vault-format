@@ -23,6 +23,29 @@ namespace UvfLib.Core.Jwe
         private const string UserKeyIdPrefix = "uvflib.net.user.";
 
         /// <summary>
+        /// Creates a single-user JWE vault (UVF-compliant with admin recipient).
+        /// </summary>
+        /// <param name="payload">The UVF masterkey payload to encrypt</param>
+        /// <param name="password">Password for the vault</param>
+        /// <param name="kdfParams">Key derivation parameters (optional, defaults to PBKDF2)</param>
+        /// <returns>JWE JSON serialization string</returns>
+        public static string CreateSingleUserVault(UvfMasterkeyPayload payload, string password, KeyDerivationParameters? kdfParams = null)
+        {
+            if (string.IsNullOrEmpty(password)) throw new ArgumentNullException(nameof(password));
+            
+            char[] passwordChars = password.ToCharArray();
+            try
+            {
+                var emptyUsers = new Dictionary<string, char[]>();
+                return CreateMultiUserVault(payload, emptyUsers, passwordChars, kdfParams);
+            }
+            finally
+            {
+                Array.Clear(passwordChars, 0, passwordChars.Length);
+            }
+        }
+
+        /// <summary>
         /// Creates a multi-user JWE vault with admin and user access.
         /// </summary>
         /// <param name="payload">The UVF masterkey payload to encrypt</param>
@@ -127,6 +150,27 @@ namespace UvfLib.Core.Jwe
                 KeyDerivationMethod.Scrypt => CreateMultiUserVaultWithScrypt(payload, userCredentials, adminPassword, kdfParams),
                 _ => throw new ArgumentException($"Unsupported key derivation method: {kdfParams.Method}")
             };
+        }
+
+        /// <summary>
+        /// Loads a single-user vault (admin recipient).
+        /// </summary>
+        /// <param name="jweJsonString">JWE JSON serialization string</param>
+        /// <param name="password">Password for the vault</param>
+        /// <returns>Decrypted UVF masterkey payload</returns>
+        public static UvfMasterkeyPayload LoadSingleUserVault(string jweJsonString, string password)
+        {
+            if (string.IsNullOrEmpty(password)) throw new ArgumentNullException(nameof(password));
+            
+            char[] passwordChars = password.ToCharArray();
+            try
+            {
+                return LoadMultiUserVault(jweJsonString, passwordChars, "admin");
+            }
+            finally
+            {
+                Array.Clear(passwordChars, 0, passwordChars.Length);
+            }
         }
 
         /// <summary>
@@ -368,12 +412,13 @@ namespace UvfLib.Core.Jwe
 
         private static string CreateProtectedHeader()
         {
-            var header = new
+            // Create the exact protected header required by UVF spec
+            var header = new Dictionary<string, object>
             {
-                enc = "A256GCM",
-                cty = "json",
-                crit = new[] { "uvf.spec.version" },
-                uvf_spec_version = 1
+                ["enc"] = "A256GCM",
+                ["cty"] = "json",
+                ["crit"] = new[] { "uvf.spec.version" },
+                ["uvf.spec.version"] = 1
             };
             
             string headerJson = JsonSerializer.Serialize(header);
@@ -605,13 +650,13 @@ namespace UvfLib.Core.Jwe
         /// </summary>
         private static string CreateScryptProtectedHeader(int uvfSpecVersion)
         {
-            var header = new
+            var header = new Dictionary<string, object>
             {
-                enc = "A256GCM",
-                cty = "json",
-                crit = new[] { "uvf.spec.version", "uvf.kdf.method" },
-                uvf_spec_version = uvfSpecVersion,
-                uvf_kdf_method = "scrypt"
+                ["enc"] = "A256GCM",
+                ["cty"] = "json",
+                ["crit"] = new[] { "uvf.spec.version", "uvf.kdf.method" },
+                ["uvf.spec.version"] = uvfSpecVersion,
+                ["uvf.kdf.method"] = "scrypt"
             };
             
             string headerJson = JsonSerializer.Serialize(header);
@@ -622,34 +667,114 @@ namespace UvfLib.Core.Jwe
     }
 
     /// <summary>
-    /// Helper class for AES Key Wrap operations
+    /// Helper class for RFC 3394 AES Key Wrap operations
     /// </summary>
     internal static class AesKeyWrap
     {
+        private static readonly byte[] DefaultIV = { 0xA6, 0xA6, 0xA6, 0xA6, 0xA6, 0xA6, 0xA6, 0xA6 };
+
         public static byte[] WrapKey(byte[] kek, byte[] keyToWrap)
         {
-            // Simplified AES Key Wrap implementation
-            // In production, use a proper AES Key Wrap implementation
+            if (kek == null) throw new ArgumentNullException(nameof(kek));
+            if (keyToWrap == null) throw new ArgumentNullException(nameof(keyToWrap));
+            if (keyToWrap.Length % 8 != 0) throw new ArgumentException("Key to wrap must be a multiple of 8 bytes");
+
+            int n = keyToWrap.Length / 8;
+            byte[] a = new byte[8];
+            Array.Copy(DefaultIV, a, 8);
+            
+            byte[] r = new byte[keyToWrap.Length];
+            Array.Copy(keyToWrap, r, keyToWrap.Length);
+
             using var aes = Aes.Create();
             aes.Key = kek;
             aes.Mode = CipherMode.ECB;
             aes.Padding = PaddingMode.None;
 
             using var encryptor = aes.CreateEncryptor();
-            return encryptor.TransformFinalBlock(keyToWrap, 0, keyToWrap.Length);
+
+            for (int j = 0; j <= 5; j++)
+            {
+                for (int i = 1; i <= n; i++)
+                {
+                    byte[] b = new byte[16];
+                    Array.Copy(a, 0, b, 0, 8);
+                    Array.Copy(r, (i - 1) * 8, b, 8, 8);
+                    
+                    byte[] encrypted = encryptor.TransformFinalBlock(b, 0, 16);
+                    
+                    // A = MSB(64, B) ^ t where t = (n*j)+i
+                    long t = (long)n * j + i;
+                    Array.Copy(encrypted, 0, a, 0, 8);
+                    for (int k = 7; k >= 0; k--)
+                    {
+                        a[k] ^= (byte)(t & 0xFF);
+                        t >>= 8;
+                    }
+                    
+                    // R[i] = LSB(64, B)
+                    Array.Copy(encrypted, 8, r, (i - 1) * 8, 8);
+                }
+            }
+
+            byte[] result = new byte[8 + r.Length];
+            Array.Copy(a, 0, result, 0, 8);
+            Array.Copy(r, 0, result, 8, r.Length);
+            return result;
         }
 
         public static byte[] UnwrapKey(byte[] kek, byte[] wrappedKey)
         {
-            // Simplified AES Key Wrap implementation
-            // In production, use a proper AES Key Wrap implementation
+            if (kek == null) throw new ArgumentNullException(nameof(kek));
+            if (wrappedKey == null) throw new ArgumentNullException(nameof(wrappedKey));
+            if (wrappedKey.Length < 24 || (wrappedKey.Length - 8) % 8 != 0) 
+                throw new ArgumentException("Wrapped key must be at least 24 bytes and (length - 8) must be a multiple of 8");
+
+            int n = (wrappedKey.Length - 8) / 8;
+            byte[] a = new byte[8];
+            Array.Copy(wrappedKey, 0, a, 0, 8);
+            
+            byte[] r = new byte[wrappedKey.Length - 8];
+            Array.Copy(wrappedKey, 8, r, 0, r.Length);
+
             using var aes = Aes.Create();
             aes.Key = kek;
             aes.Mode = CipherMode.ECB;
             aes.Padding = PaddingMode.None;
 
             using var decryptor = aes.CreateDecryptor();
-            return decryptor.TransformFinalBlock(wrappedKey, 0, wrappedKey.Length);
+
+            for (int j = 5; j >= 0; j--)
+            {
+                for (int i = n; i >= 1; i--)
+                {
+                    // A = A ^ t where t = n*j+i
+                    long t = (long)n * j + i;
+                    for (int k = 7; k >= 0; k--)
+                    {
+                        a[k] ^= (byte)(t & 0xFF);
+                        t >>= 8;
+                    }
+                    
+                    byte[] b = new byte[16];
+                    Array.Copy(a, 0, b, 0, 8);
+                    Array.Copy(r, (i - 1) * 8, b, 8, 8);
+                    
+                    byte[] decrypted = decryptor.TransformFinalBlock(b, 0, 16);
+                    
+                    Array.Copy(decrypted, 0, a, 0, 8);
+                    Array.Copy(decrypted, 8, r, (i - 1) * 8, 8);
+                }
+            }
+
+            // Verify the IV
+            for (int i = 0; i < 8; i++)
+            {
+                if (a[i] != DefaultIV[i])
+                    throw new System.Security.Cryptography.CryptographicException("AES Key Wrap integrity check failed");
+            }
+
+            return r;
         }
     }
 }

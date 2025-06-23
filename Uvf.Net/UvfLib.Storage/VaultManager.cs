@@ -951,10 +951,10 @@ namespace UvfLib.Storage
             {
                 // Use KDF-aware loading that auto-detects PBKDF2 vs Scrypt
                 string jweString = System.Text.Encoding.UTF8.GetString(vaultBytes);
-                var payload = UvfLib.Core.Jwe.JweVaultManager.LoadVaultPayload(jweString, password, (KeyDerivationParameters?)null);
+                var payload = UvfLib.Core.Jwe.MultiUserJweVaultManager.LoadSingleUserVault(jweString, password);
                 
                 // Convert payload back to JWE format that VaultHandler can understand
-                string singleUserJweString = UvfLib.Core.Jwe.JweVaultManager.CreateVault(payload, password, (int?)null);
+                string singleUserJweString = UvfLib.Core.Jwe.MultiUserJweVaultManager.CreateSingleUserVault(payload, password);
                 byte[] singleUserJweBytes = System.Text.Encoding.UTF8.GetBytes(singleUserJweString);
                 
                 // Load using VaultHandler with the converted PBKDF2 JWE
@@ -1116,7 +1116,7 @@ namespace UvfLib.Storage
                 var payload = UvfLib.Core.Jwe.MultiUserJweVaultManager.LoadMultiUserVault(jweString, userPassword, null);
                 
                 // Convert the payload back to a single-user JWE format that VaultHandler can understand
-                string singleUserJweString = UvfLib.Core.Jwe.JweVaultManager.CreateVault(payload, new string(userPassword), (int?)null);
+                string singleUserJweString = UvfLib.Core.Jwe.MultiUserJweVaultManager.CreateSingleUserVault(payload, new string(userPassword));
                 byte[] singleUserJweBytes = System.Text.Encoding.UTF8.GetBytes(singleUserJweString);
                 
                 // Now load using the regular UVF loader
@@ -1183,7 +1183,7 @@ namespace UvfLib.Storage
                 var payload = CreateUvfMasterkeyPayload(encryptFilenames);
                 
                 // Use the KDF-aware JweVaultManager.CreateVault method
-                string jweString = UvfLib.Core.Jwe.JweVaultManager.CreateVault(payload, password, kdfParams);
+                string jweString = UvfLib.Core.Jwe.MultiUserJweVaultManager.CreateSingleUserVault(payload, password, kdfParams);
                 return System.Text.Encoding.UTF8.GetBytes(jweString);
             }
             

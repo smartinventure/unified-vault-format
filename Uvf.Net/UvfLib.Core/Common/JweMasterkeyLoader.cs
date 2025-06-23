@@ -52,7 +52,17 @@ namespace UvfLib.Core.Common // Or UvfLib.Jwe, depending on preference
             {
                 string jweString = File.ReadAllText(vaultPath, Encoding.UTF8);
                 
-                UvfMasterkeyPayload payload = JweVaultManager.LoadVaultPayload(jweString, password, (int?)null);
+                // Try to load as single-user vault (admin user)
+                char[] passwordChars = password.ToCharArray();
+                UvfMasterkeyPayload payload;
+                try
+                {
+                    payload = MultiUserJweVaultManager.LoadMultiUserVault(jweString, passwordChars, "admin");
+                }
+                finally
+                {
+                    Array.Clear(passwordChars, 0, passwordChars.Length);
+                }
                 
                 // Serialize payload back to JSON string to pass to UVFMasterkey.FromDecryptedPayload
                 // (as UVFMasterkeyImpl expects a JSON string)

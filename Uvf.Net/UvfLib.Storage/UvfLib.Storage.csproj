@@ -1,5 +1,4 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
-
+<Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <TargetFramework>net8.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
@@ -7,14 +6,13 @@
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <Description>Vault-specific storage decorators for UVF and Cryptomator formats</Description>
   </PropertyGroup>
-
-  <ItemGroup>
-    <PackageReference Include="FolderMagic.StorageLib" Version="1.0.250613.1337-dev" />
-  </ItemGroup>
-
   <ItemGroup>
     <ProjectReference Include="..\UvfLib.Core\UvfLib.Core.csproj" />
     <ProjectReference Include="..\UvfLib.Vault\UvfLib.Vault.csproj" />
   </ItemGroup>
-
+  <ItemGroup>
+  </ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="FolderMagic.StorageLib" Version="1.0.250613.1337-dev" />
+  </ItemGroup>
 </Project>
