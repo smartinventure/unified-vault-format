@@ -770,9 +770,10 @@ namespace UvfLib.Master
 
             try
             {
+               
                 // Validate KDF parameters
                 kdfParams.Validate();
-
+               
                 // Create UVF masterkey payload exactly like the single-user system does
                 using var rng = RandomNumberGenerator.Create();
 
@@ -791,6 +792,7 @@ namespace UvfLib.Master
                 byte[] initialSeedIdBytes = new byte[4];
                 BinaryPrimitives.WriteInt32BigEndian(initialSeedIdBytes, initialSeedId);
 
+                
                 var payload = new UvfMasterkeyPayload
                 {
                     UvfSpecVersion = 1,
@@ -836,6 +838,7 @@ namespace UvfLib.Master
                 // Create multi-user JWE with admin user only, using specified KDF
                 var userCredentials = new Dictionary<string, char[]>();
                 string jweString = UvfLib.Core.Jwe.MultiUserJweVaultManager.CreateMultiUserVault(payload, userCredentials, adminPassword, kdfParams.ToInternal());
+                
                 byte[] vaultFileContent = System.Text.Encoding.UTF8.GetBytes(jweString);
                 
                 // Ensure vault directory exists
@@ -852,8 +855,14 @@ namespace UvfLib.Master
                 // Load the vault for use
                 await LoadMultiUserUvfVaultInternalAsync(adminPassword, encryptFilenames, null);
             }
-            catch (Exception)
+            catch (Exception ex)
             {
+                Console.WriteLine($"[VaultManager DEBUG] ERROR in InitializeNewMultiUserUvfVaultAsync: {ex.GetType().Name}: {ex.Message}");
+                if (ex.InnerException != null)
+                {
+                    Console.WriteLine($"[VaultManager DEBUG] Inner exception: {ex.InnerException.GetType().Name}: {ex.InnerException.Message}");
+                }
+                
                 // Clean up on failure
                 if (_ownsStorage && _baseStorage is IDisposable disposable)
                 {
@@ -909,12 +918,15 @@ namespace UvfLib.Master
         {
             try
             {
+                
                 // Load vault file content
                 string vaultFilePath = Path.Combine(_vaultBasePath, "vault.uvf");
+                
                 if (!System.IO.File.Exists(vaultFilePath))
                     throw new FileNotFoundException($"UVF vault file not found: {vaultFilePath}");
 
                 byte[] vaultFileContent = await System.IO.File.ReadAllBytesAsync(vaultFilePath);
+                
                 string jweString = System.Text.Encoding.UTF8.GetString(vaultFileContent);
                 
                 // Load the multi-user vault payload first
@@ -952,8 +964,15 @@ namespace UvfLib.Master
 
                 _isOpen = true;
             }
-            catch (Exception)
+            catch (Exception ex)
             {
+                Console.WriteLine($"[VaultManager DEBUG] ERROR in LoadMultiUserUvfVaultInternalAsync: {ex.GetType().Name}: {ex.Message}");
+                if (ex.InnerException != null)
+                {
+                    Console.WriteLine($"[VaultManager DEBUG] Inner exception: {ex.InnerException.GetType().Name}: {ex.InnerException.Message}");
+                }
+                Console.WriteLine($"[VaultManager DEBUG] Stack trace: {ex.StackTrace}");
+                
                 // Clean up on failure
                 _vault?.Dispose();
                 _vault = null;

@@ -1,6 +1,6 @@
-using DemoApp.Wrapper;
+using ExampleVaultApp.Wrapper;
 
-namespace DemoApp
+namespace ExampleVaultApp
 {
     /// <summary>
     /// Compatibility wrapper that exposes the separated TitanVault classes
@@ -92,7 +92,6 @@ namespace DemoApp
             public Stream OpenReadStream(string filePath) => _innerVault.OpenReadStream(filePath);
             public Stream OpenWriteStream(string filePath) => _innerVault.OpenWriteStream(filePath);
             public string[] ListDirectory(string directoryPath) => _innerVault.ListDirectory(directoryPath);
-            public FileObject[] ListDirectoryDetailed(string directoryPath) => _innerVault.ListDirectoryDetailed(directoryPath);
             internal void EnsureOpen() => _innerVault.EnsureOpen();
             public void Close() => _innerVault.Close();
             public void Dispose() => _innerVault.Dispose();

@@ -59,6 +59,14 @@ namespace ExampleVaultApp
                         await RunMultiUserTestAsync();
                         break;
 
+                    case "manageduvf":
+                        await TestManagedUvfDirectly();
+                        break;
+
+                    case "cstyle":
+                        await TestCStyleWrapper();
+                        break;
+
                     default:
                         Console.WriteLine($"❌ Unknown command: {command}");
                         Console.WriteLine("Run without arguments to see available commands.");
@@ -87,6 +95,8 @@ namespace ExampleVaultApp
             Console.WriteLine("  changepassword    : Test password change functionality");
             Console.WriteLine("  backuptest        : Test vault backup functionality");
             Console.WriteLine("  multiusertest     : Test multi-user UVF vault functionality");
+            Console.WriteLine("  manageduvf         : Test managed UVF functionality");
+            Console.WriteLine("  cstyle           : Test C-style wrapper functionality");
 
             Console.WriteLine();
             Console.WriteLine("Format Options (choose one):");
@@ -446,5 +456,22 @@ namespace ExampleVaultApp
         }
 
         #endregion
+
+        private static async Task TestCStyleWrapper()
+        {
+            Console.WriteLine("🧪 Testing C-Style Wrapper Functionality...");
+            string testVaultPath = @"D:\temp\uvf-cstyle-test";
+            string testPassword = "TestPassword123";
+            
+            var cStyleTest = new SimpleUvfTestCStyle(testVaultPath, testPassword, true);
+            await cStyleTest.RunTestAsync();
+        }
+
+        private static async Task TestManagedUvfDirectly()
+        {
+            // This method was referenced but not implemented
+            Console.WriteLine("This test is not implemented yet.");
+            await Task.CompletedTask;
+        }
     }
 }

@@ -1,9 +1,12 @@
 using System;
 using System.Collections.Concurrent;
+using System.Collections.Generic;
+using System.IO;
 using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using System.Threading.Tasks;
 using UvfLib.Master;
 
 namespace UvfLib.Master.Exports
@@ -18,6 +21,11 @@ namespace UvfLib.Master.Exports
     public static class TitanVaultExports
     {
         #region Constants and Error Codes
+
+
+        // Debug logging control
+        private static readonly bool DEBUG_ENABLED = false;
+
 
         // Return codes for TitanVault operations
         public const int TITAN_VAULT_SUCCESS = 0;
@@ -115,18 +123,18 @@ namespace UvfLib.Master.Exports
         /// </summary>
         [UnmanagedCallersOnly(EntryPoint = "titan_vault_detect_vault_format")]
         public static unsafe int DetectVaultFormat(
-            IntPtr vaultPathBytes,
+            byte* vaultPathBytes,
             int vaultPathLength)
         {
             try
             {
-                if (vaultPathBytes == IntPtr.Zero || vaultPathLength <= 0)
+                if (vaultPathBytes == null || vaultPathLength <= 0)
                 {
                     SetLastError("Invalid vault path parameter");
                     return TITAN_VAULT_ERROR_INVALID_PARAMETER;
                 }
 
-                var vaultPath = GetUtf8String(vaultPathBytes, vaultPathLength);
+                var vaultPath = GetUtf8String((IntPtr)vaultPathBytes, vaultPathLength);
                 if (string.IsNullOrEmpty(vaultPath))
                 {
                     SetLastError("Failed to decode vault path");
@@ -154,22 +162,22 @@ namespace UvfLib.Master.Exports
         /// </summary>
         [UnmanagedCallersOnly(EntryPoint = "titan_vault_create_cryptomator_vault")]
         public static unsafe int CreateCryptomatorVault(
-            IntPtr vaultPathBytes,
+            byte* vaultPathBytes,
             int vaultPathLength,
-            IntPtr passwordBytes,
+            byte* passwordBytes,
             int passwordLength)
         {
             try
             {
-                if (vaultPathBytes == IntPtr.Zero || vaultPathLength <= 0 ||
-                    passwordBytes == IntPtr.Zero || passwordLength <= 0)
+                if (vaultPathBytes == null || vaultPathLength <= 0 ||
+                    passwordBytes == null || passwordLength <= 0)
                 {
                     SetLastError("Invalid parameters");
                     return TITAN_VAULT_ERROR_INVALID_PARAMETER;
                 }
 
-                var vaultPath = GetUtf8String(vaultPathBytes, vaultPathLength);
-                var passwordChars = GetPasswordChars(passwordBytes, passwordLength);
+                var vaultPath = GetUtf8String((IntPtr)vaultPathBytes, vaultPathLength);
+                var passwordChars = GetPasswordChars((IntPtr)passwordBytes, passwordLength);
 
                 if (string.IsNullOrEmpty(vaultPath) || passwordChars == null)
                 {
@@ -208,22 +216,22 @@ namespace UvfLib.Master.Exports
         /// </summary>
         [UnmanagedCallersOnly(EntryPoint = "titan_vault_load_cryptomator_vault")]
         public static unsafe IntPtr LoadCryptomatorVault(
-            IntPtr vaultPathBytes,
+            byte* vaultPathBytes,
             int vaultPathLength,
-            IntPtr passwordBytes,
+            byte* passwordBytes,
             int passwordLength)
         {
             try
             {
-                if (vaultPathBytes == IntPtr.Zero || vaultPathLength <= 0 ||
-                    passwordBytes == IntPtr.Zero || passwordLength <= 0)
+                if (vaultPathBytes == null || vaultPathLength <= 0 ||
+                    passwordBytes == null || passwordLength <= 0)
                 {
                     SetLastError("Invalid parameters");
                     return IntPtr.Zero;
                 }
 
-                var vaultPath = GetUtf8String(vaultPathBytes, vaultPathLength);
-                var passwordChars = GetPasswordChars(passwordBytes, passwordLength);
+                var vaultPath = GetUtf8String((IntPtr)vaultPathBytes, vaultPathLength);
+                var passwordChars = GetPasswordChars((IntPtr)passwordBytes, passwordLength);
 
                 if (string.IsNullOrEmpty(vaultPath) || passwordChars == null)
                 {
@@ -269,26 +277,26 @@ namespace UvfLib.Master.Exports
         /// </summary>
         [UnmanagedCallersOnly(EntryPoint = "titan_vault_change_cryptomator_password")]
         public static unsafe int ChangeCryptomatorPassword(
-            IntPtr vaultPathBytes,
+            byte* vaultPathBytes,
             int vaultPathLength,
-            IntPtr oldPasswordBytes,
+            byte* oldPasswordBytes,
             int oldPasswordLength,
-            IntPtr newPasswordBytes,
+            byte* newPasswordBytes,
             int newPasswordLength)
         {
             try
             {
-                if (vaultPathBytes == IntPtr.Zero || vaultPathLength <= 0 ||
-                    oldPasswordBytes == IntPtr.Zero || oldPasswordLength <= 0 ||
-                    newPasswordBytes == IntPtr.Zero || newPasswordLength <= 0)
+                if (vaultPathBytes == null || vaultPathLength <= 0 ||
+                    oldPasswordBytes == null || oldPasswordLength <= 0 ||
+                    newPasswordBytes == null || newPasswordLength <= 0)
                 {
                     SetLastError("Invalid parameters");
                     return TITAN_VAULT_ERROR_INVALID_PARAMETER;
                 }
 
-                var vaultPath = GetUtf8String(vaultPathBytes, vaultPathLength);
-                var oldPasswordChars = GetPasswordChars(oldPasswordBytes, oldPasswordLength);
-                var newPasswordChars = GetPasswordChars(newPasswordBytes, newPasswordLength);
+                var vaultPath = GetUtf8String((IntPtr)vaultPathBytes, vaultPathLength);
+                var oldPasswordChars = GetPasswordChars((IntPtr)oldPasswordBytes, oldPasswordLength);
+                var newPasswordChars = GetPasswordChars((IntPtr)newPasswordBytes, newPasswordLength);
 
                 if (string.IsNullOrEmpty(vaultPath) || oldPasswordChars == null || newPasswordChars == null)
                 {
@@ -340,57 +348,79 @@ namespace UvfLib.Master.Exports
         /// </summary>
         [UnmanagedCallersOnly(EntryPoint = "titan_vault_create_uvf_vault")]
         public static unsafe int CreateUvfVault(
-            IntPtr vaultPathBytes,
+            byte* vaultPathBytes,
             int vaultPathLength,
-            IntPtr adminPasswordBytes,
+            byte* adminPasswordBytes,
             int adminPasswordLength,
             int encryptFilenames,
             int kdfMethod,
             int kdfIterations)
         {
+            DebugLog("=== CreateUvfVault START ===");
+            
             try
             {
-                if (vaultPathBytes == IntPtr.Zero || vaultPathLength <= 0 ||
-                    adminPasswordBytes == IntPtr.Zero || adminPasswordLength <= 0)
+                DebugLog($"Parameters: vaultPathLength={vaultPathLength}, adminPasswordLength={adminPasswordLength}, encryptFilenames={encryptFilenames}, kdfMethod={kdfMethod}, kdfIterations={kdfIterations}");
+                
+                if (vaultPathBytes == null || vaultPathLength <= 0 ||
+                    adminPasswordBytes == null || adminPasswordLength <= 0)
                 {
+                    DebugLog("ERROR: Invalid parameters - null pointers or invalid lengths");
                     SetLastError("Invalid parameters");
                     return TITAN_VAULT_ERROR_INVALID_PARAMETER;
                 }
 
-                var vaultPath = GetUtf8String(vaultPathBytes, vaultPathLength);
-                var adminPasswordChars = GetPasswordChars(adminPasswordBytes, adminPasswordLength);
+                var vaultPath = GetUtf8String((IntPtr)vaultPathBytes, vaultPathLength);
+                var adminPassword = GetUtf8String((IntPtr)adminPasswordBytes, adminPasswordLength);
+                
+                DebugLog($"Parsed vaultPath: '{vaultPath}'");
+                DebugLog($"Parsed adminPassword length: {adminPassword?.Length ?? 0}");
 
-                if (string.IsNullOrEmpty(vaultPath) || adminPasswordChars == null)
+                if (string.IsNullOrEmpty(vaultPath) || string.IsNullOrEmpty(adminPassword))
                 {
-                    SetLastError("Failed to decode parameters");
+                    DebugLog("ERROR: Failed to parse vault path or admin password");
+                    SetLastError("Failed to parse parameters");
                     return TITAN_VAULT_ERROR_INVALID_PARAMETER;
                 }
 
+                // Convert parameters
+                var adminPasswordChars = adminPassword.ToCharArray();
+                var kdfParams = ConvertKdfParameters(kdfMethod, kdfIterations);
+                
+                DebugLog($"KDF Parameters: Method={kdfParams.Method}, Iterations={kdfParams.Pbkdf2Iterations}");
+                DebugLog($"About to call VaultManager.CreateUvfVaultAsync...");
+
                 try
                 {
-                    var kdfParams = kdfMethod == TITAN_VAULT_KDF_SCRYPT
-                        ? VaultManager.KeyDerivationParameters.Scrypt(16384, 8, 1) // Standard scrypt parameters
-                        : VaultManager.KeyDerivationParameters.Pbkdf2(kdfIterations > 0 ? kdfIterations : 64000);
-
-                    var vault = VaultManager.CreateUvfVaultAsync(vaultPath, adminPasswordChars, encryptFilenames != 0, kdfParams).Result;
-                    vault.CloseVaultAsync().Wait();
-                    vault.Dispose();
+                    VaultManager.CreateUvfVaultAsync(vaultPath, adminPasswordChars, encryptFilenames != 0, kdfParams).Wait();
+                    DebugLog("VaultManager.CreateUvfVaultAsync completed successfully");
+                    
+                    DebugLog("=== CreateUvfVault SUCCESS ===");
                     return TITAN_VAULT_SUCCESS;
+                }
+                catch (Exception ex)
+                {
+                    DebugLog($"ERROR in VaultManager.CreateUvfVaultAsync: {ex.GetType().Name}: {ex.Message}");
+                    if (ex.InnerException != null)
+                    {
+                        DebugLog($"Inner exception: {ex.InnerException.GetType().Name}: {ex.InnerException.Message}");
+                    }
+                    DebugLog($"Stack trace: {ex.StackTrace}");
+                    
+                    SetLastError($"Failed to create UVF vault: {ex.Message}");
+                    return TITAN_VAULT_ERROR_INTERNAL;
                 }
                 finally
                 {
-                    if (adminPasswordChars != null)
-                        Array.Clear(adminPasswordChars, 0, adminPasswordChars.Length);
+                    Array.Clear(adminPasswordChars, 0, adminPasswordChars.Length);
                 }
-            }
-            catch (AggregateException ex) when (ex.InnerException != null)
-            {
-                SetLastError($"Failed to create UVF vault: {ex.InnerException.Message}");
-                return TITAN_VAULT_ERROR_INTERNAL;
             }
             catch (Exception ex)
             {
-                SetLastError($"Failed to create UVF vault: {ex.Message}");
+                DebugLog($"ERROR in CreateUvfVault outer catch: {ex.GetType().Name}: {ex.Message}");
+                DebugLog($"Stack trace: {ex.StackTrace}");
+                
+                SetLastError($"Internal error: {ex.Message}");
                 return TITAN_VAULT_ERROR_INTERNAL;
             }
         }
@@ -401,26 +431,26 @@ namespace UvfLib.Master.Exports
         /// </summary>
         [UnmanagedCallersOnly(EntryPoint = "titan_vault_load_uvf_vault")]
         public static unsafe IntPtr LoadUvfVault(
-            IntPtr vaultPathBytes,
+            byte* vaultPathBytes,
             int vaultPathLength,
-            IntPtr userPasswordBytes,
+            byte* userPasswordBytes,
             int userPasswordLength,
-            IntPtr userIdBytes,
+            byte* userIdBytes,
             int userIdLength)
         {
             try
             {
-                if (vaultPathBytes == IntPtr.Zero || vaultPathLength <= 0 ||
-                    userPasswordBytes == IntPtr.Zero || userPasswordLength <= 0)
+                if (vaultPathBytes == null || vaultPathLength <= 0 ||
+                    userPasswordBytes == null || userPasswordLength <= 0)
                 {
                     SetLastError("Invalid parameters");
                     return IntPtr.Zero;
                 }
 
-                var vaultPath = GetUtf8String(vaultPathBytes, vaultPathLength);
-                var userPasswordChars = GetPasswordChars(userPasswordBytes, userPasswordLength);
-                var userId = userIdBytes != IntPtr.Zero && userIdLength > 0 
-                    ? GetUtf8String(userIdBytes, userIdLength) 
+                var vaultPath = GetUtf8String((IntPtr)vaultPathBytes, vaultPathLength);
+                var userPasswordChars = GetPasswordChars((IntPtr)userPasswordBytes, userPasswordLength);
+                var userId = userIdBytes != null && userIdLength > 0 
+                    ? GetUtf8String((IntPtr)userIdBytes, userIdLength) 
                     : null;
 
                 if (string.IsNullOrEmpty(vaultPath) || userPasswordChars == null)
@@ -467,30 +497,30 @@ namespace UvfLib.Master.Exports
         /// </summary>
         [UnmanagedCallersOnly(EntryPoint = "titan_vault_add_user")]
         public static unsafe int AddUserToVault(
-            IntPtr vaultPathBytes,
+            byte* vaultPathBytes,
             int vaultPathLength,
-            IntPtr adminPasswordBytes,
+            byte* adminPasswordBytes,
             int adminPasswordLength,
-            IntPtr newUserIdBytes,
+            byte* newUserIdBytes,
             int newUserIdLength,
-            IntPtr newUserPasswordBytes,
+            byte* newUserPasswordBytes,
             int newUserPasswordLength)
         {
             try
             {
-                if (vaultPathBytes == IntPtr.Zero || vaultPathLength <= 0 ||
-                    adminPasswordBytes == IntPtr.Zero || adminPasswordLength <= 0 ||
-                    newUserIdBytes == IntPtr.Zero || newUserIdLength <= 0 ||
-                    newUserPasswordBytes == IntPtr.Zero || newUserPasswordLength <= 0)
+                if (vaultPathBytes == null || vaultPathLength <= 0 ||
+                    adminPasswordBytes == null || adminPasswordLength <= 0 ||
+                    newUserIdBytes == null || newUserIdLength <= 0 ||
+                    newUserPasswordBytes == null || newUserPasswordLength <= 0)
                 {
                     SetLastError("Invalid parameters");
                     return TITAN_VAULT_ERROR_INVALID_PARAMETER;
                 }
 
-                var vaultPath = GetUtf8String(vaultPathBytes, vaultPathLength);
-                var adminPasswordChars = GetPasswordChars(adminPasswordBytes, adminPasswordLength);
-                var newUserId = GetUtf8String(newUserIdBytes, newUserIdLength);
-                var newUserPasswordChars = GetPasswordChars(newUserPasswordBytes, newUserPasswordLength);
+                var vaultPath = GetUtf8String((IntPtr)vaultPathBytes, vaultPathLength);
+                var adminPasswordChars = GetPasswordChars((IntPtr)adminPasswordBytes, adminPasswordLength);
+                var newUserId = GetUtf8String((IntPtr)newUserIdBytes, newUserIdLength);
+                var newUserPasswordChars = GetPasswordChars((IntPtr)newUserPasswordBytes, newUserPasswordLength);
 
                 if (string.IsNullOrEmpty(vaultPath) || adminPasswordChars == null ||
                     string.IsNullOrEmpty(newUserId) || newUserPasswordChars == null)
@@ -539,26 +569,26 @@ namespace UvfLib.Master.Exports
         /// </summary>
         [UnmanagedCallersOnly(EntryPoint = "titan_vault_remove_user")]
         public static unsafe int RemoveUserFromVault(
-            IntPtr vaultPathBytes,
+            byte* vaultPathBytes,
             int vaultPathLength,
-            IntPtr adminPasswordBytes,
+            byte* adminPasswordBytes,
             int adminPasswordLength,
-            IntPtr userIdToRemoveBytes,
+            byte* userIdToRemoveBytes,
             int userIdToRemoveLength)
         {
             try
             {
-                if (vaultPathBytes == IntPtr.Zero || vaultPathLength <= 0 ||
-                    adminPasswordBytes == IntPtr.Zero || adminPasswordLength <= 0 ||
-                    userIdToRemoveBytes == IntPtr.Zero || userIdToRemoveLength <= 0)
+                if (vaultPathBytes == null || vaultPathLength <= 0 ||
+                    adminPasswordBytes == null || adminPasswordLength <= 0 ||
+                    userIdToRemoveBytes == null || userIdToRemoveLength <= 0)
                 {
                     SetLastError("Invalid parameters");
                     return TITAN_VAULT_ERROR_INVALID_PARAMETER;
                 }
 
-                var vaultPath = GetUtf8String(vaultPathBytes, vaultPathLength);
-                var adminPasswordChars = GetPasswordChars(adminPasswordBytes, adminPasswordLength);
-                var userIdToRemove = GetUtf8String(userIdToRemoveBytes, userIdToRemoveLength);
+                var vaultPath = GetUtf8String((IntPtr)vaultPathBytes, vaultPathLength);
+                var adminPasswordChars = GetPasswordChars((IntPtr)adminPasswordBytes, adminPasswordLength);
+                var userIdToRemove = GetUtf8String((IntPtr)userIdToRemoveBytes, userIdToRemoveLength);
 
                 if (string.IsNullOrEmpty(vaultPath) || adminPasswordChars == null || string.IsNullOrEmpty(userIdToRemove))
                 {
@@ -609,14 +639,14 @@ namespace UvfLib.Master.Exports
         [UnmanagedCallersOnly(EntryPoint = "titan_vault_read_file")]
         public static unsafe int ReadFile(
             IntPtr vaultHandle,
-            IntPtr filePathBytes,
+            byte* filePathBytes,
             int filePathLength,
             IntPtr buffer,
             IntPtr bufferSize)
         {
             try
             {
-                if (vaultHandle == IntPtr.Zero || filePathBytes == IntPtr.Zero || 
+                if (vaultHandle == IntPtr.Zero || filePathBytes == null || 
                     filePathLength <= 0 || buffer == IntPtr.Zero || bufferSize == IntPtr.Zero)
                 {
                     SetLastError("Invalid parameters");
@@ -630,7 +660,7 @@ namespace UvfLib.Master.Exports
                     return TITAN_VAULT_ERROR_INVALID_PARAMETER;
                 }
 
-                var filePath = GetUtf8String(filePathBytes, filePathLength);
+                var filePath = GetUtf8String((IntPtr)filePathBytes, filePathLength);
                 if (string.IsNullOrEmpty(filePath))
                 {
                     SetLastError("Failed to decode file path");
@@ -653,20 +683,10 @@ namespace UvfLib.Master.Exports
                 Marshal.Copy(fileData, 0, buffer, fileData.Length);
                 return TITAN_VAULT_SUCCESS;
             }
-            catch (AggregateException ex) when (ex.InnerException is FileNotFoundException)
-            {
-                SetLastError("File not found");
-                return TITAN_VAULT_ERROR_VAULT_NOT_FOUND;
-            }
             catch (AggregateException ex) when (ex.InnerException != null)
             {
                 SetLastError($"Failed to read file: {ex.InnerException.Message}");
                 return TITAN_VAULT_ERROR_INTERNAL;
-            }
-            catch (FileNotFoundException)
-            {
-                SetLastError("File not found");
-                return TITAN_VAULT_ERROR_VAULT_NOT_FOUND;
             }
             catch (Exception ex)
             {
@@ -681,14 +701,14 @@ namespace UvfLib.Master.Exports
         [UnmanagedCallersOnly(EntryPoint = "titan_vault_write_file")]
         public static unsafe int WriteFile(
             IntPtr vaultHandle,
-            IntPtr filePathBytes,
+            byte* filePathBytes,
             int filePathLength,
             IntPtr buffer,
             int bufferSize)
         {
             try
             {
-                if (vaultHandle == IntPtr.Zero || filePathBytes == IntPtr.Zero || 
+                if (vaultHandle == IntPtr.Zero || filePathBytes == null || 
                     filePathLength <= 0 || buffer == IntPtr.Zero || bufferSize <= 0)
                 {
                     SetLastError("Invalid parameters");
@@ -702,17 +722,17 @@ namespace UvfLib.Master.Exports
                     return TITAN_VAULT_ERROR_INVALID_PARAMETER;
                 }
 
-                var filePath = GetUtf8String(filePathBytes, filePathLength);
+                var filePath = GetUtf8String((IntPtr)filePathBytes, filePathLength);
                 if (string.IsNullOrEmpty(filePath))
                 {
                     SetLastError("Failed to decode file path");
                     return TITAN_VAULT_ERROR_INVALID_PARAMETER;
                 }
 
-                var fileData = new byte[bufferSize];
-                Marshal.Copy(buffer, fileData, 0, bufferSize);
+                byte[] data = new byte[bufferSize];
+                Marshal.Copy(buffer, data, 0, bufferSize);
 
-                vault.WriteAllBytesAsync(filePath, fileData).Wait();
+                vault.WriteAllBytesAsync(filePath, data).Wait();
                 return TITAN_VAULT_SUCCESS;
             }
             catch (AggregateException ex) when (ex.InnerException != null)
@@ -729,17 +749,16 @@ namespace UvfLib.Master.Exports
 
         /// <summary>
         /// Check if file exists in vault.
-        /// Returns 1 if exists, 0 if not, negative on error.
         /// </summary>
         [UnmanagedCallersOnly(EntryPoint = "titan_vault_file_exists")]
         public static unsafe int FileExists(
             IntPtr vaultHandle,
-            IntPtr filePathBytes,
+            byte* filePathBytes,
             int filePathLength)
         {
             try
             {
-                if (vaultHandle == IntPtr.Zero || filePathBytes == IntPtr.Zero || filePathLength <= 0)
+                if (vaultHandle == IntPtr.Zero || filePathBytes == null || filePathLength <= 0)
                 {
                     SetLastError("Invalid parameters");
                     return TITAN_VAULT_ERROR_INVALID_PARAMETER;
@@ -752,14 +771,14 @@ namespace UvfLib.Master.Exports
                     return TITAN_VAULT_ERROR_INVALID_PARAMETER;
                 }
 
-                var filePath = GetUtf8String(filePathBytes, filePathLength);
+                var filePath = GetUtf8String((IntPtr)filePathBytes, filePathLength);
                 if (string.IsNullOrEmpty(filePath))
                 {
                     SetLastError("Failed to decode file path");
                     return TITAN_VAULT_ERROR_INVALID_PARAMETER;
                 }
 
-                var exists = vault.FileExistsAsync(filePath).Result;
+                bool exists = vault.FileExistsAsync(filePath).Result;
                 return exists ? 1 : 0;
             }
             catch (AggregateException ex) when (ex.InnerException != null)
@@ -870,12 +889,12 @@ namespace UvfLib.Master.Exports
         [UnmanagedCallersOnly(EntryPoint = "titan_vault_create_directory")]
         public static unsafe int CreateDirectory(
             IntPtr vaultHandle,
-            IntPtr directoryPathBytes,
+            byte* directoryPathBytes,
             int directoryPathLength)
         {
             try
             {
-                if (vaultHandle == IntPtr.Zero || directoryPathBytes == IntPtr.Zero || directoryPathLength <= 0)
+                if (vaultHandle == IntPtr.Zero || directoryPathBytes == null || directoryPathLength <= 0)
                 {
                     SetLastError("Invalid parameters");
                     return TITAN_VAULT_ERROR_INVALID_PARAMETER;
@@ -888,7 +907,7 @@ namespace UvfLib.Master.Exports
                     return TITAN_VAULT_ERROR_INVALID_PARAMETER;
                 }
 
-                var directoryPath = GetUtf8String(directoryPathBytes, directoryPathLength);
+                var directoryPath = GetUtf8String((IntPtr)directoryPathBytes, directoryPathLength);
                 if (string.IsNullOrEmpty(directoryPath))
                 {
                     SetLastError("Failed to decode directory path");
@@ -1882,26 +1901,26 @@ namespace UvfLib.Master.Exports
         /// </summary>
         [UnmanagedCallersOnly(EntryPoint = "titan_vault_change_uvf_admin_password")]
         public static unsafe int ChangeUvfAdminPassword(
-            IntPtr vaultPathBytes,
+            byte* vaultPathBytes,
             int vaultPathLength,
-            IntPtr oldPasswordBytes,
+            byte* oldPasswordBytes,
             int oldPasswordLength,
-            IntPtr newPasswordBytes,
+            byte* newPasswordBytes,
             int newPasswordLength)
         {
             try
             {
-                if (vaultPathBytes == IntPtr.Zero || vaultPathLength <= 0 ||
-                    oldPasswordBytes == IntPtr.Zero || oldPasswordLength <= 0 ||
-                    newPasswordBytes == IntPtr.Zero || newPasswordLength <= 0)
+                if (vaultPathBytes == null || vaultPathLength <= 0 ||
+                    oldPasswordBytes == null || oldPasswordLength <= 0 ||
+                    newPasswordBytes == null || newPasswordLength <= 0)
                 {
                     SetLastError("Invalid parameters");
                     return TITAN_VAULT_ERROR_INVALID_PARAMETER;
                 }
 
-                var vaultPath = GetUtf8String(vaultPathBytes, vaultPathLength);
-                var oldPasswordChars = GetPasswordChars(oldPasswordBytes, oldPasswordLength);
-                var newPasswordChars = GetPasswordChars(newPasswordBytes, newPasswordLength);
+                var vaultPath = GetUtf8String((IntPtr)vaultPathBytes, vaultPathLength);
+                var oldPasswordChars = GetPasswordChars((IntPtr)oldPasswordBytes, oldPasswordLength);
+                var newPasswordChars = GetPasswordChars((IntPtr)newPasswordBytes, newPasswordLength);
 
                 if (string.IsNullOrEmpty(vaultPath) || oldPasswordChars == null || newPasswordChars == null)
                 {
@@ -2210,6 +2229,33 @@ namespace UvfLib.Master.Exports
                 // Clear the temporary byte array
                 CryptographicOperations.ZeroMemory(bytes);
             }
+        }
+
+        #endregion
+
+        #region Debug Logging
+
+
+        private static void DebugLog(string message)
+        {
+            if (DEBUG_ENABLED)
+            {
+                Console.WriteLine($"[TitanVault DEBUG] {message}");
+            }
+        }
+
+        #endregion
+
+        #region KDF Parameters
+
+        private static VaultManager.KeyDerivationParameters ConvertKdfParameters(int kdfMethod, int kdfIterations)
+        {
+            return kdfMethod switch
+            {
+                TITAN_VAULT_KDF_SCRYPT => VaultManager.KeyDerivationParameters.Scrypt(16384, 8, 1), // Standard scrypt parameters
+                TITAN_VAULT_KDF_PBKDF2 => VaultManager.KeyDerivationParameters.Pbkdf2(kdfIterations > 0 ? kdfIterations : 64000),
+                _ => VaultManager.KeyDerivationParameters.Pbkdf2(kdfIterations > 0 ? kdfIterations : 64000) // Default to PBKDF2
+            };
         }
 
         #endregion

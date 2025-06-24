@@ -35,8 +35,9 @@ using JwtBase64Url = Jose.Base64Url; // Alias for JWT Base64Url operations
 namespace UvfLib.Vault
 {
     /// <summary>
-    /// Represents an unlocked Uvf vault and provides high-level access
-    /// to its cryptographic operations.
+    /// Main entry point for vault operations.
+    /// Provides high-level methods for creating, loading, and managing encrypted vaults.
+    /// Handles both UVF and Cryptomator V8 vault formats.
     /// </summary>
     public sealed class VaultHandler : IDisposable
     {
@@ -287,7 +288,7 @@ namespace UvfLib.Vault
                 
                 // Instead of re-serializing, pass the payload object directly if UVFMasterkeyImpl can accept it.
                 // For now, assuming FromDecryptedPayload expects JSON string as per current V3.UVFMasterkeyImpl.
-                string jsonPayloadString = JsonSerializer.Serialize(payload, new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase });
+                string jsonPayloadString = JsonSerializer.Serialize(payload, UvfLib.Core.Common.UvfJsonContext.Default.UvfMasterkeyPayload);
                 
                 // UvfLib.Core.Api.UVFMasterkey.FromDecryptedPayload is the entry point
                 // This will internally create a V3.UVFMasterkeyImpl instance.
@@ -439,13 +440,7 @@ namespace UvfLib.Vault
             try
             {
                 // Create JWT payload with vault configuration
-                var payload = new
-                {
-                    jti = Guid.NewGuid().ToString(), // Unique identifier for this vault
-                    format = 8,                       // Vault format version
-                    cipherCombo = "SIV_GCM",         // Cipher combination used
-                    shorteningThreshold = 220        // Filename shortening threshold
-                };
+                var payload = CryptomatorVaultConfig.CreateDefault();
 
                 // Create JWT header using Base64URL encoding
                 string header = JwtBase64Url.Encode(Encoding.UTF8.GetBytes(
@@ -456,7 +451,7 @@ namespace UvfLib.Vault
                 { 
                     WriteIndented = false  // Ensures compact format without spaces
                 };
-                string payloadJson = System.Text.Json.JsonSerializer.Serialize(payload, jsonOptions);
+                string payloadJson = JsonSerializer.Serialize(payload, UvfLib.Core.Common.UvfJsonContext.Default.CryptomatorVaultConfig);
                 string payloadBase64 = JwtBase64Url.Encode(Encoding.UTF8.GetBytes(payloadJson));
 
                 // Create the signing input (header.payload)
@@ -551,23 +546,19 @@ namespace UvfLib.Vault
             try
             {
                 // Create JWT payload with vault configuration
-                var payload = new
-                {
-                    jti = Guid.NewGuid().ToString(), // Unique identifier for this vault
-                    format = 8,                       // Vault format version
-                    cipherCombo = "SIV_GCM",         // Cipher combination used
-                    shorteningThreshold = 220        // Filename shortening threshold
+                var payload = CryptomatorVaultConfig.CreateDefault();
+
+                // Create JWT header using Base64URL encoding
+                string header = JwtBase64Url.Encode(Encoding.UTF8.GetBytes(
+                    """{"kid":"masterkeyfile:masterkey.cryptomator","alg":"HS256","typ":"JWT"}"""));
+
+                // Serialize payload using compact JSON format (no spaces) to match Cryptomator
+                var jsonOptions = new JsonSerializerOptions 
+                { 
+                    WriteIndented = false  // Ensures compact format without spaces
                 };
-
-                // For simplicity, create an unsigned JWT (algorithm: "none")
-                // Real Cryptomator uses HMAC-SHA256, but we'll start with a simpler approach
-                string header = Convert.ToBase64String(Encoding.UTF8.GetBytes(
-                    """{"kid":"masterkeyfile:masterkey.cryptomator","alg":"HS256","typ":"JWT"}"""))
-                    .TrimEnd('='); // Remove padding
-
-                string payloadJson = System.Text.Json.JsonSerializer.Serialize(payload);
-                string payloadBase64 = Convert.ToBase64String(Encoding.UTF8.GetBytes(payloadJson))
-                    .TrimEnd('='); // Remove padding
+                string payloadJson = JsonSerializer.Serialize(payload, UvfLib.Core.Common.UvfJsonContext.Default.CryptomatorVaultConfig);
+                string payloadBase64 = JwtBase64Url.Encode(Encoding.UTF8.GetBytes(payloadJson));
 
                 // Create a dummy signature for now (real implementation would use HMAC-SHA256)
                 string signature = Convert.ToBase64String(new byte[32]) // 32 bytes = 256 bits

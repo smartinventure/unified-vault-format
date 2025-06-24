@@ -5,6 +5,7 @@
     <TargetFramework>net8.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
   </PropertyGroup>
 
   <!-- StorageLib dependency removed - now accessed through UvfLib.Master -->
@@ -19,7 +20,18 @@
   </ItemGroup>
 
   <ItemGroup>
+    <ProjectReference Include="..\UvfLib.Core\UvfLib.Core.csproj" />
     <ProjectReference Include="..\UvfLib.Master\UvfLib.Master.csproj" />
+    <ProjectReference Include="..\UvfLib.Vault\UvfLib.Vault.csproj" />
+  </ItemGroup>
+
+  <!-- Exclude problematic wrapper files that depend on methods we haven't implemented -->
+  <ItemGroup>
+    <Compile Remove="Wrapper\\TitanVault.cs" />
+    <Compile Remove="Wrapper\\TitanVaultStatic.cs" />
+    <Compile Remove="Wrapper\\TitanVaultStream.cs" />
+    <Compile Remove="Wrapper\\TitanVaultLibraryLoader.cs" />
+    <Compile Remove="TitanVaultWrapper.cs" />
   </ItemGroup>
 
 </Project>

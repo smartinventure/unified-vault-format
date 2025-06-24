@@ -57,25 +57,19 @@ namespace UvfLib.Vault.VaultHelpers
                 
                 // Create a Cryptomator-compatible object with ONLY the fields Cryptomator expects
                 // This excludes all UVF-specific fields that cause Cryptomator to reject the file
-                var cryptomatorMasterkey = new 
+                var cryptomatorMasterkey = new CryptomatorMasterkeyFile
                 {
-                    version = masterkeyFile.Version,
-                    scryptSalt = Convert.ToBase64String(masterkeyFile.ScryptSalt!),
-                    scryptCostParam = masterkeyFile.ScryptCostParam,
-                    scryptBlockSize = masterkeyFile.ScryptBlockSize,
-                    primaryMasterKey = Convert.ToBase64String(masterkeyFile.EncMasterKey!),
-                    hmacMasterKey = Convert.ToBase64String(masterkeyFile.MacMasterKey!),
-                    versionMac = Convert.ToBase64String(masterkeyFile.VersionMac!)
+                    Version = masterkeyFile.Version,
+                    ScryptSalt = Convert.ToBase64String(masterkeyFile.ScryptSalt!),
+                    ScryptCostParam = masterkeyFile.ScryptCostParam,
+                    ScryptBlockSize = masterkeyFile.ScryptBlockSize,
+                    PrimaryMasterKey = Convert.ToBase64String(masterkeyFile.EncMasterKey!),
+                    HmacMasterKey = Convert.ToBase64String(masterkeyFile.MacMasterKey!),
+                    VersionMac = Convert.ToBase64String(masterkeyFile.VersionMac!)
                 };
 
                 // Serialize with indented formatting to match Cryptomator's format
-                var jsonOptions = new JsonSerializerOptions 
-                { 
-                    WriteIndented = true,
-                    Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping
-                };
-                
-                return JsonSerializer.SerializeToUtf8Bytes(cryptomatorMasterkey, jsonOptions);
+                return JsonSerializer.SerializeToUtf8Bytes(cryptomatorMasterkey, UvfLib.Core.Common.UvfJsonContext.Default.CryptomatorMasterkeyFile);
             }
             catch (Exception ex)
             {

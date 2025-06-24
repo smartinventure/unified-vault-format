@@ -21,6 +21,12 @@ namespace DemoApp
 
         private readonly Stopwatch _stopwatch = new();
         private long _totalBytesProcessed = 0;
+        
+        // Separate tracking for read and write operations
+        private TimeSpan _writeElapsed = TimeSpan.Zero;
+        private TimeSpan _readElapsed = TimeSpan.Zero;
+        private long _totalBytesWritten = 0;
+        private long _totalBytesRead = 0;
 
         public SimpleUvfDemo(string sourceFolderPath, string vaultFolderPath, string decryptedFolderPath, string password, bool encryptFilenames = true)
         {
@@ -183,6 +189,8 @@ namespace DemoApp
                 Console.WriteLine("2️⃣ Processing file encryption (source -> vault)...");
                 _stopwatch.Restart();
                 _totalBytesProcessed = 0;
+                _totalBytesWritten = 0;
+                _writeElapsed = TimeSpan.Zero;
                 
                 await ProcessSourceDirectoryForEncryption(vault);
                 
@@ -194,6 +202,8 @@ namespace DemoApp
                 
                 _stopwatch.Restart();
                 _totalBytesProcessed = 0;
+                _totalBytesRead = 0;
+                _readElapsed = TimeSpan.Zero;
                 
                 await ProcessVaultDirectoryForDecryption(vault);
                 
@@ -202,6 +212,9 @@ namespace DemoApp
                 
                 Console.WriteLine("4️⃣ Verifying file integrity (source vs decrypted)...");
                 await VerifyFilesAsync();
+                
+                // Display comprehensive performance summary
+                PrintPerformanceSummary();
                 
                 Console.WriteLine("✅ Real UVF vault operations complete");
                 
@@ -270,6 +283,9 @@ namespace DemoApp
             var buffer = new byte[bufferSize];
             long totalBytesProcessed = 0;
             
+            // Track write operation timing
+            var writeTimer = Stopwatch.StartNew();
+            
             using (var sourceStream = new FileStream(sourceFilePath, FileMode.Open, FileAccess.Read))
             using (var vaultStream = vault.OpenWriteStream(vaultVirtualPath))
             {
@@ -284,7 +300,13 @@ namespace DemoApp
                 await vaultStream.FlushAsync();
             }
             
+            writeTimer.Stop();
+            
+            // Update tracking
             _totalBytesProcessed += totalBytesProcessed;
+            _totalBytesWritten += totalBytesProcessed;
+            _writeElapsed += writeTimer.Elapsed;
+            
             Console.WriteLine($"   📄 {fileName} -> {Path.GetFileName(vaultVirtualPath)} ({totalBytesProcessed:N0} bytes) [STREAMED]");
         }
 
@@ -307,25 +329,27 @@ namespace DemoApp
                 return;
             }
             
-            // Get directory contents from vault
-            var entries = vault.ListDirectory(vaultVirtualPath);
+            // Get directory contents from vault as FileObjects with full metadata
+            var fileObjects = vault.ListDirectoryDetailed(vaultVirtualPath);
             
-            foreach (var entry in entries)
+            foreach (var fileObj in fileObjects)
             {
-                var entryName = Path.GetFileName(entry);
-                string entryPath = vaultVirtualPath == "/" ? $"/{entryName}" : $"{vaultVirtualPath}/{entryName}";
+                var entryName = fileObj.Filename;
+                string entryPath = fileObj.VirtualPath;
                 
-                if (entry.EndsWith("/")) // Directory
+                if (fileObj.IsDirectory)
                 {
                     // Process subdirectory
                     string decryptedSubPath = Path.Combine(decryptedPhysicalPath, entryName);
                     string relativeSubPath = string.IsNullOrEmpty(relativePath) ? entryName : $"{relativePath}/{entryName}";
+                    Console.WriteLine($"   📁 Directory: {entryName} (IsDirectory: {fileObj.IsDirectory})");
                     await ProcessDirectoryRecursivelyForDecryption(vault, entryPath, decryptedSubPath, relativeSubPath);
                 }
                 else
                 {
-                    // Process file
+                    // Process file with metadata info
                     string decryptedFilePath = Path.Combine(decryptedPhysicalPath, entryName);
+                    Console.WriteLine($"   📄 File: {entryName} (Size: {fileObj.Size:N0} bytes, Modified: {fileObj.LastModified:yyyy-MM-dd HH:mm:ss})");
                     await CopyFileFromVaultAsync(vault, entryPath, decryptedFilePath, "decryption");
                 }
             }
@@ -339,6 +363,9 @@ namespace DemoApp
             const int bufferSize = 64 * 1024; // 64KB buffer - good balance of memory usage and performance
             var buffer = new byte[bufferSize];
             long totalBytesProcessed = 0;
+            
+            // Track read operation timing
+            var readTimer = Stopwatch.StartNew();
             
             using (var vaultStream = vault.OpenReadStream(vaultVirtualPath))
             using (var targetStream = new FileStream(targetFilePath, FileMode.Create, FileAccess.Write))
@@ -354,7 +381,13 @@ namespace DemoApp
                 await targetStream.FlushAsync();
             }
             
+            readTimer.Stop();
+            
+            // Update tracking
             _totalBytesProcessed += totalBytesProcessed;
+            _totalBytesRead += totalBytesProcessed;
+            _readElapsed += readTimer.Elapsed;
+            
             Console.WriteLine($"   📄 {Path.GetFileName(vaultVirtualPath)} -> {fileName} ({totalBytesProcessed:N0} bytes) [STREAMED]");
         }
 
@@ -362,25 +395,25 @@ namespace DemoApp
         {
             Console.WriteLine("🔍 Comparing source and decrypted files...");
             
-            var sourceFiles = await CollectFilesAsync(_sourceFolderPath, "source");
-            var decryptedFiles = await CollectFilesAsync(_decryptedFolderPath, "decrypted");
+            // Collect comprehensive statistics
+            var sourceStats = await CollectComprehensiveStatsAsync(_sourceFolderPath, "source");
+            var decryptedStats = await CollectComprehensiveStatsAsync(_decryptedFolderPath, "decrypted");
             
-            Console.WriteLine($"📊 Source files: {sourceFiles.Count}");
-            Console.WriteLine($"📊 Decrypted files: {decryptedFiles.Count}");
+            Console.WriteLine($"📊 Source: {sourceStats.FileCount} files, {sourceStats.DirectoryCount} directories");
+            Console.WriteLine($"📊 Decrypted: {decryptedStats.FileCount} files, {decryptedStats.DirectoryCount} directories");
             
             bool allMatch = true;
             int matchCount = 0;
             int mismatchCount = 0;
             int missingCount = 0;
             
-            // Check each source file against decrypted (by size only, no MD5 as requested)
-            foreach (var sourceFile in sourceFiles)
+            // Check each source file against decrypted (by size only)
+            foreach (var sourceFile in sourceStats.Files)
             {
-                if (decryptedFiles.TryGetValue(sourceFile.Key, out var decryptedFile))
+                if (decryptedStats.Files.TryGetValue(sourceFile.Key, out var decryptedFile))
                 {
                     if (sourceFile.Value.Size == decryptedFile.Size)
                     {
-                        Console.WriteLine($"✅ {sourceFile.Key} - Size match ({sourceFile.Value.Size} bytes)");
                         matchCount++;
                     }
                     else
@@ -402,9 +435,9 @@ namespace DemoApp
             
             // Check for extra files in decrypted
             int extraCount = 0;
-            foreach (var decryptedFile in decryptedFiles)
+            foreach (var decryptedFile in decryptedStats.Files)
             {
-                if (!sourceFiles.ContainsKey(decryptedFile.Key))
+                if (!sourceStats.Files.ContainsKey(decryptedFile.Key))
                 {
                     Console.WriteLine($"⚠️ {decryptedFile.Key} - Extra file in decrypted");
                     extraCount++;
@@ -413,23 +446,35 @@ namespace DemoApp
             
             // Final verification summary
             Console.WriteLine("\n📈 VERIFICATION SUMMARY:");
+            Console.WriteLine($"   📁 Source directories: {sourceStats.DirectoryCount}");
+            Console.WriteLine($"   📁 Decrypted directories: {decryptedStats.DirectoryCount}");
+            Console.WriteLine($"   📄 Source files: {sourceStats.FileCount}");
+            Console.WriteLine($"   📄 Decrypted files: {decryptedStats.FileCount}");
             Console.WriteLine($"   ✅ Size matches: {matchCount}");
             if (mismatchCount > 0) Console.WriteLine($"   ❌ Size mismatches: {mismatchCount}");
             if (missingCount > 0) Console.WriteLine($"   ❌ Missing files: {missingCount}");
             if (extraCount > 0) Console.WriteLine($"   ⚠️ Extra files: {extraCount}");
             
-            long totalBytes = sourceFiles.Values.Sum(f => f.Size);
-            Console.WriteLine($"   📊 Total bytes verified: {totalBytes:N0}");
+            Console.WriteLine($"   📊 Total bytes verified: {sourceStats.TotalBytes:N0}");
+            
+            // Check if counts match
+            bool countsMatch = sourceStats.FileCount == decryptedStats.FileCount && 
+                              sourceStats.DirectoryCount == decryptedStats.DirectoryCount;
             
             // Final result message
-            if (allMatch && extraCount == 0)
+            if (allMatch && extraCount == 0 && countsMatch)
             {
-                Console.WriteLine("\n🎉 SUCCESS: All source files exist in decrypted with matching sizes!");
-                Console.WriteLine($"   Perfect data integrity: {matchCount} files, {totalBytes:N0} bytes verified");
+                Console.WriteLine("\n🎉 SUCCESS: All files and directories match perfectly!");
+                Console.WriteLine($"   Perfect data integrity: {matchCount} files, {sourceStats.DirectoryCount} directories, {sourceStats.TotalBytes:N0} bytes verified");
             }
             else
             {
                 Console.WriteLine("\n💥 FAILURE: Discrepancies found between source and decrypted!");
+                if (!countsMatch)
+                {
+                    Console.WriteLine($"   Directory count mismatch: {sourceStats.DirectoryCount} vs {decryptedStats.DirectoryCount}");
+                    Console.WriteLine($"   File count mismatch: {sourceStats.FileCount} vs {decryptedStats.FileCount}");
+                }
             }
         }
 
@@ -471,9 +516,63 @@ namespace DemoApp
             }
         }
 
+        private async Task<DirectoryStats> CollectComprehensiveStatsAsync(string directoryPath, string directoryName)
+        {
+            Console.WriteLine($"📋 Collecting comprehensive stats from {directoryName} directory...");
+            var stats = new DirectoryStats();
+            
+            if (Directory.Exists(directoryPath))
+            {
+                await CollectStatsRecursiveAsync(directoryPath, "", stats);
+            }
+            
+            Console.WriteLine($"   📊 Found {stats.FileCount} files, {stats.DirectoryCount} directories in {directoryName} directory");
+            return stats;
+        }
+
+        private async Task CollectStatsRecursiveAsync(string currentPath, string relativePath, DirectoryStats stats)
+        {
+            var filePaths = Directory.GetFiles(currentPath);
+            var directoryPaths = Directory.GetDirectories(currentPath);
+            
+            // Count directories (exclude root)
+            if (!string.IsNullOrEmpty(relativePath))
+            {
+                stats.DirectoryCount++;
+            }
+            
+            // Process files
+            foreach (var filePath in filePaths)
+            {
+                var fileName = Path.GetFileName(filePath);
+                string relativeFilePath = string.IsNullOrEmpty(relativePath) ? fileName : $"{relativePath}/{fileName}";
+                
+                var systemFileInfo = new System.IO.FileInfo(filePath);
+                stats.Files[relativeFilePath] = new FileInfo { Size = systemFileInfo.Length };
+                stats.FileCount++;
+                stats.TotalBytes += systemFileInfo.Length;
+            }
+            
+            // Process subdirectories
+            foreach (var dirPath in directoryPaths)
+            {
+                var dirName = Path.GetFileName(dirPath);
+                string relativeSubPath = string.IsNullOrEmpty(relativePath) ? dirName : $"{relativePath}/{dirName}";
+                await CollectStatsRecursiveAsync(dirPath, relativeSubPath, stats);
+            }
+        }
+
         private class FileInfo
         {
             public long Size { get; set; }
+        }
+
+        private class DirectoryStats
+        {
+            public Dictionary<string, FileInfo> Files { get; set; } = new Dictionary<string, FileInfo>();
+            public int FileCount { get; set; } = 0;
+            public int DirectoryCount { get; set; } = 0;
+            public long TotalBytes { get; set; } = 0;
         }
 
         private void CleanupDirectory(string directoryPath, string directoryName)
@@ -499,6 +598,42 @@ namespace DemoApp
             {
                 double mbps = (totalBytes / (1024.0 * 1024.0)) / elapsed.TotalSeconds;
                 Console.WriteLine($"   ⚡ Speed: {mbps:F2} MB/s");
+            }
+        }
+
+        private void PrintPerformanceSummary()
+        {
+            Console.WriteLine("\n📊 PERFORMANCE SUMMARY:");
+            
+            // Write speed (encryption)
+            if (_writeElapsed.TotalSeconds > 0 && _totalBytesWritten > 0)
+            {
+                double writeMbps = (_totalBytesWritten / (1024.0 * 1024.0)) / _writeElapsed.TotalSeconds;
+                Console.WriteLine($"   📝 Write Speed (Encryption): {_totalBytesWritten:N0} bytes in {_writeElapsed.TotalMilliseconds:F0}ms = {writeMbps:F2} MB/s");
+            }
+            else
+            {
+                Console.WriteLine($"   📝 Write Speed (Encryption): {_totalBytesWritten:N0} bytes in {_writeElapsed.TotalMilliseconds:F0}ms");
+            }
+            
+            // Read speed (decryption)  
+            if (_readElapsed.TotalSeconds > 0 && _totalBytesRead > 0)
+            {
+                double readMbps = (_totalBytesRead / (1024.0 * 1024.0)) / _readElapsed.TotalSeconds;
+                Console.WriteLine($"   📖 Read Speed (Decryption): {_totalBytesRead:N0} bytes in {_readElapsed.TotalMilliseconds:F0}ms = {readMbps:F2} MB/s");
+            }
+            else
+            {
+                Console.WriteLine($"   📖 Read Speed (Decryption): {_totalBytesRead:N0} bytes in {_readElapsed.TotalMilliseconds:F0}ms");
+            }
+            
+            // Average speed
+            long totalBytes = _totalBytesWritten + _totalBytesRead;
+            TimeSpan totalTime = _writeElapsed + _readElapsed;
+            if (totalTime.TotalSeconds > 0 && totalBytes > 0)
+            {
+                double avgMbps = (totalBytes / (1024.0 * 1024.0)) / totalTime.TotalSeconds;
+                Console.WriteLine($"   ⚡ Average Speed: {totalBytes:N0} bytes in {totalTime.TotalMilliseconds:F0}ms = {avgMbps:F2} MB/s");
             }
         }
     }

@@ -1,7 +1,7 @@
 using System.Text;
 using System.Runtime.InteropServices;
 
-namespace DemoApp.Wrapper
+namespace ExampleVaultApp.Wrapper
 {
     /// <summary>
     /// High-level C# wrapper for TitanVault operations
@@ -449,7 +449,7 @@ namespace DemoApp.Wrapper
         }
 
         /// <summary>
-        /// List directory contents (returns filenames only, for compatibility with native exports)
+        /// List directory contents (placeholder - may need native implementation)
         /// </summary>
         public string[] ListDirectory(string directoryPath)
         {
@@ -492,111 +492,6 @@ namespace DemoApp.Wrapper
                     return entries;
                 }
             }
-        }
-
-        /// <summary>
-        /// List directory contents with full metadata (FileObject with IsDirectory, Size, timestamps, etc.)
-        /// This is a higher-level method that combines ListDirectory + GetFileInfo for each entry
-        /// </summary>
-        public FileObject[] ListDirectoryDetailed(string directoryPath)
-        {
-            EnsureOpen();
-            if (string.IsNullOrEmpty(directoryPath))
-                throw new ArgumentNullException(nameof(directoryPath));
-
-            // First get the list of entry names
-            var entryNames = ListDirectory(directoryPath);
-            var fileObjects = new List<FileObject>();
-
-            foreach (var entryName in entryNames)
-            {
-                if (!string.IsNullOrEmpty(entryName))
-                {
-                    // Build full path for the entry
-                    string entryPath = directoryPath == "/" ? $"/{entryName}" : $"{directoryPath}/{entryName}";
-                    
-                    // Check if it's a directory
-                    bool isDirectory = DirectoryExists(entryPath);
-                    
-                    // Create FileObject with full metadata
-                    var fileObject = CreateFileObjectWithMetadata(entryPath, entryName, isDirectory);
-                    fileObjects.Add(fileObject);
-                }
-            }
-
-            return fileObjects.ToArray();
-        }
-
-        /// <summary>
-        /// Helper method to create FileObject with full metadata
-        /// </summary>
-        private FileObject CreateFileObjectWithMetadata(string fullPath, string entryName, bool isDirectory)
-        {
-            var fileObject = new FileObject(fullPath)
-            {
-                IsDirectory = isDirectory,
-                Filename = entryName,
-                RealPath = fullPath,
-                VirtualPath = fullPath
-            };
-
-            if (isDirectory)
-            {
-                // For directories, set basic metadata
-                fileObject.Size = 0;
-                fileObject.CreationTime = DateTime.UtcNow;
-                fileObject.LastModified = DateTime.UtcNow;
-                fileObject.LastAccessTime = DateTime.UtcNow;
-            }
-            else
-            {
-                // For files, get full metadata from native layer
-                try
-                {
-                    unsafe
-                    {
-                        var pathBytes = TitanVaultUtils.StringToUtf8Bytes(fullPath);
-                        long fileSize = 0;
-                        long lastModified = 0;
-
-                        fixed (byte* pathPtr = pathBytes)
-                        {
-                            var result = TitanVaultNativeMethods.GetFileInfo(
-                                _vaultHandle, pathPtr, pathBytes.Length,
-                                (IntPtr)(&fileSize), (IntPtr)(&lastModified));
-
-                            if (result == TitanVaultUtils.ReturnCodes.Success)
-                            {
-                                // Convert Unix timestamp back to DateTime
-                                var lastModifiedDateTime = DateTimeOffset.FromUnixTimeSeconds(lastModified).DateTime;
-                                
-                                fileObject.Size = fileSize; // This is the DECRYPTED size!
-                                fileObject.CreationTime = lastModifiedDateTime;
-                                fileObject.LastModified = lastModifiedDateTime;
-                                fileObject.LastAccessTime = lastModifiedDateTime;
-                            }
-                            else
-                            {
-                                // Fallback if GetFileInfo fails
-                                fileObject.Size = 0;
-                                fileObject.CreationTime = DateTime.UtcNow;
-                                fileObject.LastModified = DateTime.UtcNow;
-                                fileObject.LastAccessTime = DateTime.UtcNow;
-                            }
-                        }
-                    }
-                }
-                catch
-                {
-                    // Fallback if metadata retrieval fails
-                    fileObject.Size = 0;
-                    fileObject.CreationTime = DateTime.UtcNow;
-                    fileObject.LastModified = DateTime.UtcNow;
-                    fileObject.LastAccessTime = DateTime.UtcNow;
-                }
-            }
-
-            return fileObject;
         }
 
         #endregion

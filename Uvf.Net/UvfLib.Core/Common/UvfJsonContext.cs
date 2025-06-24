@@ -16,6 +16,8 @@ namespace UvfLib.Core.Common
     [JsonSerializable(typeof(UvfLibNetConfig))]
     [JsonSerializable(typeof(KeyDerivationParameters))]
     [JsonSerializable(typeof(MasterkeyFile))]
+    [JsonSerializable(typeof(CryptomatorVaultConfig))] // For Cryptomator vault.cryptomator JWT payload
+    [JsonSerializable(typeof(CryptomatorMasterkeyFile))] // For Cryptomator masterkey.cryptomator file
     [JsonSerializable(typeof(List<PayloadKey>))]
     [JsonSerializable(typeof(List<PayloadSeed>))]
     [JsonSerializable(typeof(Dictionary<string, object>))] // For JWE headers
