@@ -8,7 +8,10 @@
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
   </PropertyGroup>
 
-  <!-- StorageLib dependency removed - now accessed through UvfLib.Master -->
+  <!-- Only reference UvfLib.Master - it contains everything needed -->
+  <ItemGroup>
+    <ProjectReference Include="..\UvfLib.Master\UvfLib.Master.csproj" />
+  </ItemGroup>
 
   <!-- Temporarily exclude problematic test files to focus on simple tests -->
   <ItemGroup>
@@ -17,12 +20,6 @@
     <Compile Remove="DirectCryptomatorTest.cs" />
     <Compile Remove="DirectUvfTest.cs" />
     <Compile Remove="MultiUserVaultTest.cs" />
-  </ItemGroup>
-
-  <ItemGroup>
-    <ProjectReference Include="..\UvfLib.Core\UvfLib.Core.csproj" />
-    <ProjectReference Include="..\UvfLib.Master\UvfLib.Master.csproj" />
-    <ProjectReference Include="..\UvfLib.Vault\UvfLib.Vault.csproj" />
   </ItemGroup>
 
   <!-- Exclude problematic wrapper files that depend on methods we haven't implemented -->

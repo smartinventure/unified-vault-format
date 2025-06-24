@@ -11,7 +11,7 @@ namespace DemoApp
     /// Demonstrates UVF vault operations with native TitanVault library integration.
     /// Uses TitanVault native wrapper instead of managed VaultManager for authentic native operations.
     /// </summary>
-    public class SimpleUvfDemo
+    public class UvfDemo
     {
         private readonly string _sourceFolderPath;
         private readonly string _vaultFolderPath;
@@ -28,7 +28,7 @@ namespace DemoApp
         private long _totalBytesWritten = 0;
         private long _totalBytesRead = 0;
 
-        public SimpleUvfDemo(string sourceFolderPath, string vaultFolderPath, string decryptedFolderPath, string password, bool encryptFilenames = true)
+        public UvfDemo(string sourceFolderPath, string vaultFolderPath, string decryptedFolderPath, string password, bool encryptFilenames = true)
         {
             _sourceFolderPath = sourceFolderPath;
             _vaultFolderPath = vaultFolderPath;
@@ -100,7 +100,7 @@ namespace DemoApp
             
             // Create a larger file to test streaming (1MB)
             Console.WriteLine("📄 Creating large test file (1MB) to demonstrate streaming...");
-            await CreateLargeTestFileAsync(Path.Combine(_sourceFolderPath, "large_file.txt"), 1024 * 1024); // 1MB
+            await CreateLargeTestFileAsync(Path.Combine(_sourceFolderPath, "large_file.txt"), 1024 * 1024 * 1024); // 1GB
             
             var allFiles = Directory.GetFiles(_sourceFolderPath, "*", SearchOption.AllDirectories);
             var totalSize = allFiles.Sum(f => new System.IO.FileInfo(f).Length);

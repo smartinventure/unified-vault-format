@@ -55,12 +55,44 @@ namespace DemoApp
             }
 
             /// <summary>
+            /// Create a new UVF vault (string overload)
+            /// </summary>
+            public static TitanVault CreateUvfVault(string vaultPath, string adminPassword, bool encryptFilenames = true)
+            {
+                var adminPasswordChars = adminPassword.ToCharArray();
+                try
+                {
+                    return CreateUvfVault(vaultPath, adminPasswordChars, encryptFilenames);
+                }
+                finally
+                {
+                    Array.Clear(adminPasswordChars, 0, adminPasswordChars.Length);
+                }
+            }
+
+            /// <summary>
             /// Load an existing UVF vault
             /// </summary>
             public static TitanVault LoadUvfVault(string vaultPath, char[] userPassword, string? userId = null)
             {
                 var innerVault = Wrapper.TitanVault.LoadUvfVault(vaultPath, userPassword, userId);
                 return new TitanVault(innerVault);
+            }
+
+            /// <summary>
+            /// Load an existing UVF vault (string overload)
+            /// </summary>
+            public static TitanVault LoadUvfVault(string vaultPath, string userPassword, string? userId = null)
+            {
+                var userPasswordChars = userPassword.ToCharArray();
+                try
+                {
+                    return LoadUvfVault(vaultPath, userPasswordChars, userId);
+                }
+                finally
+                {
+                    Array.Clear(userPasswordChars, 0, userPasswordChars.Length);
+                }
             }
 
             /// <summary>
@@ -73,12 +105,44 @@ namespace DemoApp
             }
 
             /// <summary>
+            /// Create a new Cryptomator vault (string overload)
+            /// </summary>
+            public static TitanVault CreateCryptomatorVault(string vaultPath, string password)
+            {
+                var passwordChars = password.ToCharArray();
+                try
+                {
+                    return CreateCryptomatorVault(vaultPath, passwordChars);
+                }
+                finally
+                {
+                    Array.Clear(passwordChars, 0, passwordChars.Length);
+                }
+            }
+
+            /// <summary>
             /// Load an existing Cryptomator vault
             /// </summary>
             public static TitanVault LoadCryptomatorVault(string vaultPath, char[] password)
             {
                 var innerVault = Wrapper.TitanVault.LoadCryptomatorVault(vaultPath, password);
                 return new TitanVault(innerVault);
+            }
+
+            /// <summary>
+            /// Load an existing Cryptomator vault (string overload)
+            /// </summary>
+            public static TitanVault LoadCryptomatorVault(string vaultPath, string password)
+            {
+                var passwordChars = password.ToCharArray();
+                try
+                {
+                    return LoadCryptomatorVault(vaultPath, passwordChars);
+                }
+                finally
+                {
+                    Array.Clear(passwordChars, 0, passwordChars.Length);
+                }
             }
 
             // Delegate all methods to the inner vault
@@ -134,6 +198,129 @@ namespace DemoApp
             /// </summary>
             public static void ChangeCryptomatorPassword(string vaultPath, char[] oldPassword, char[] newPassword)
                 => Wrapper.TitanVaultStatic.ChangeCryptomatorVaultPassword(vaultPath, oldPassword, newPassword);
+
+            /// <summary>
+            /// Get list of users in UVF vault
+            /// </summary>
+            public static string[] GetVaultUsers(string vaultPath, char[] adminPassword)
+                => Wrapper.TitanVaultStatic.GetVaultUsers(vaultPath, adminPassword);
+
+            /// <summary>
+            /// Change UVF admin password
+            /// </summary>
+            public static void ChangeUvfAdminPassword(string vaultPath, char[] oldPassword, char[] newPassword)
+                => Wrapper.TitanVaultStatic.ChangeUvfAdminPassword(vaultPath, oldPassword, newPassword);
+
+            /// <summary>
+            /// Change UVF user password
+            /// </summary>
+            public static void ChangeUvfUserPassword(string vaultPath, char[] adminPassword, string userId, char[] newUserPassword)
+                => Wrapper.TitanVaultStatic.ChangeUvfUserPassword(vaultPath, adminPassword, userId, newUserPassword);
+
+            // Convenience overloads with string passwords
+            /// <summary>
+            /// Add a user to an existing UVF vault (string overload)
+            /// </summary>
+            public static void AddUserToVault(string vaultPath, string adminPassword, string newUserId, string newUserPassword)
+            {
+                var adminPasswordChars = adminPassword.ToCharArray();
+                var newUserPasswordChars = newUserPassword.ToCharArray();
+                try
+                {
+                    AddUserToVault(vaultPath, adminPasswordChars, newUserId, newUserPasswordChars);
+                }
+                finally
+                {
+                    Array.Clear(adminPasswordChars, 0, adminPasswordChars.Length);
+                    Array.Clear(newUserPasswordChars, 0, newUserPasswordChars.Length);
+                }
+            }
+
+            /// <summary>
+            /// Remove a user from an existing UVF vault (string overload)
+            /// </summary>
+            public static void RemoveUserFromVault(string vaultPath, string adminPassword, string userIdToRemove)
+            {
+                var adminPasswordChars = adminPassword.ToCharArray();
+                try
+                {
+                    RemoveUserFromVault(vaultPath, adminPasswordChars, userIdToRemove);
+                }
+                finally
+                {
+                    Array.Clear(adminPasswordChars, 0, adminPasswordChars.Length);
+                }
+            }
+
+            /// <summary>
+            /// Get list of users in UVF vault (string overload)
+            /// </summary>
+            public static string[] GetVaultUsers(string vaultPath, string adminPassword)
+            {
+                var adminPasswordChars = adminPassword.ToCharArray();
+                try
+                {
+                    return GetVaultUsers(vaultPath, adminPasswordChars);
+                }
+                finally
+                {
+                    Array.Clear(adminPasswordChars, 0, adminPasswordChars.Length);
+                }
+            }
+
+            /// <summary>
+            /// Change UVF admin password (string overload)
+            /// </summary>
+            public static void ChangeUvfAdminPassword(string vaultPath, string oldPassword, string newPassword)
+            {
+                var oldPasswordChars = oldPassword.ToCharArray();
+                var newPasswordChars = newPassword.ToCharArray();
+                try
+                {
+                    ChangeUvfAdminPassword(vaultPath, oldPasswordChars, newPasswordChars);
+                }
+                finally
+                {
+                    Array.Clear(oldPasswordChars, 0, oldPasswordChars.Length);
+                    Array.Clear(newPasswordChars, 0, newPasswordChars.Length);
+                }
+            }
+
+            /// <summary>
+            /// Change UVF user password (string overload)
+            /// </summary>
+            public static void ChangeUvfUserPassword(string vaultPath, string adminPassword, string userId, string newUserPassword)
+            {
+                var adminPasswordChars = adminPassword.ToCharArray();
+                var newUserPasswordChars = newUserPassword.ToCharArray();
+                try
+                {
+                    ChangeUvfUserPassword(vaultPath, adminPasswordChars, userId, newUserPasswordChars);
+                }
+                finally
+                {
+                    Array.Clear(adminPasswordChars, 0, adminPasswordChars.Length);
+                    Array.Clear(newUserPasswordChars, 0, newUserPasswordChars.Length);
+                }
+            }
+
+            /// <summary>
+            /// Change Cryptomator password (string overload)
+            /// </summary>
+            public static void ChangeCryptomatorPassword(string vaultPath, string oldPassword, string newPassword)
+            {
+                var oldPasswordChars = oldPassword.ToCharArray();
+                var newPasswordChars = newPassword.ToCharArray();
+                try
+                {
+                    ChangeCryptomatorPassword(vaultPath, oldPasswordChars, newPasswordChars);
+                }
+                finally
+                {
+                    Array.Clear(oldPasswordChars, 0, oldPasswordChars.Length);
+                    Array.Clear(newPasswordChars, 0, newPasswordChars.Length);
+                }
+            }
         }
 
         /// <summary>

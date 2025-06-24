@@ -29,8 +29,8 @@ namespace DemoApp
             {
                 switch (command)
                 {
-                    case "test":
-                        await RunSimpleDemoAsync(encryptFilenames);
+                    case "uvf":
+                        await RunUvfDemoAsync(encryptFilenames);
                         break;
 
                     case "cryptomator":
@@ -51,14 +51,6 @@ namespace DemoApp
 
                     case "info":
                         ShowSystemInfo();
-                        break;
-
-                    case "simple":
-                        SimpleVaultTest.TestUvfVaultCreationAndLoading();
-                        break;
-
-                    case "stream":
-                        await RunStreamingDemoAsync();
                         break;
 
                     default:
@@ -90,8 +82,6 @@ namespace DemoApp
             Console.WriteLine("  password          : Run password change demo (both UVF and Cryptomator)");
             Console.WriteLine("  native            : Test native library wrapper only");
             Console.WriteLine("  info              : Show system and library information");
-            Console.WriteLine("  simple            : Test UVF vault creation and loading");
-            Console.WriteLine("  stream            : Run streaming demo");
             Console.WriteLine();
             Console.WriteLine("Options:");
             Console.WriteLine("  --encryptfilenames=true   : Enable filename encryption (default, UVF only)");
@@ -105,7 +95,6 @@ namespace DemoApp
             Console.WriteLine("  DemoApp password");
             Console.WriteLine("  DemoApp native");
             Console.WriteLine("  DemoApp info");
-            Console.WriteLine("  DemoApp stream");
             Console.WriteLine();
             Console.WriteLine("Demo Paths:");
             Console.WriteLine($"  Source:    {SourceFolderPath}");
@@ -125,12 +114,12 @@ namespace DemoApp
             return true; // Default to true
         }
 
-        private static async Task RunSimpleDemoAsync(bool encryptFilenames)
+        private static async Task RunUvfDemoAsync(bool encryptFilenames)
         {
             Console.WriteLine($"🔧 Running UVF Demo with filename encryption: {(encryptFilenames ? "Enabled" : "Disabled")}");
             Console.WriteLine();
 
-            var demo = new SimpleUvfDemo(
+            var demo = new UvfDemo(
                 SourceFolderPath, 
                 VaultFolderPath, 
                 DecryptedFolderPath, 
@@ -153,7 +142,7 @@ namespace DemoApp
             Console.WriteLine("🔧 Running Cryptomator V8 Demo");
             Console.WriteLine();
 
-            var demo = new SimpleCryptomatorDemo(
+            var demo = new CryptomatorDemo(
                 SourceFolderPath, 
                 VaultFolderPath, 
                 DecryptedFolderPath, 
@@ -312,26 +301,6 @@ namespace DemoApp
             {
                 Console.WriteLine($"   {name}: ❌ Does not exist");
             }
-        }
-
-        private static async Task RunStreamingDemoAsync()
-        {
-            Console.WriteLine("🔧 Running Streaming Demo");
-            Console.WriteLine();
-
-            await StreamingDemo.RunStreamingDemoAsync(
-                SourceFolderPath + "_stream",
-                VaultFolderPath + "_stream",
-                DecryptedFolderPath + "_stream",
-                Password + "_stream");
-
-            Console.WriteLine();
-            Console.WriteLine("🎉 Streaming demo completed successfully!");
-            Console.WriteLine();
-            Console.WriteLine("📁 You can inspect the results at:");
-            Console.WriteLine($"   Source files:    {SourceFolderPath}_stream");
-            Console.WriteLine($"   Encrypted vault: {VaultFolderPath}_stream");
-            Console.WriteLine($"   Decrypted files: {DecryptedFolderPath}_stream");
         }
     }
 }

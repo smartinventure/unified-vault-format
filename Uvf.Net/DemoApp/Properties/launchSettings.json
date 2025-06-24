@@ -1,8 +1,16 @@
 {
   "profiles": {
-    "DemoApp": {
+    "WSL": {
+      "commandName": "WSL2",
+      "distributionName": ""
+    },
+    "UvfDemo": {
       "commandName": "Project",
-      "commandLineArgs": "test"
+      "commandLineArgs": "uvf"
+    },
+    "CryptomatorDemo": {
+      "commandName": "Project",
+      "commandLineArgs": "cryptomator"
     }
   }
 }

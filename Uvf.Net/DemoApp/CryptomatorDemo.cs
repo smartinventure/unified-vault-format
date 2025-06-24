@@ -7,7 +7,7 @@ namespace DemoApp
     /// Demonstrates Cryptomator V8 functionality using NATIVE TitanVault.dll wrapper.
     /// This shows how to create and use Cryptomator-compatible vaults via native library.
     /// </summary>
-    public class SimpleCryptomatorDemo
+    public class CryptomatorDemo
     {
         private readonly string _sourceFolderPath;
         private readonly string _vaultFolderPath;
@@ -23,7 +23,7 @@ namespace DemoApp
         private long _totalBytesWritten = 0;
         private long _totalBytesRead = 0;
 
-        public SimpleCryptomatorDemo(string sourceFolderPath, string vaultFolderPath, string decryptedFolderPath, string password)
+        public CryptomatorDemo(string sourceFolderPath, string vaultFolderPath, string decryptedFolderPath, string password)
         {
             _sourceFolderPath = sourceFolderPath;
             _vaultFolderPath = vaultFolderPath;
