@@ -240,6 +240,40 @@ namespace DemoApp.Wrapper
             byte* buffer, int count);
 
         /// <summary>
+        /// Seek to a specific position in the stream
+        /// </summary>
+        [DllImport(LibraryName, CallingConvention = CallingConvention.Cdecl, EntryPoint = "titan_vault_stream_seek")]
+        public static extern long StreamSeek(
+            IntPtr streamHandle,
+            long offset, int origin);
+
+        /// <summary>
+        /// Get the current position in the stream
+        /// </summary>
+        [DllImport(LibraryName, CallingConvention = CallingConvention.Cdecl, EntryPoint = "titan_vault_stream_get_position")]
+        public static extern long StreamGetPosition(IntPtr streamHandle);
+
+        /// <summary>
+        /// Get the length of the stream
+        /// </summary>
+        [DllImport(LibraryName, CallingConvention = CallingConvention.Cdecl, EntryPoint = "titan_vault_stream_get_length")]
+        public static extern long StreamGetLength(IntPtr streamHandle);
+
+        /// <summary>
+        /// Set the length of a writable stream
+        /// </summary>
+        [DllImport(LibraryName, CallingConvention = CallingConvention.Cdecl, EntryPoint = "titan_vault_stream_set_length")]
+        public static extern int StreamSetLength(
+            IntPtr streamHandle,
+            long length);
+
+        /// <summary>
+        /// Flush any pending writes to the stream
+        /// </summary>
+        [DllImport(LibraryName, CallingConvention = CallingConvention.Cdecl, EntryPoint = "titan_vault_stream_flush")]
+        public static extern int StreamFlush(IntPtr streamHandle);
+
+        /// <summary>
         /// Close stream and free resources
         /// </summary>
         [DllImport(LibraryName, CallingConvention = CallingConvention.Cdecl, EntryPoint = "titan_vault_close_stream")]

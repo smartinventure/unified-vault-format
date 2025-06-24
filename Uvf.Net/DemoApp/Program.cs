@@ -53,6 +53,14 @@ namespace DemoApp
                         ShowSystemInfo();
                         break;
 
+                    case "simple":
+                        SimpleVaultTest.TestUvfVaultCreationAndLoading();
+                        break;
+
+                    case "stream":
+                        await RunStreamingDemoAsync();
+                        break;
+
                     default:
                         Console.WriteLine($"❌ Unknown command: {command}");
                         ShowUsage();
@@ -82,6 +90,8 @@ namespace DemoApp
             Console.WriteLine("  password          : Run password change demo (both UVF and Cryptomator)");
             Console.WriteLine("  native            : Test native library wrapper only");
             Console.WriteLine("  info              : Show system and library information");
+            Console.WriteLine("  simple            : Test UVF vault creation and loading");
+            Console.WriteLine("  stream            : Run streaming demo");
             Console.WriteLine();
             Console.WriteLine("Options:");
             Console.WriteLine("  --encryptfilenames=true   : Enable filename encryption (default, UVF only)");
@@ -95,6 +105,7 @@ namespace DemoApp
             Console.WriteLine("  DemoApp password");
             Console.WriteLine("  DemoApp native");
             Console.WriteLine("  DemoApp info");
+            Console.WriteLine("  DemoApp stream");
             Console.WriteLine();
             Console.WriteLine("Demo Paths:");
             Console.WriteLine($"  Source:    {SourceFolderPath}");
@@ -301,6 +312,26 @@ namespace DemoApp
             {
                 Console.WriteLine($"   {name}: ❌ Does not exist");
             }
+        }
+
+        private static async Task RunStreamingDemoAsync()
+        {
+            Console.WriteLine("🔧 Running Streaming Demo");
+            Console.WriteLine();
+
+            await StreamingDemo.RunStreamingDemoAsync(
+                SourceFolderPath + "_stream",
+                VaultFolderPath + "_stream",
+                DecryptedFolderPath + "_stream",
+                Password + "_stream");
+
+            Console.WriteLine();
+            Console.WriteLine("🎉 Streaming demo completed successfully!");
+            Console.WriteLine();
+            Console.WriteLine("📁 You can inspect the results at:");
+            Console.WriteLine($"   Source files:    {SourceFolderPath}_stream");
+            Console.WriteLine($"   Encrypted vault: {VaultFolderPath}_stream");
+            Console.WriteLine($"   Decrypted files: {DecryptedFolderPath}_stream");
         }
     }
 }

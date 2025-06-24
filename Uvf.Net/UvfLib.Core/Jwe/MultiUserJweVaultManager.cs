@@ -478,28 +478,73 @@ namespace UvfLib.Core.Jwe
 
                 // Extract parameters
                 string alg = headerElement.GetProperty("alg").GetString()!;
-                if (alg != "PBES2-HS512+A256KW") return null;
-
-                byte[] salt = Jose.Base64Url.Decode(headerElement.GetProperty("p2s").GetString()!);
-                int iterations = headerElement.GetProperty("p2c").GetInt32();
                 byte[] encryptedKey = Jose.Base64Url.Decode(encKeyElement.GetString()!);
 
-                // Derive KEK
-                byte[] kek = new byte[32];
-                byte[] passwordBytes = System.Text.Encoding.UTF8.GetBytes(password);
-                using (var pbkdf2 = new Rfc2898DeriveBytes(passwordBytes, salt, iterations, HashAlgorithmName.SHA512))
+                if (alg == "PBES2-HS512+A256KW")
                 {
-                    kek = pbkdf2.GetBytes(32);
-                }
+                    // PBKDF2 recipient
+                    byte[] salt = Jose.Base64Url.Decode(headerElement.GetProperty("p2s").GetString()!);
+                    int iterations = headerElement.GetProperty("p2c").GetInt32();
 
-                try
-                {
-                    // Decrypt CEK
-                    return AesKeyWrap.UnwrapKey(kek, encryptedKey);
+                    // Derive KEK using PBKDF2
+                    byte[] kek = new byte[32];
+                    byte[] passwordBytes = System.Text.Encoding.UTF8.GetBytes(password);
+                    using (var pbkdf2 = new Rfc2898DeriveBytes(passwordBytes, salt, iterations, HashAlgorithmName.SHA512))
+                    {
+                        kek = pbkdf2.GetBytes(32);
+                    }
+
+                    try
+                    {
+                        // Decrypt CEK
+                        return AesKeyWrap.UnwrapKey(kek, encryptedKey);
+                    }
+                    finally
+                    {
+                        Array.Clear(kek, 0, kek.Length);
+                    }
                 }
-                finally
+                else if (alg == "uvf.scrypt+A256KW")
                 {
-                    Array.Clear(kek, 0, kek.Length);
+                    // Scrypt recipient
+                    byte[] salt = Jose.Base64Url.Decode(headerElement.GetProperty("uvf_kdf_scrypt_salt").GetString()!);
+                    int scryptN = headerElement.GetProperty("uvf_kdf_scrypt_n").GetInt32();
+                    int scryptR = headerElement.GetProperty("uvf_kdf_scrypt_r").GetInt32();
+                    int scryptP = headerElement.GetProperty("uvf_kdf_scrypt_p").GetInt32();
+
+                    // Derive KEK using Scrypt
+                    byte[] passwordBytes = Encoding.UTF8.GetBytes(password);
+                    byte[] kek;
+                    try
+                    {
+                        kek = SCrypt.Generate(
+                            passwordBytes,
+                            salt,
+                            scryptN,
+                            scryptR,
+                            scryptP,
+                            32 // 256-bit KEK for AES Key Wrap
+                        );
+                    }
+                    finally
+                    {
+                        Array.Clear(passwordBytes, 0, passwordBytes.Length);
+                    }
+
+                    try
+                    {
+                        // Decrypt CEK
+                        return AesKeyWrap.UnwrapKey(kek, encryptedKey);
+                    }
+                    finally
+                    {
+                        Array.Clear(kek, 0, kek.Length);
+                    }
+                }
+                else
+                {
+                    // Unsupported algorithm
+                    return null;
                 }
             }
             catch

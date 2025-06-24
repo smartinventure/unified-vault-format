@@ -39,6 +39,169 @@ namespace UvfLib.Master
             UvfV3
         }
 
+        /// <summary>
+        /// Key derivation methods supported by UVF vaults.
+        /// </summary>
+        public enum KeyDerivationMethod
+        {
+            /// <summary>
+            /// PBKDF2 with HMAC-SHA512 (default, backward compatible)
+            /// </summary>
+            PBKDF2_HMAC_SHA512,
+            
+            /// <summary>
+            /// Scrypt key derivation (enhanced security, slower)
+            /// </summary>
+            Scrypt
+        }
+
+        /// <summary>
+        /// Parameters for key derivation functions used in UVF vaults.
+        /// </summary>
+        public class KeyDerivationParameters
+        {
+            /// <summary>
+            /// Key derivation method to use
+            /// </summary>
+            public KeyDerivationMethod Method { get; set; }
+
+            /// <summary>
+            /// PBKDF2 iteration count (used when Method is PBKDF2_HMAC_SHA512)
+            /// </summary>
+            public int Pbkdf2Iterations { get; set; }
+
+            /// <summary>
+            /// Scrypt CPU/memory cost parameter (used when Method is Scrypt)
+            /// </summary>
+            public int ScryptN { get; set; }
+
+            /// <summary>
+            /// Scrypt block size parameter (used when Method is Scrypt)
+            /// </summary>
+            public int ScryptR { get; set; }
+
+            /// <summary>
+            /// Scrypt parallelization parameter (used when Method is Scrypt)
+            /// </summary>
+            public int ScryptP { get; set; }
+
+            /// <summary>
+            /// Creates default PBKDF2 parameters for backward compatibility
+            /// </summary>
+            public static KeyDerivationParameters Default()
+            {
+                return new KeyDerivationParameters
+                {
+                    Method = KeyDerivationMethod.PBKDF2_HMAC_SHA512,
+                    Pbkdf2Iterations = 64000
+                };
+            }
+
+            /// <summary>
+            /// Creates Scrypt parameters with recommended security settings
+            /// </summary>
+            public static KeyDerivationParameters Scrypt()
+            {
+                return new KeyDerivationParameters
+                {
+                    Method = KeyDerivationMethod.Scrypt,
+                    ScryptN = 32768,  // 2^15
+                    ScryptR = 8,
+                    ScryptP = 1
+                };
+            }
+
+            /// <summary>
+            /// Creates Scrypt parameters with custom settings
+            /// </summary>
+            public static KeyDerivationParameters Scrypt(int n, int r, int p)
+            {
+                return new KeyDerivationParameters
+                {
+                    Method = KeyDerivationMethod.Scrypt,
+                    ScryptN = n,
+                    ScryptR = r,
+                    ScryptP = p
+                };
+            }
+
+            /// <summary>
+            /// Creates PBKDF2 parameters with custom iteration count
+            /// </summary>
+            public static KeyDerivationParameters Pbkdf2(int iterations)
+            {
+                return new KeyDerivationParameters
+                {
+                    Method = KeyDerivationMethod.PBKDF2_HMAC_SHA512,
+                    Pbkdf2Iterations = iterations
+                };
+            }
+
+            /// <summary>
+            /// Validates the parameters for the selected method
+            /// </summary>
+            public void Validate()
+            {
+                switch (Method)
+                {
+                    case KeyDerivationMethod.PBKDF2_HMAC_SHA512:
+                        if (Pbkdf2Iterations <= 0)
+                            throw new ArgumentException("PBKDF2 iterations must be positive");
+                        break;
+                    case KeyDerivationMethod.Scrypt:
+                        if (ScryptN <= 0 || (ScryptN & (ScryptN - 1)) != 0)
+                            throw new ArgumentException("Scrypt N must be a positive power of 2");
+                        if (ScryptR <= 0)
+                            throw new ArgumentException("Scrypt r must be positive");
+                        if (ScryptP <= 0)
+                            throw new ArgumentException("Scrypt p must be positive");
+                        break;
+                    default:
+                        throw new ArgumentException($"Unknown key derivation method: {Method}");
+                }
+            }
+
+            /// <summary>
+            /// Converts to internal UvfLib.Core.Api.KeyDerivationParameters
+            /// </summary>
+            internal UvfLib.Core.Api.KeyDerivationParameters ToInternal()
+            {
+                return new UvfLib.Core.Api.KeyDerivationParameters
+                {
+                    Method = Method switch
+                    {
+                        KeyDerivationMethod.PBKDF2_HMAC_SHA512 => UvfLib.Core.Api.KeyDerivationMethod.PBKDF2_HMAC_SHA512,
+                        KeyDerivationMethod.Scrypt => UvfLib.Core.Api.KeyDerivationMethod.Scrypt,
+                        _ => throw new ArgumentException($"Unknown method: {Method}")
+                    },
+                    Pbkdf2Iterations = Pbkdf2Iterations,
+                    ScryptN = ScryptN,
+                    ScryptR = ScryptR,
+                    ScryptP = ScryptP
+                };
+            }
+
+            /// <summary>
+            /// Creates from internal UvfLib.Core.Api.KeyDerivationParameters
+            /// </summary>
+            internal static KeyDerivationParameters FromInternal(UvfLib.Core.Api.KeyDerivationParameters internal_params)
+            {
+                return new KeyDerivationParameters
+                {
+                    Method = internal_params.Method switch
+                    {
+                        UvfLib.Core.Api.KeyDerivationMethod.PBKDF2_HMAC_SHA512 => KeyDerivationMethod.PBKDF2_HMAC_SHA512,
+                        UvfLib.Core.Api.KeyDerivationMethod.Scrypt => KeyDerivationMethod.Scrypt,
+                        _ => throw new ArgumentException($"Unknown internal method: {internal_params.Method}")
+                    },
+                    Pbkdf2Iterations = internal_params.Pbkdf2Iterations,
+                    ScryptN = internal_params.ScryptN,
+                    ScryptR = internal_params.ScryptR,
+                    ScryptP = internal_params.ScryptP
+                };
+            }
+        }
+
         #region Factory Methods - Cryptomator
 
         /// <summary>
@@ -605,84 +768,99 @@ namespace UvfLib.Master
             _ownsStorage = ownsStorage;
             _vaultFormat = VaultFormat.UvfV3;
 
-            // Create UVF masterkey payload exactly like the single-user system does
-            using var rng = RandomNumberGenerator.Create();
-
-            byte[] primaryEncryptionKey = new byte[32];
-            rng.GetBytes(primaryEncryptionKey);
-            byte[] primaryHmacKey = new byte[32];
-            rng.GetBytes(primaryHmacKey);
-            byte[] seedValue = new byte[32];
-            rng.GetBytes(seedValue);
-            int initialSeedId = 1;
-            byte[] kdfSaltForSeeds = new byte[32];
-            rng.GetBytes(kdfSaltForSeeds);
-            byte[] rootDirIdContext = Encoding.ASCII.GetBytes("rootDirId");
-            byte[] rootDirId = HKDF.DeriveKey(HashAlgorithmName.SHA512, seedValue, UvfLib.Core.V3.Constants.DIR_ID_SIZE, kdfSaltForSeeds, rootDirIdContext);
-
-            byte[] initialSeedIdBytes = new byte[4];
-            BinaryPrimitives.WriteInt32BigEndian(initialSeedIdBytes, initialSeedId);
-
-            var payload = new UvfMasterkeyPayload
+            try
             {
-                UvfSpecVersion = 1,
-                Keys = new List<PayloadKey>
+                // Validate KDF parameters
+                kdfParams.Validate();
+
+                // Create UVF masterkey payload exactly like the single-user system does
+                using var rng = RandomNumberGenerator.Create();
+
+                byte[] primaryEncryptionKey = new byte[32];
+                rng.GetBytes(primaryEncryptionKey);
+                byte[] primaryHmacKey = new byte[32];
+                rng.GetBytes(primaryHmacKey);
+                byte[] seedValue = new byte[32];
+                rng.GetBytes(seedValue);
+                int initialSeedId = 1;
+                byte[] kdfSaltForSeeds = new byte[32];
+                rng.GetBytes(kdfSaltForSeeds);
+                byte[] rootDirIdContext = Encoding.ASCII.GetBytes("rootDirId");
+                byte[] rootDirId = HKDF.DeriveKey(HashAlgorithmName.SHA512, seedValue, UvfLib.Core.V3.Constants.DIR_ID_SIZE, kdfSaltForSeeds, rootDirIdContext);
+
+                byte[] initialSeedIdBytes = new byte[4];
+                BinaryPrimitives.WriteInt32BigEndian(initialSeedIdBytes, initialSeedId);
+
+                var payload = new UvfMasterkeyPayload
                 {
-                    new PayloadKey 
+                    UvfSpecVersion = 1,
+                    Keys = new List<PayloadKey>
                     {
-                        Id = "1", 
-                        Purpose = "org.cryptomator.masterkey", 
-                        Alg = "AES-256-RAW", 
-                        Value = Jose.Base64Url.Encode(primaryEncryptionKey)
+                        new PayloadKey 
+                        {
+                            Id = "1", 
+                            Purpose = "org.cryptomator.masterkey", 
+                            Alg = "AES-256-RAW", 
+                            Value = Jose.Base64Url.Encode(primaryEncryptionKey)
+                        },
+                        new PayloadKey 
+                        {
+                            Id = "2", 
+                            Purpose = "org.cryptomator.hmacMasterkey", 
+                            Alg = "HMAC-SHA256-RAW", 
+                            Value = Jose.Base64Url.Encode(primaryHmacKey)
+                        }
                     },
-                    new PayloadKey 
+                    Kdf = new PayloadKdf
                     {
-                        Id = "2", 
-                        Purpose = "org.cryptomator.hmacMasterkey", 
-                        Alg = "HMAC-SHA256-RAW", 
-                        Value = Jose.Base64Url.Encode(primaryHmacKey)
-                    }
-                },
-                Kdf = new PayloadKdf
-                {
-                    Type = "HKDF-SHA512",
-                    Salt = Jose.Base64Url.Encode(kdfSaltForSeeds)
-                },
-                Seeds = new List<PayloadSeed>
-                {
-                    new PayloadSeed
+                        Type = "HKDF-SHA512",
+                        Salt = Jose.Base64Url.Encode(kdfSaltForSeeds)
+                    },
+                    Seeds = new List<PayloadSeed>
                     {
-                        Id = Jose.Base64Url.Encode(initialSeedIdBytes),
-                        Value = Jose.Base64Url.Encode(seedValue),
-                        Created = DateTime.UtcNow.ToString("yyyy-MM-ddTHH:mm:ssZ")
+                        new PayloadSeed
+                        {
+                            Id = Jose.Base64Url.Encode(initialSeedIdBytes),
+                            Value = Jose.Base64Url.Encode(seedValue),
+                            Created = DateTime.UtcNow.ToString("yyyy-MM-ddTHH:mm:ssZ")
+                        }
+                    },
+                    RootDirId = Jose.Base64Url.Encode(rootDirId),
+                    Config = new UvfLibNetConfig
+                    {
+                        EncryptFilenames = encryptFilenames,
+                        CreatedByVersion = System.Reflection.Assembly.GetExecutingAssembly().GetName().Version?.ToString()
                     }
-                },
-                RootDirId = Jose.Base64Url.Encode(rootDirId),
-                Config = new UvfLibNetConfig
+                };
+
+                // Create multi-user JWE with admin user only, using specified KDF
+                var userCredentials = new Dictionary<string, char[]>();
+                string jweString = UvfLib.Core.Jwe.MultiUserJweVaultManager.CreateMultiUserVault(payload, userCredentials, adminPassword, kdfParams.ToInternal());
+                byte[] vaultFileContent = System.Text.Encoding.UTF8.GetBytes(jweString);
+                
+                // Ensure vault directory exists
+                string vaultDirectoryPath = Path.GetDirectoryName(Path.Combine(_vaultBasePath, "vault.uvf"))!;
+                if (!string.IsNullOrEmpty(vaultDirectoryPath) && !Directory.Exists(vaultDirectoryPath))
                 {
-                    EncryptFilenames = encryptFilenames,
-                    CreatedByVersion = System.Reflection.Assembly.GetExecutingAssembly().GetName().Version?.ToString()
+                    Directory.CreateDirectory(vaultDirectoryPath);
                 }
-            };
 
-            // Create multi-user JWE with admin user only, using specified KDF
-            var userCredentials = new Dictionary<string, char[]>();
-            string jweString = UvfLib.Core.Jwe.MultiUserJweVaultManager.CreateMultiUserVault(payload, userCredentials, adminPassword, kdfParams);
-            byte[] vaultFileContent = System.Text.Encoding.UTF8.GetBytes(jweString);
-            
-            // Ensure vault directory exists
-            string vaultDirectoryPath = Path.GetDirectoryName(Path.Combine(_vaultBasePath, "vault.uvf"))!;
-            if (!string.IsNullOrEmpty(vaultDirectoryPath) && !Directory.Exists(vaultDirectoryPath))
-            {
-                Directory.CreateDirectory(vaultDirectoryPath);
+                // Write vault file
+                string vaultFilePath = Path.Combine(_vaultBasePath, "vault.uvf");
+                await System.IO.File.WriteAllBytesAsync(vaultFilePath, vaultFileContent);
+
+                // Load the vault for use
+                await LoadMultiUserUvfVaultInternalAsync(adminPassword, encryptFilenames, null);
             }
-
-            // Write vault file
-            string vaultFilePath = Path.Combine(_vaultBasePath, "vault.uvf");
-            await System.IO.File.WriteAllBytesAsync(vaultFilePath, vaultFileContent);
-
-            // Load the vault for use
-            await LoadMultiUserUvfVaultInternalAsync(adminPassword, encryptFilenames);
+            catch (Exception)
+            {
+                // Clean up on failure
+                if (_ownsStorage && _baseStorage is IDisposable disposable)
+                {
+                    disposable.Dispose();
+                }
+                throw;
+            }
         }
 
         private async Task InitializeExistingMultiUserUvfVaultAsync(IStorage storage, char[] userPassword, string vaultBasePath, string? userId, bool ownsStorage)
@@ -713,7 +891,7 @@ namespace UvfLib.Master
                 }
 
                 // Load the vault for use
-            await LoadMultiUserUvfVaultInternalAsync(userPassword, encryptFilenames);
+                await LoadMultiUserUvfVaultInternalAsync(userPassword, encryptFilenames, userId);
                 _isOpen = true;
             }
             catch (Exception)
@@ -727,7 +905,7 @@ namespace UvfLib.Master
             }
         }
 
-        private async Task LoadMultiUserUvfVaultInternalAsync(char[] userPassword, bool encryptFilenames)
+        private async Task LoadMultiUserUvfVaultInternalAsync(char[] userPassword, bool encryptFilenames, string? userId)
         {
             try
             {
@@ -740,7 +918,7 @@ namespace UvfLib.Master
                 string jweString = System.Text.Encoding.UTF8.GetString(vaultFileContent);
                 
                 // Load the multi-user vault payload first
-                var payload = UvfLib.Core.Jwe.MultiUserJweVaultManager.LoadMultiUserVault(jweString, userPassword, null);
+                var payload = UvfLib.Core.Jwe.MultiUserJweVaultManager.LoadMultiUserVault(jweString, userPassword, userId);
                 
                 // Convert the payload back to a single-user JWE format that VaultHandler can understand
                 // TODO: Update MultiUserJweVaultManager.CreateSingleUserVault to use char[] passwords
@@ -1191,7 +1369,7 @@ namespace UvfLib.Master
                 payload, 
                 userCredentials, 
                 newAdminPassword,
-                KeyDerivationParameters.Default()
+                KeyDerivationParameters.Default().ToInternal()
             );
 
             // Write updated vault content
@@ -1216,6 +1394,21 @@ namespace UvfLib.Master
             // Remove user and re-add with new password
             await RemoveUserFromVaultAsync(vaultPath, adminPassword, userId);
             await AddUserToVaultAsync(vaultPath, adminPassword, userId, newUserPassword);
+        }
+
+        #endregion
+
+        #region Utility Methods
+
+        /// <summary>
+        /// Detects whether filename encryption is enabled in a UVF vault.
+        /// </summary>
+        /// <param name="vaultFileContent">Content of the vault.uvf file</param>
+        /// <param name="passwordBytes">Password as UTF-8 encoded bytes</param>
+        /// <returns>True if filename encryption is enabled, false otherwise</returns>
+        public static bool DetectFilenameEncryption(byte[] vaultFileContent, byte[] passwordBytes)
+        {
+            return VaultHandler.DetectFilenameEncryption(vaultFileContent, passwordBytes);
         }
 
         #endregion

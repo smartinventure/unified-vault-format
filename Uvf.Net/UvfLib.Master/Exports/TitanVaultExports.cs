@@ -4,7 +4,6 @@ using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
-using UvfLib.Core.Api;
 using UvfLib.Master;
 
 namespace UvfLib.Master.Exports
@@ -370,8 +369,8 @@ namespace UvfLib.Master.Exports
                 try
                 {
                     var kdfParams = kdfMethod == TITAN_VAULT_KDF_SCRYPT
-                        ? KeyDerivationParameters.Scrypt(16384, 8, 1) // Standard scrypt parameters
-                        : KeyDerivationParameters.Pbkdf2(kdfIterations > 0 ? kdfIterations : 64000);
+                        ? VaultManager.KeyDerivationParameters.Scrypt(16384, 8, 1) // Standard scrypt parameters
+                        : VaultManager.KeyDerivationParameters.Pbkdf2(kdfIterations > 0 ? kdfIterations : 64000);
 
                     var vault = VaultManager.CreateUvfVaultAsync(vaultPath, adminPasswordChars, encryptFilenames != 0, kdfParams).Result;
                     vault.CloseVaultAsync().Wait();
@@ -1254,6 +1253,186 @@ namespace UvfLib.Master.Exports
             catch (Exception ex)
             {
                 SetLastError($"Failed to write to stream: {ex.Message}");
+                return TITAN_VAULT_ERROR_INTERNAL;
+            }
+        }
+
+        /// <summary>
+        /// Seek to a specific position in the stream.
+        /// Returns the new position or negative error code.
+        /// </summary>
+        [UnmanagedCallersOnly(EntryPoint = "titan_vault_stream_seek")]
+        public static unsafe long StreamSeek(
+            IntPtr streamHandle,
+            long offset,
+            int origin)
+        {
+            try
+            {
+                if (streamHandle == IntPtr.Zero)
+                {
+                    SetLastError("Invalid stream handle");
+                    return TITAN_VAULT_ERROR_INVALID_PARAMETER;
+                }
+
+                var stream = GetStream(streamHandle);
+                if (stream == null)
+                {
+                    SetLastError("Invalid stream handle");
+                    return TITAN_VAULT_ERROR_INVALID_PARAMETER;
+                }
+
+                if (!stream.CanSeek)
+                {
+                    SetLastError("Stream does not support seeking");
+                    return TITAN_VAULT_ERROR_UNSUPPORTED_FORMAT;
+                }
+
+                SeekOrigin seekOrigin = origin switch
+                {
+                    0 => SeekOrigin.Begin,
+                    1 => SeekOrigin.Current,
+                    2 => SeekOrigin.End,
+                    _ => throw new ArgumentException("Invalid seek origin")
+                };
+
+                return stream.Seek(offset, seekOrigin);
+            }
+            catch (Exception ex)
+            {
+                SetLastError($"Failed to seek stream: {ex.Message}");
+                return TITAN_VAULT_ERROR_INTERNAL;
+            }
+        }
+
+        /// <summary>
+        /// Get the current position in the stream.
+        /// Returns position or negative error code.
+        /// </summary>
+        [UnmanagedCallersOnly(EntryPoint = "titan_vault_stream_get_position")]
+        public static unsafe long StreamGetPosition(IntPtr streamHandle)
+        {
+            try
+            {
+                if (streamHandle == IntPtr.Zero)
+                {
+                    SetLastError("Invalid stream handle");
+                    return TITAN_VAULT_ERROR_INVALID_PARAMETER;
+                }
+
+                var stream = GetStream(streamHandle);
+                if (stream == null)
+                {
+                    SetLastError("Invalid stream handle");
+                    return TITAN_VAULT_ERROR_INVALID_PARAMETER;
+                }
+
+                return stream.Position;
+            }
+            catch (Exception ex)
+            {
+                SetLastError($"Failed to get stream position: {ex.Message}");
+                return TITAN_VAULT_ERROR_INTERNAL;
+            }
+        }
+
+        /// <summary>
+        /// Get the length of the stream.
+        /// Returns length or negative error code.
+        /// </summary>
+        [UnmanagedCallersOnly(EntryPoint = "titan_vault_stream_get_length")]
+        public static unsafe long StreamGetLength(IntPtr streamHandle)
+        {
+            try
+            {
+                if (streamHandle == IntPtr.Zero)
+                {
+                    SetLastError("Invalid stream handle");
+                    return TITAN_VAULT_ERROR_INVALID_PARAMETER;
+                }
+
+                var stream = GetStream(streamHandle);
+                if (stream == null)
+                {
+                    SetLastError("Invalid stream handle");
+                    return TITAN_VAULT_ERROR_INVALID_PARAMETER;
+                }
+
+                return stream.Length;
+            }
+            catch (Exception ex)
+            {
+                SetLastError($"Failed to get stream length: {ex.Message}");
+                return TITAN_VAULT_ERROR_INTERNAL;
+            }
+        }
+
+        /// <summary>
+        /// Set the length of a writable stream.
+        /// </summary>
+        [UnmanagedCallersOnly(EntryPoint = "titan_vault_stream_set_length")]
+        public static unsafe int StreamSetLength(
+            IntPtr streamHandle,
+            long length)
+        {
+            try
+            {
+                if (streamHandle == IntPtr.Zero || length < 0)
+                {
+                    SetLastError("Invalid parameters");
+                    return TITAN_VAULT_ERROR_INVALID_PARAMETER;
+                }
+
+                var stream = GetStream(streamHandle);
+                if (stream == null)
+                {
+                    SetLastError("Invalid stream handle");
+                    return TITAN_VAULT_ERROR_INVALID_PARAMETER;
+                }
+
+                if (!stream.CanWrite)
+                {
+                    SetLastError("Stream is not writable");
+                    return TITAN_VAULT_ERROR_ACCESS_DENIED;
+                }
+
+                stream.SetLength(length);
+                return TITAN_VAULT_SUCCESS;
+            }
+            catch (Exception ex)
+            {
+                SetLastError($"Failed to set stream length: {ex.Message}");
+                return TITAN_VAULT_ERROR_INTERNAL;
+            }
+        }
+
+        /// <summary>
+        /// Flush any pending writes to the stream.
+        /// </summary>
+        [UnmanagedCallersOnly(EntryPoint = "titan_vault_stream_flush")]
+        public static unsafe int StreamFlush(IntPtr streamHandle)
+        {
+            try
+            {
+                if (streamHandle == IntPtr.Zero)
+                {
+                    SetLastError("Invalid stream handle");
+                    return TITAN_VAULT_ERROR_INVALID_PARAMETER;
+                }
+
+                var stream = GetStream(streamHandle);
+                if (stream == null)
+                {
+                    SetLastError("Invalid stream handle");
+                    return TITAN_VAULT_ERROR_INVALID_PARAMETER;
+                }
+
+                stream.Flush();
+                return TITAN_VAULT_SUCCESS;
+            }
+            catch (Exception ex)
+            {
+                SetLastError($"Failed to flush stream: {ex.Message}");
                 return TITAN_VAULT_ERROR_INTERNAL;
             }
         }

@@ -1,6 +1,4 @@
 using UvfLib.Master;
-using UvfLib.Vault;
-using UvfLib.Core.Api;
 using System.Diagnostics;
 using System.Security.Cryptography;
 using System.IO;
@@ -15,24 +13,24 @@ namespace ExampleVaultApp
     /// </summary>
     public class SimpleUvfTest
     {
-                private readonly string _sourceFolderPath;
+        private readonly string _sourceFolderPath;
         private readonly string _vaultFolderPath;
         private readonly string _decryptedFolderPath;
-        private readonly string _password;
+        private readonly char[] _password;
         private readonly bool _encryptFilenames;
-        private readonly KeyDerivationParameters _keyDerivationParams;
+        private readonly VaultManager.KeyDerivationParameters _keyDerivationParams;
 
         private readonly Stopwatch _stopwatch = new();
         private long _totalBytesProcessed = 0;
 
-        public SimpleUvfTest(string sourceFolderPath, string vaultFolderPath, string decryptedFolderPath, string password, bool encryptFilenames = true, KeyDerivationParameters? keyDerivationParams = null)
+        public SimpleUvfTest(string sourceFolderPath, string vaultFolderPath, string decryptedFolderPath, string password, bool encryptFilenames = true, VaultManager.KeyDerivationParameters? keyDerivationParams = null)
         {
-            _sourceFolderPath = sourceFolderPath;
-            _vaultFolderPath = vaultFolderPath;
-            _decryptedFolderPath = decryptedFolderPath;
-            _password = password;
+            _sourceFolderPath = sourceFolderPath ?? throw new ArgumentNullException(nameof(sourceFolderPath));
+            _vaultFolderPath = vaultFolderPath ?? throw new ArgumentNullException(nameof(vaultFolderPath));
+            _decryptedFolderPath = decryptedFolderPath ?? throw new ArgumentNullException(nameof(decryptedFolderPath));
+            _password = password?.ToCharArray() ?? throw new ArgumentNullException(nameof(password));
             _encryptFilenames = encryptFilenames;
-            _keyDerivationParams = keyDerivationParams ?? KeyDerivationParameters.Default();
+            _keyDerivationParams = keyDerivationParams ?? VaultManager.KeyDerivationParameters.Default();
         }
 
         public async Task RunTestAsync()
@@ -179,7 +177,8 @@ namespace ExampleVaultApp
             {
                 string vaultUvfFile = Path.Combine(_vaultFolderPath, "vault.uvf");
                 byte[] vaultFileContent = await File.ReadAllBytesAsync(vaultUvfFile);
-                bool detectedEncryptFilenames = VaultHandler.DetectFilenameEncryption(vaultFileContent, _password);
+                byte[] passwordBytes = System.Text.Encoding.UTF8.GetBytes(_password);
+                bool detectedEncryptFilenames = VaultManager.DetectFilenameEncryption(vaultFileContent, passwordBytes);
                 Console.WriteLine($"🔍 Auto-detected filename encryption: {(detectedEncryptFilenames ? "Enabled" : "Disabled")}");
             }
             catch (Exception ex)
@@ -420,13 +419,13 @@ namespace ExampleVaultApp
             }
         }
 
-        private static string GetKeyDerivationDetails(KeyDerivationParameters kdfParams)
+        private static string GetKeyDerivationDetails(VaultManager.KeyDerivationParameters kdfParams)
         {
             switch (kdfParams.Method)
             {
-                case KeyDerivationMethod.PBKDF2_HMAC_SHA512:
+                case VaultManager.KeyDerivationMethod.PBKDF2_HMAC_SHA512:
                     return $"({kdfParams.Pbkdf2Iterations:N0} iterations)";
-                case KeyDerivationMethod.Scrypt:
+                case VaultManager.KeyDerivationMethod.Scrypt:
                     return $"(N={kdfParams.ScryptN}, r={kdfParams.ScryptR}, p={kdfParams.ScryptP})";
                 default:
                     return "";

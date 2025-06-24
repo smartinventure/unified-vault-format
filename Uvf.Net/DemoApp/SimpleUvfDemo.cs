@@ -59,60 +59,72 @@ namespace DemoApp
 
         private async Task SetupTestDataAsync()
         {
+            Console.WriteLine("📄 Creating test files...");
+            
+            // Clean and create source directory
+            CleanupDirectory(_sourceFolderPath, "source");
             Directory.CreateDirectory(_sourceFolderPath);
-
-            var testFiles = new Dictionary<string, string>
+            
+            // Create test files with various sizes
+            var testFiles = new[]
             {
-                { "test.txt", "Hello, this is a test file for UVF encryption!" },
-                { "config.json", $"{{\"app\": \"Cryptomator Demo\", \"version\": \"8.0\", \"timestamp\": \"{DateTime.Now:O}\"}}" },
-                { "document.txt", "This is a test document for Cryptomator encryption!" },
-                { "data.json", $"{{\"message\": \"JSON test data\", \"timestamp\": \"{DateTime.Now:O}\"}}" }
+                ("test.txt", "Hello, World! This is a test file for UVF encryption."),
+                ("config.json", "{\n  \"app\": \"UVF Demo\",\n  \"version\": \"1.0\",\n  \"encryption\": true\n}"),
+                ("document.txt", "This is a longer document with multiple lines.\nLine 2\nLine 3\nEnd of document."),
+                ("data.json", "{\n  \"users\": [\"alice\", \"bob\"],\n  \"settings\": {\"theme\": \"dark\"}\n}")
             };
-
-            // Create subdirectories with files
-            var subDirs = new Dictionary<string, Dictionary<string, string>>
-            {
-                { "subfolder", new Dictionary<string, string>
-                    {
-                        { "nested.txt", "This is a nested file in a subdirectory" },
-                        { "binary.dat", Convert.ToBase64String(System.Security.Cryptography.RandomNumberGenerator.GetBytes(1024)) }
-                    }
-                },
-                { "data", new Dictionary<string, string>
-                    {
-                        { "binary.dat", Convert.ToBase64String(System.Security.Cryptography.RandomNumberGenerator.GetBytes(4096)) }
-                    }
-                },
-                { "images", new Dictionary<string, string>
-                    {
-                        { "photo.txt", "Simulated image file content in subdirectory" }
-                    }
-                }
-            };
-
-            // Create root files
+            
             foreach (var (fileName, content) in testFiles)
             {
                 var filePath = Path.Combine(_sourceFolderPath, fileName);
                 await File.WriteAllTextAsync(filePath, content);
                 Console.WriteLine($"   Created: {fileName} ({content.Length} bytes)");
             }
-
-            // Create subdirectories and files
-            foreach (var (subDir, files) in subDirs)
-            {
-                var subDirPath = Path.Combine(_sourceFolderPath, subDir);
-                Directory.CreateDirectory(subDirPath);
-
-                foreach (var (fileName, content) in files)
-                {
-                    var filePath = Path.Combine(subDirPath, fileName);
-                    await File.WriteAllTextAsync(filePath, content);
-                }
-            }
-
+            
+            // Create subdirectories with files
+            var subDir1 = Path.Combine(_sourceFolderPath, "subdirectory1");
+            var subDir2 = Path.Combine(_sourceFolderPath, "subdirectory2");
+            Directory.CreateDirectory(subDir1);
+            Directory.CreateDirectory(subDir2);
+            
+            // Add files to subdirectories
+            await File.WriteAllTextAsync(Path.Combine(subDir1, "sub1_file.txt"), "Content in subdirectory 1");
+            await File.WriteAllTextAsync(Path.Combine(subDir2, "sub2_file.txt"), "Content in subdirectory 2");
+            await File.WriteAllTextAsync(Path.Combine(subDir2, "another.json"), "{\"sub\": \"directory2\"}");
+            
+            // Create a larger file to test streaming (1MB)
+            Console.WriteLine("📄 Creating large test file (1MB) to demonstrate streaming...");
+            await CreateLargeTestFileAsync(Path.Combine(_sourceFolderPath, "large_file.txt"), 1024 * 1024); // 1MB
+            
             var allFiles = Directory.GetFiles(_sourceFolderPath, "*", SearchOption.AllDirectories);
-            Console.WriteLine($"✅ Created {allFiles.Length} test files");
+            var totalSize = allFiles.Sum(f => new System.IO.FileInfo(f).Length);
+            Console.WriteLine($"✅ Created {allFiles.Length} test files (total: {totalSize:N0} bytes)");
+        }
+        
+        private async Task CreateLargeTestFileAsync(string filePath, long targetSize)
+        {
+            const int bufferSize = 64 * 1024; // 64KB buffer
+            var buffer = new byte[bufferSize];
+            
+            // Fill buffer with test data pattern
+            for (int i = 0; i < bufferSize; i++)
+            {
+                buffer[i] = (byte)('A' + (i % 26)); // Repeating A-Z pattern
+            }
+            
+            using (var stream = new FileStream(filePath, FileMode.Create, FileAccess.Write))
+            {
+                long bytesWritten = 0;
+                while (bytesWritten < targetSize)
+                {
+                    int bytesToWrite = (int)Math.Min(bufferSize, targetSize - bytesWritten);
+                    await stream.WriteAsync(buffer, 0, bytesToWrite);
+                    bytesWritten += bytesToWrite;
+                }
+                await stream.FlushAsync();
+            }
+            
+            Console.WriteLine($"   Created: large_file.txt ({targetSize:N0} bytes) [STREAMED CREATION]");
         }
 
         private void TestNativeWrapper()
@@ -253,14 +265,27 @@ namespace DemoApp
         {
             var fileName = Path.GetFileName(sourceFilePath);
             
-            // Read from source file
-            byte[] sourceData = await File.ReadAllBytesAsync(sourceFilePath);
+            // Use streaming for large file support
+            const int bufferSize = 64 * 1024; // 64KB buffer - good balance of memory usage and performance
+            var buffer = new byte[bufferSize];
+            long totalBytesProcessed = 0;
             
-            // Write to vault using TitanVault
-            vault.WriteAllBytes(vaultVirtualPath, sourceData);
+            using (var sourceStream = new FileStream(sourceFilePath, FileMode.Open, FileAccess.Read))
+            using (var vaultStream = vault.OpenWriteStream(vaultVirtualPath))
+            {
+                int bytesRead;
+                while ((bytesRead = await sourceStream.ReadAsync(buffer, 0, bufferSize)) > 0)
+                {
+                    await vaultStream.WriteAsync(buffer, 0, bytesRead);
+                    totalBytesProcessed += bytesRead;
+                }
+                
+                // Ensure all data is written
+                await vaultStream.FlushAsync();
+            }
             
-            _totalBytesProcessed += sourceData.Length;
-            Console.WriteLine($"   📄 {fileName} -> {Path.GetFileName(vaultVirtualPath)} ({sourceData.Length} bytes)");
+            _totalBytesProcessed += totalBytesProcessed;
+            Console.WriteLine($"   📄 {fileName} -> {Path.GetFileName(vaultVirtualPath)} ({totalBytesProcessed:N0} bytes) [STREAMED]");
         }
 
         private async Task ProcessVaultDirectoryForDecryption(TitanVaultWrapper.TitanVault vault)
@@ -310,14 +335,27 @@ namespace DemoApp
         {
             var fileName = Path.GetFileName(vaultVirtualPath);
             
-            // Read from vault using TitanVault
-            byte[] vaultData = vault.ReadAllBytes(vaultVirtualPath);
+            // Use streaming for large file support
+            const int bufferSize = 64 * 1024; // 64KB buffer - good balance of memory usage and performance
+            var buffer = new byte[bufferSize];
+            long totalBytesProcessed = 0;
             
-            // Write to target file
-            await File.WriteAllBytesAsync(targetFilePath, vaultData);
+            using (var vaultStream = vault.OpenReadStream(vaultVirtualPath))
+            using (var targetStream = new FileStream(targetFilePath, FileMode.Create, FileAccess.Write))
+            {
+                int bytesRead;
+                while ((bytesRead = await vaultStream.ReadAsync(buffer, 0, bufferSize)) > 0)
+                {
+                    await targetStream.WriteAsync(buffer, 0, bytesRead);
+                    totalBytesProcessed += bytesRead;
+                }
+                
+                // Ensure all data is written
+                await targetStream.FlushAsync();
+            }
             
-            _totalBytesProcessed += vaultData.Length;
-            Console.WriteLine($"   📄 {Path.GetFileName(vaultVirtualPath)} -> {fileName} ({vaultData.Length} bytes)");
+            _totalBytesProcessed += totalBytesProcessed;
+            Console.WriteLine($"   📄 {Path.GetFileName(vaultVirtualPath)} -> {fileName} ({totalBytesProcessed:N0} bytes) [STREAMED]");
         }
 
         private async Task VerifyFilesAsync()

@@ -172,12 +172,41 @@ namespace DemoApp
                 string encryptedName = GenerateCryptomatorFileName();
                 string vaultFilePath = Path.Combine(encryptedDir, encryptedName);
                 
-                var originalContent = await File.ReadAllBytesAsync(filePath);
-                var encryptedContent = SimulateCryptomatorEncryption(originalContent);
-                await File.WriteAllBytesAsync(vaultFilePath, encryptedContent);
+                // Use streaming for large file support
+                const int bufferSize = 64 * 1024; // 64KB buffer
+                var buffer = new byte[bufferSize];
+                long totalBytesProcessed = 0;
                 
-                _totalBytesProcessed += originalContent.Length;
-                Console.WriteLine($"   📄 {fileName} -> {encryptedName} ({originalContent.Length} bytes, Cryptomator format)");
+                using (var sourceStream = new FileStream(filePath, FileMode.Open, FileAccess.Read))
+                using (var vaultStream = new FileStream(vaultFilePath, FileMode.Create, FileAccess.Write))
+                {
+                    // Write simulated Cryptomator header
+                    var header = System.Text.Encoding.UTF8.GetBytes("CRYPTOMATOR_V8_");
+                    var nonce = RandomNumberGenerator.GetBytes(12);
+                    await vaultStream.WriteAsync(header, 0, header.Length);
+                    await vaultStream.WriteAsync(nonce, 0, nonce.Length);
+                    
+                    // Stream and encrypt content
+                    int bytesRead;
+                    int position = 0;
+                    while ((bytesRead = await sourceStream.ReadAsync(buffer, 0, bufferSize)) > 0)
+                    {
+                        // Simple XOR encryption simulation (streaming)
+                        for (int i = 0; i < bytesRead; i++)
+                        {
+                            buffer[i] = (byte)(buffer[i] ^ (nonce[(position + i) % nonce.Length] + (position + i) % 256));
+                        }
+                        
+                        await vaultStream.WriteAsync(buffer, 0, bytesRead);
+                        totalBytesProcessed += bytesRead;
+                        position += bytesRead;
+                    }
+                    
+                    await vaultStream.FlushAsync();
+                }
+                
+                _totalBytesProcessed += totalBytesProcessed;
+                Console.WriteLine($"   📄 {fileName} -> {encryptedName} ({totalBytesProcessed:N0} bytes, Cryptomator format) [STREAMED]");
             }
         }
 
@@ -193,16 +222,56 @@ namespace DemoApp
             {
                 var fileName = Path.GetFileName(filePath);
                 
-                var encryptedContent = await File.ReadAllBytesAsync(filePath);
-                var decryptedContent = SimulateCryptomatorDecryption(encryptedContent);
-                
                 string originalName = $"cryptomator_restored_{++fileIndex}.txt";
                 string decryptedFilePath = Path.Combine(_decryptedFolderPath, originalName);
                 
-                await File.WriteAllBytesAsync(decryptedFilePath, decryptedContent);
+                // Use streaming for large file support
+                const int bufferSize = 64 * 1024; // 64KB buffer
+                var buffer = new byte[bufferSize];
+                long totalBytesProcessed = 0;
                 
-                _totalBytesProcessed += decryptedContent.Length;
-                Console.WriteLine($"   📄 {fileName} -> {originalName} ({decryptedContent.Length} bytes, decrypted)");
+                using (var vaultStream = new FileStream(filePath, FileMode.Open, FileAccess.Read))
+                using (var decryptedStream = new FileStream(decryptedFilePath, FileMode.Create, FileAccess.Write))
+                {
+                    // Read and skip simulated Cryptomator header
+                    var headerLength = "CRYPTOMATOR_V8_".Length;
+                    var nonceLength = 12;
+                    var totalHeaderLength = headerLength + nonceLength;
+                    
+                    if (vaultStream.Length < totalHeaderLength)
+                    {
+                        Console.WriteLine($"   ⚠️ {fileName} -> {originalName} (invalid format, copying as-is)");
+                        vaultStream.Position = 0;
+                        await vaultStream.CopyToAsync(decryptedStream);
+                        continue;
+                    }
+                    
+                    // Skip header and read nonce
+                    vaultStream.Position = headerLength;
+                    var nonce = new byte[nonceLength];
+                    await vaultStream.ReadAsync(nonce, 0, nonceLength);
+                    
+                    // Stream and decrypt content
+                    int bytesRead;
+                    int position = 0;
+                    while ((bytesRead = await vaultStream.ReadAsync(buffer, 0, bufferSize)) > 0)
+                    {
+                        // Reverse the XOR encryption (streaming)
+                        for (int i = 0; i < bytesRead; i++)
+                        {
+                            buffer[i] = (byte)(buffer[i] ^ (nonce[(position + i) % nonce.Length] + (position + i) % 256));
+                        }
+                        
+                        await decryptedStream.WriteAsync(buffer, 0, bytesRead);
+                        totalBytesProcessed += bytesRead;
+                        position += bytesRead;
+                    }
+                    
+                    await decryptedStream.FlushAsync();
+                }
+                
+                _totalBytesProcessed += totalBytesProcessed;
+                Console.WriteLine($"   📄 {fileName} -> {originalName} ({totalBytesProcessed:N0} bytes, decrypted) [STREAMED]");
             }
         }
 

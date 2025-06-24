@@ -22,42 +22,52 @@ namespace DemoApp.Wrapper
         /// <summary>
         /// Create a new UVF vault
         /// </summary>
-        public static TitanVault CreateUvfVault(string vaultPath, char[] adminPassword, bool encryptFilenames = true)
+        public static TitanVault CreateUvfVault(string vaultPath, char[] adminPassword, bool encryptFilenames)
         {
-            if (string.IsNullOrEmpty(vaultPath))
-                throw new ArgumentNullException(nameof(vaultPath));
-            if (adminPassword == null)
-                throw new ArgumentNullException(nameof(adminPassword));
-
-            unsafe
+            try
             {
-                var vaultPathBytes = TitanVaultUtils.StringToUtf8Bytes(vaultPath);
-                var adminPasswordBytes = Encoding.UTF8.GetBytes(adminPassword);
-
-                try
+                Console.WriteLine($"🔧 Creating UVF vault at: {vaultPath}");
+                Console.WriteLine($"🔧 Encrypt filenames: {encryptFilenames}");
+                
+                unsafe
                 {
+                    var vaultPathBytes = TitanVaultUtils.StringToUtf8Bytes(vaultPath);
+                    var adminPasswordBytes = System.Text.Encoding.UTF8.GetBytes(adminPassword);
+
                     fixed (byte* vaultPathPtr = vaultPathBytes)
                     fixed (byte* adminPasswordPtr = adminPasswordBytes)
                     {
+                        Console.WriteLine($"🔧 Calling native CreateUvfVault...");
                         var result = TitanVaultNativeMethods.CreateUvfVault(
                             vaultPathPtr, vaultPathBytes.Length,
                             adminPasswordPtr, adminPasswordBytes.Length,
                             encryptFilenames ? 1 : 0,
                             TitanVaultUtils.KdfMethod.PBKDF2, 64000);
 
-                        if (result != TitanVaultUtils.ReturnCodes.Success)
+                        Console.WriteLine($"🔧 Native CreateUvfVault result: {result}");
+                        
+                        if (result != 0)
                         {
-                            throw new InvalidOperationException($"Failed to create UVF vault: {TitanVaultUtils.GetLastErrorString()}");
+                            string errorMsg = TitanVaultUtils.GetLastErrorString();
+                            Console.WriteLine($"❌ Native CreateUvfVault failed with code {result}: {errorMsg}");
+                            throw new InvalidOperationException($"Failed to create UVF vault: {errorMsg}");
                         }
-
-                        // Load the newly created vault
+                        
+                        Console.WriteLine($"✅ Native CreateUvfVault succeeded, now loading vault...");
+                        
+                        // Now load the vault
                         return LoadUvfVault(vaultPath, adminPassword, "admin");
                     }
                 }
-                finally
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"❌ CreateUvfVault exception: {ex.GetType().Name}: {ex.Message}");
+                if (ex.InnerException != null)
                 {
-                    Array.Clear(adminPasswordBytes, 0, adminPasswordBytes.Length);
+                    Console.WriteLine($"❌ Inner exception: {ex.InnerException.GetType().Name}: {ex.InnerException.Message}");
                 }
+                throw new InvalidOperationException($"Failed to create UVF vault: {ex.Message}", ex);
             }
         }
 
@@ -363,12 +373,12 @@ namespace DemoApp.Wrapper
         #region Stream Operations
 
         /// <summary>
-        /// Opens a file for reading as a stream using native streaming exports.
-        /// Supports small buffer reads for large files.
+        /// Opens a file for reading only
         /// </summary>
-        public Stream OpenReadStream(string filePath)
+        public TitanVaultStream OpenReadStream(string filePath)
         {
-            EnsureOpen();
+            if (_disposed)
+                throw new ObjectDisposedException(nameof(TitanVault));
             if (string.IsNullOrEmpty(filePath))
                 throw new ArgumentNullException(nameof(filePath));
 
@@ -377,25 +387,25 @@ namespace DemoApp.Wrapper
                 var filePathBytes = TitanVaultUtils.StringToUtf8Bytes(filePath);
                 fixed (byte* filePathPtr = filePathBytes)
                 {
-                    var streamHandle = TitanVaultNativeMethods.OpenReadStream(_vaultHandle, filePathPtr, filePathBytes.Length);
-                    
-                    if (streamHandle == IntPtr.Zero)
+                    var handle = TitanVaultNativeMethods.OpenReadStream(_vaultHandle, filePathPtr, filePathBytes.Length);
+
+                    if (handle == IntPtr.Zero)
                     {
-                        throw new InvalidOperationException($"Failed to open read stream: {TitanVaultUtils.GetLastErrorString()}");
+                        throw new IOException($"Failed to open read stream for '{filePath}': {TitanVaultUtils.GetLastErrorString()}");
                     }
 
-                    return new TitanVaultReadStream(streamHandle, this);
+                    return new TitanVaultStream(handle, this, canWrite: false);
                 }
             }
         }
 
         /// <summary>
-        /// Opens a file for writing as a stream using native streaming exports.
-        /// Supports small buffer writes for large files.
+        /// Opens a file for reading and writing
         /// </summary>
-        public Stream OpenWriteStream(string filePath)
+        public TitanVaultStream OpenWriteStream(string filePath)
         {
-            EnsureOpen();
+            if (_disposed)
+                throw new ObjectDisposedException(nameof(TitanVault));
             if (string.IsNullOrEmpty(filePath))
                 throw new ArgumentNullException(nameof(filePath));
 
@@ -404,16 +414,38 @@ namespace DemoApp.Wrapper
                 var filePathBytes = TitanVaultUtils.StringToUtf8Bytes(filePath);
                 fixed (byte* filePathPtr = filePathBytes)
                 {
-                    var streamHandle = TitanVaultNativeMethods.OpenWriteStream(_vaultHandle, filePathPtr, filePathBytes.Length);
-                    
-                    if (streamHandle == IntPtr.Zero)
+                    var handle = TitanVaultNativeMethods.OpenWriteStream(_vaultHandle, filePathPtr, filePathBytes.Length);
+
+                    if (handle == IntPtr.Zero)
                     {
-                        throw new InvalidOperationException($"Failed to open write stream: {TitanVaultUtils.GetLastErrorString()}");
+                        throw new IOException($"Failed to open write stream for '{filePath}': {TitanVaultUtils.GetLastErrorString()}");
                     }
 
-                    return new TitanVaultWriteStream(streamHandle, this);
+                    return new TitanVaultStream(handle, this, canWrite: true);
                 }
             }
+        }
+
+        /// <summary>
+        /// Opens a file for reading and writing (alias for OpenWriteStream for clarity)
+        /// </summary>
+        public TitanVaultStream OpenReadWriteStream(string filePath)
+        {
+            return OpenWriteStream(filePath);
+        }
+
+        /// <summary>
+        /// Opens a file in the specified mode
+        /// </summary>
+        public TitanVaultStream OpenStream(string filePath, FileAccess access)
+        {
+            return access switch
+            {
+                FileAccess.Read => OpenReadStream(filePath),
+                FileAccess.Write => OpenWriteStream(filePath),
+                FileAccess.ReadWrite => OpenWriteStream(filePath),
+                _ => throw new ArgumentException("Invalid file access mode", nameof(access))
+            };
         }
 
         /// <summary>
