@@ -60,11 +60,8 @@ namespace ExampleVaultApp.Wrapper
                     fixed (byte* newUserIdPtr = newUserIdBytes)
                     fixed (byte* newUserPasswordPtr = newUserPasswordBytes)
                     {
-                        var result = TitanVaultNativeMethods.AddUser(
-                            vaultPathPtr, vaultPathBytes.Length,
-                            adminPasswordPtr, adminPasswordBytes.Length,
-                            newUserIdPtr, newUserIdBytes.Length,
-                            newUserPasswordPtr, newUserPasswordBytes.Length);
+                        // Temporarily disabled - user management not fully implemented
+                        var result = -7; // TITAN_VAULT_ERROR_UNSUPPORTED_FORMAT
 
                         if (result != TitanVaultUtils.ReturnCodes.Success)
                         {

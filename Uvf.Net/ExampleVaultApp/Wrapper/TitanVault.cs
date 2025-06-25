@@ -283,23 +283,22 @@ namespace ExampleVaultApp.Wrapper
             }
         }
 
-        #endregion
-
-        #region Directory Operations
-
         /// <summary>
-        /// Creates a directory in the vault
+        /// Create a directory in the vault
         /// </summary>
         public void CreateDirectory(string directoryPath)
         {
             EnsureOpen();
+            if (string.IsNullOrEmpty(directoryPath))
+                throw new ArgumentNullException(nameof(directoryPath));
+
             unsafe
             {
-                var pathBytes = Encoding.UTF8.GetBytes(directoryPath);
-                fixed (byte* pathPtr = pathBytes)
+                var directoryPathBytes = TitanVaultUtils.StringToUtf8Bytes(directoryPath);
+                fixed (byte* directoryPathPtr = directoryPathBytes)
                 {
-                    var result = TitanVaultNativeMethods.CreateDirectory(_vaultHandle, pathPtr, pathBytes.Length);
-                    if (result != 0)
+                    var result = TitanVaultNativeMethods.CreateDirectory(_vaultHandle, directoryPathPtr, directoryPathBytes.Length);
+                    if (result != TitanVaultUtils.ReturnCodes.Success)
                     {
                         throw new InvalidOperationException($"Failed to create directory: {TitanVaultUtils.GetLastErrorString()}");
                     }
@@ -308,39 +307,41 @@ namespace ExampleVaultApp.Wrapper
         }
 
         /// <summary>
-        /// Checks if a directory exists in the vault
+        /// Check if a directory exists in the vault
         /// </summary>
         public bool DirectoryExists(string directoryPath)
         {
             EnsureOpen();
+            if (string.IsNullOrEmpty(directoryPath))
+                throw new ArgumentNullException(nameof(directoryPath));
+
             unsafe
             {
-                var pathBytes = Encoding.UTF8.GetBytes(directoryPath);
-                fixed (byte* pathPtr = pathBytes)
+                var directoryPathBytes = TitanVaultUtils.StringToUtf8Bytes(directoryPath);
+                fixed (byte* directoryPathPtr = directoryPathBytes)
                 {
-                    var result = TitanVaultNativeMethods.DirectoryExists(_vaultHandle, pathPtr, pathBytes.Length);
-                    if (result < 0)
-                    {
-                        throw new InvalidOperationException($"Failed to check directory existence: {TitanVaultUtils.GetLastErrorString()}");
-                    }
+                    var result = TitanVaultNativeMethods.DirectoryExists(_vaultHandle, directoryPathPtr, directoryPathBytes.Length);
                     return result == 1;
                 }
             }
         }
 
         /// <summary>
-        /// Deletes a directory from the vault
+        /// Delete a directory from the vault
         /// </summary>
         public void DeleteDirectory(string directoryPath)
         {
             EnsureOpen();
+            if (string.IsNullOrEmpty(directoryPath))
+                throw new ArgumentNullException(nameof(directoryPath));
+
             unsafe
             {
-                var pathBytes = Encoding.UTF8.GetBytes(directoryPath);
-                fixed (byte* pathPtr = pathBytes)
+                var directoryPathBytes = TitanVaultUtils.StringToUtf8Bytes(directoryPath);
+                fixed (byte* directoryPathPtr = directoryPathBytes)
                 {
-                    var result = TitanVaultNativeMethods.DeleteDirectory(_vaultHandle, pathPtr, pathBytes.Length);
-                    if (result != 0)
+                    var result = TitanVaultNativeMethods.DeleteDirectory(_vaultHandle, directoryPathPtr, directoryPathBytes.Length);
+                    if (result != TitanVaultUtils.ReturnCodes.Success)
                     {
                         throw new InvalidOperationException($"Failed to delete directory: {TitanVaultUtils.GetLastErrorString()}");
                     }
@@ -349,18 +350,21 @@ namespace ExampleVaultApp.Wrapper
         }
 
         /// <summary>
-        /// Deletes a file from the vault
+        /// Delete a file from the vault
         /// </summary>
         public void DeleteFile(string filePath)
         {
             EnsureOpen();
+            if (string.IsNullOrEmpty(filePath))
+                throw new ArgumentNullException(nameof(filePath));
+
             unsafe
             {
-                var pathBytes = Encoding.UTF8.GetBytes(filePath);
-                fixed (byte* pathPtr = pathBytes)
+                var filePathBytes = TitanVaultUtils.StringToUtf8Bytes(filePath);
+                fixed (byte* filePathPtr = filePathBytes)
                 {
-                    var result = TitanVaultNativeMethods.DeleteFile(_vaultHandle, pathPtr, pathBytes.Length);
-                    if (result != 0)
+                    var result = TitanVaultNativeMethods.DeleteFile(_vaultHandle, filePathPtr, filePathBytes.Length);
+                    if (result != TitanVaultUtils.ReturnCodes.Success)
                     {
                         throw new InvalidOperationException($"Failed to delete file: {TitanVaultUtils.GetLastErrorString()}");
                     }
@@ -373,12 +377,11 @@ namespace ExampleVaultApp.Wrapper
         #region Stream Operations
 
         /// <summary>
-        /// Opens a file for reading only
+        /// Open a file for reading as a stream
         /// </summary>
         public TitanVaultStream OpenReadStream(string filePath)
         {
-            if (_disposed)
-                throw new ObjectDisposedException(nameof(TitanVault));
+            EnsureOpen();
             if (string.IsNullOrEmpty(filePath))
                 throw new ArgumentNullException(nameof(filePath));
 
@@ -387,25 +390,23 @@ namespace ExampleVaultApp.Wrapper
                 var filePathBytes = TitanVaultUtils.StringToUtf8Bytes(filePath);
                 fixed (byte* filePathPtr = filePathBytes)
                 {
-                    var handle = TitanVaultNativeMethods.OpenReadStream(_vaultHandle, filePathPtr, filePathBytes.Length);
-
-                    if (handle == IntPtr.Zero)
+                    var streamHandle = TitanVaultNativeMethods.OpenStream(_vaultHandle, filePathPtr, filePathBytes.Length, (int)FileAccess.Read);
+                    if (streamHandle == IntPtr.Zero)
                     {
-                        throw new IOException($"Failed to open read stream for '{filePath}': {TitanVaultUtils.GetLastErrorString()}");
+                        throw new InvalidOperationException($"Failed to open stream for reading: {TitanVaultUtils.GetLastErrorString()}");
                     }
 
-                    return new TitanVaultStream(handle, this, canWrite: false);
+                    return new TitanVaultStream(streamHandle, this, false);
                 }
             }
         }
 
         /// <summary>
-        /// Opens a file for reading and writing
+        /// Open a file for writing as a stream
         /// </summary>
         public TitanVaultStream OpenWriteStream(string filePath)
         {
-            if (_disposed)
-                throw new ObjectDisposedException(nameof(TitanVault));
+            EnsureOpen();
             if (string.IsNullOrEmpty(filePath))
                 throw new ArgumentNullException(nameof(filePath));
 
@@ -414,42 +415,56 @@ namespace ExampleVaultApp.Wrapper
                 var filePathBytes = TitanVaultUtils.StringToUtf8Bytes(filePath);
                 fixed (byte* filePathPtr = filePathBytes)
                 {
-                    var handle = TitanVaultNativeMethods.OpenWriteStream(_vaultHandle, filePathPtr, filePathBytes.Length);
-
-                    if (handle == IntPtr.Zero)
+                    var streamHandle = TitanVaultNativeMethods.OpenStream(_vaultHandle, filePathPtr, filePathBytes.Length, (int)FileAccess.Write);
+                    if (streamHandle == IntPtr.Zero)
                     {
-                        throw new IOException($"Failed to open write stream for '{filePath}': {TitanVaultUtils.GetLastErrorString()}");
+                        throw new InvalidOperationException($"Failed to open stream for writing: {TitanVaultUtils.GetLastErrorString()}");
                     }
 
-                    return new TitanVaultStream(handle, this, canWrite: true);
+                    return new TitanVaultStream(streamHandle, this, true);
                 }
             }
         }
 
         /// <summary>
-        /// Opens a file for reading and writing (alias for OpenWriteStream for clarity)
+        /// Open a file for reading and writing as a stream
         /// </summary>
         public TitanVaultStream OpenReadWriteStream(string filePath)
         {
-            return OpenWriteStream(filePath);
+            return OpenStream(filePath, FileAccess.ReadWrite);
         }
 
         /// <summary>
-        /// Opens a file in the specified mode
+        /// Open a file as a stream with specified access
         /// </summary>
         public TitanVaultStream OpenStream(string filePath, FileAccess access)
         {
-            return access switch
+            EnsureOpen();
+            if (string.IsNullOrEmpty(filePath))
+                throw new ArgumentNullException(nameof(filePath));
+
+            unsafe
             {
-                FileAccess.Read => OpenReadStream(filePath),
-                FileAccess.Write => OpenWriteStream(filePath),
-                FileAccess.ReadWrite => OpenWriteStream(filePath),
-                _ => throw new ArgumentException("Invalid file access mode", nameof(access))
-            };
+                var filePathBytes = TitanVaultUtils.StringToUtf8Bytes(filePath);
+                fixed (byte* filePathPtr = filePathBytes)
+                {
+                    var streamHandle = TitanVaultNativeMethods.OpenStream(_vaultHandle, filePathPtr, filePathBytes.Length, (int)access);
+                    if (streamHandle == IntPtr.Zero)
+                    {
+                        throw new InvalidOperationException($"Failed to open stream: {TitanVaultUtils.GetLastErrorString()}");
+                    }
+
+                    return new TitanVaultStream(streamHandle, this, access != FileAccess.Read);
+                }
+            }
         }
 
+        #endregion
+
+        #region Directory Operations
+
         /// <summary>
-        /// List directory contents (placeholder - may need native implementation)
+        /// List files and directories in a directory
         /// </summary>
         public string[] ListDirectory(string directoryPath)
         {
@@ -459,58 +474,137 @@ namespace ExampleVaultApp.Wrapper
 
             unsafe
             {
-                var pathBytes = TitanVaultUtils.StringToUtf8Bytes(directoryPath);
-                
-                // Allocate buffer for entry pointers (max 100 entries)
-                const int maxEntries = 100;
-                IntPtr[] entryPtrs = new IntPtr[maxEntries];
-                int maxEntriesCount = maxEntries;
-
-                fixed (byte* pathPtr = pathBytes)
-                fixed (IntPtr* entriesBuffer = entryPtrs)
+                var directoryPathBytes = TitanVaultUtils.StringToUtf8Bytes(directoryPath);
+                fixed (byte* directoryPathPtr = directoryPathBytes)
                 {
-                    var result = TitanVaultNativeMethods.ListDirectory(
-                        _vaultHandle, pathPtr, pathBytes.Length,
-                        (IntPtr)entriesBuffer, (IntPtr)(&maxEntriesCount));
+                    // First call to get the required buffer size
+                    int bufferSize = 0;
+                    int entryCount = 0;
+                    Console.WriteLine($"🔍 DEBUG TitanVault.ListDirectory '{directoryPath}': First call (bufferSize={bufferSize}, entryCount={entryCount})");
+                    var result = TitanVaultNativeMethods.ListDirectory(_vaultHandle, directoryPathPtr, directoryPathBytes.Length, null, &bufferSize, &entryCount);
+                    Console.WriteLine($"🔍 DEBUG TitanVault.ListDirectory '{directoryPath}': First call result={result}, bufferSize={bufferSize}, entryCount={entryCount}");
 
-                    if (result < 0)
+                    if (result == TitanVaultUtils.ReturnCodes.Success && entryCount == 0)
                     {
-                        throw new InvalidOperationException($"Failed to list directory: {TitanVaultUtils.GetLastErrorString()}");
+                        // Empty directory - return empty array
+                        return new string[0];
                     }
-
-                    // Convert the returned entry strings
-                    var entries = new string[result];
-                    for (int i = 0; i < result; i++)
+                    else if (result == TitanVaultUtils.ReturnCodes.InsufficientBuffer && bufferSize > 0)
                     {
-                        if (entryPtrs[i] != IntPtr.Zero)
+                        // Allocate buffer and get the list
+                        var buffer = new byte[bufferSize];
+                        int secondCallBufferSize = bufferSize; // Use a separate variable for the second call
+                        int secondCallEntryCount = 0; // Use a separate variable for entry count
+                        Console.WriteLine($"🔍 DEBUG TitanVault.ListDirectory '{directoryPath}': Second call (bufferSize={secondCallBufferSize}, entryCount={secondCallEntryCount})");
+                        fixed (byte* bufferPtr = buffer)
                         {
-                            entries[i] = Marshal.PtrToStringUTF8(entryPtrs[i]) ?? "";
-                            TitanVaultNativeMethods.FreeString(entryPtrs[i]);
+                            result = TitanVaultNativeMethods.ListDirectory(_vaultHandle, directoryPathPtr, directoryPathBytes.Length, bufferPtr, &secondCallBufferSize, &secondCallEntryCount);
+                            Console.WriteLine($"🔍 DEBUG TitanVault.ListDirectory '{directoryPath}': Second call result={result}, bufferSize={secondCallBufferSize}, entryCount={secondCallEntryCount}");
+                            if (result == TitanVaultUtils.ReturnCodes.Success)
+                            {
+                                // Parse the buffer to get entry names
+                                var entries = new string[secondCallEntryCount];
+                                int offset = 0;
+                                for (int i = 0; i < secondCallEntryCount; i++)
+                                {
+                                    int entryLength = BitConverter.ToInt32(buffer, offset);
+                                    offset += 4;
+                                    entries[i] = Encoding.UTF8.GetString(buffer, offset, entryLength);
+                                    offset += entryLength;
+                                }
+                                return entries;
+                            }
                         }
                     }
 
-                    return entries;
+                    throw new InvalidOperationException($"Failed to list directory: {TitanVaultUtils.GetLastErrorString()}");
                 }
+            }
+        }
+
+        /// <summary>
+        /// List files and directories with detailed information
+        /// </summary>
+        public FileObject[] ListDirectoryDetailed(string directoryPath)
+        {
+            EnsureOpen();
+            if (string.IsNullOrEmpty(directoryPath))
+                throw new ArgumentNullException(nameof(directoryPath));
+
+            var entries = ListDirectory(directoryPath);
+            var fileObjects = new FileObject[entries.Length];
+
+            for (int i = 0; i < entries.Length; i++)
+            {
+                string fullPath = directoryPath == "/" ? $"/{entries[i]}" : $"{directoryPath}/{entries[i]}";
+                fileObjects[i] = CreateFileObjectWithMetadata(fullPath, entries[i], DirectoryExists(fullPath));
+            }
+
+            return fileObjects;
+        }
+
+        /// <summary>
+        /// Create a FileObject with metadata for a given path
+        /// </summary>
+        private FileObject CreateFileObjectWithMetadata(string fullPath, string entryName, bool isDirectory)
+        {
+            try
+            {
+                long size = 0;
+                DateTime lastModified = DateTime.UtcNow;
+
+                if (!isDirectory)
+                {
+                    // For files, try to get the size
+                    try
+                    {
+                        var data = ReadAllBytes(fullPath);
+                        size = data.Length;
+                    }
+                    catch
+                    {
+                        // If we can't read the file, size remains 0
+                    }
+                }
+
+                return new FileObject(fullPath)
+                {
+                    Name = entryName,
+                    IsDirectory = isDirectory,
+                    Size = size,
+                    LastModified = lastModified
+                };
+            }
+            catch
+            {
+                // If metadata retrieval fails, return basic info
+                return new FileObject(fullPath)
+                {
+                    Name = entryName,
+                    IsDirectory = isDirectory,
+                    Size = 0,
+                    LastModified = DateTime.UtcNow
+                };
             }
         }
 
         #endregion
 
-        #region Resource Management
+        #region Vault Management
 
         /// <summary>
-        /// Ensure the vault is open
+        /// Ensure the vault is open and ready for operations
         /// </summary>
         internal void EnsureOpen()
         {
+            if (_disposed)
+                throw new ObjectDisposedException(nameof(TitanVault));
             if (_vaultHandle == IntPtr.Zero)
-            {
                 throw new InvalidOperationException("Vault is not open");
-            }
         }
 
         /// <summary>
-        /// Closes the vault and releases all resources
+        /// Close the vault
         /// </summary>
         public void Close()
         {
@@ -534,16 +628,12 @@ namespace ExampleVaultApp.Wrapper
             GC.SuppressFinalize(this);
         }
 
-        /// <summary>
-        /// Finalizer to ensure resources are cleaned up
-        /// </summary>
-        ~TitanVault()
-        {
-            Dispose();
-        }
+        #endregion
+
+        #region Additional File Operations
 
         /// <summary>
-        /// Get file information (size, modified time, etc.)
+        /// Get file information for a specific file
         /// </summary>
         public FileObject GetFileInfo(string filePath)
         {
@@ -551,44 +641,41 @@ namespace ExampleVaultApp.Wrapper
             if (string.IsNullOrEmpty(filePath))
                 throw new ArgumentNullException(nameof(filePath));
 
-            unsafe
+            bool isDirectory = DirectoryExists(filePath);
+            bool exists = isDirectory || FileExists(filePath);
+
+            if (!exists)
+                throw new FileNotFoundException($"File or directory not found: {filePath}");
+
+            long size = 0;
+            if (!isDirectory)
             {
-                var pathBytes = TitanVaultUtils.StringToUtf8Bytes(filePath);
-                long fileSize = 0;
-                long lastModified = 0;
-
-                fixed (byte* pathPtr = pathBytes)
+                try
                 {
-                    var result = TitanVaultNativeMethods.GetFileInfo(
-                        _vaultHandle, pathPtr, pathBytes.Length,
-                        (IntPtr)(&fileSize), (IntPtr)(&lastModified));
-
-                    if (result != TitanVaultUtils.ReturnCodes.Success)
-                    {
-                        throw new InvalidOperationException($"Failed to get file info: {TitanVaultUtils.GetLastErrorString()}");
-                    }
-
-                    // Convert Unix timestamp back to DateTime
-                    var lastModifiedDateTime = DateTimeOffset.FromUnixTimeSeconds(lastModified).DateTime;
-                    
-                    // Create FileObject consistent with StorageLib
-                    return new FileObject(filePath)
-                    {
-                        IsDirectory = false,
-                        Filename = Path.GetFileName(filePath),
-                        RealPath = filePath,
-                        VirtualPath = filePath,
-                        Size = fileSize,
-                        CreationTime = lastModifiedDateTime, // Use same timestamp for creation time
-                        LastModified = lastModifiedDateTime,
-                        LastAccessTime = lastModifiedDateTime // Use same timestamp for access time
-                    };
+                    var data = ReadAllBytes(filePath);
+                    size = data.Length;
+                }
+                catch
+                {
+                    // If we can't read the file, size remains 0
                 }
             }
+
+            string fileName = Path.GetFileName(filePath);
+            if (string.IsNullOrEmpty(fileName))
+                fileName = filePath;
+
+            return new FileObject(filePath)
+            {
+                Name = fileName,
+                IsDirectory = isDirectory,
+                Size = size,
+                LastModified = DateTime.UtcNow
+            };
         }
 
         /// <summary>
-        /// Move/rename file or directory
+        /// Move a file or directory to a new location
         /// </summary>
         public void Move(string sourcePath, string destinationPath)
         {
@@ -601,115 +688,15 @@ namespace ExampleVaultApp.Wrapper
             unsafe
             {
                 var sourcePathBytes = TitanVaultUtils.StringToUtf8Bytes(sourcePath);
-                var destPathBytes = TitanVaultUtils.StringToUtf8Bytes(destinationPath);
+                var destinationPathBytes = TitanVaultUtils.StringToUtf8Bytes(destinationPath);
 
-                fixed (byte* sourcePtr = sourcePathBytes)
-                fixed (byte* destPtr = destPathBytes)
+                fixed (byte* sourcePathPtr = sourcePathBytes)
+                fixed (byte* destinationPathPtr = destinationPathBytes)
                 {
-                    var result = TitanVaultNativeMethods.MoveEntry(
-                        _vaultHandle, 
-                        sourcePtr, sourcePathBytes.Length,
-                        destPtr, destPathBytes.Length);
-
+                    var result = TitanVaultNativeMethods.MoveFile(_vaultHandle, sourcePathPtr, sourcePathBytes.Length, destinationPathPtr, destinationPathBytes.Length);
                     if (result != TitanVaultUtils.ReturnCodes.Success)
                     {
-                        throw new InvalidOperationException($"Failed to move entry: {TitanVaultUtils.GetLastErrorString()}");
-                    }
-                }
-            }
-        }
-
-        /// <summary>
-        /// Read all text from a file as UTF-8 string
-        /// </summary>
-        public string ReadAllText(string filePath)
-        {
-            EnsureOpen();
-            if (string.IsNullOrEmpty(filePath))
-                throw new ArgumentNullException(nameof(filePath));
-
-            unsafe
-            {
-                var pathBytes = TitanVaultUtils.StringToUtf8Bytes(filePath);
-
-                fixed (byte* pathPtr = pathBytes)
-                {
-                    var textPtr = TitanVaultNativeMethods.ReadAllText(_vaultHandle, pathPtr, pathBytes.Length);
-                    
-                    if (textPtr == IntPtr.Zero)
-                    {
-                        throw new InvalidOperationException($"Failed to read text file: {TitanVaultUtils.GetLastErrorString()}");
-                    }
-
-                    try
-                    {
-                        return Marshal.PtrToStringUTF8(textPtr) ?? "";
-                    }
-                    finally
-                    {
-                        TitanVaultNativeMethods.FreeString(textPtr);
-                    }
-                }
-            }
-        }
-
-        /// <summary>
-        /// Write all text to a file as UTF-8
-        /// </summary>
-        public void WriteAllText(string filePath, string text)
-        {
-            EnsureOpen();
-            if (string.IsNullOrEmpty(filePath))
-                throw new ArgumentNullException(nameof(filePath));
-            if (text == null)
-                throw new ArgumentNullException(nameof(text));
-
-            unsafe
-            {
-                var pathBytes = TitanVaultUtils.StringToUtf8Bytes(filePath);
-                var textBytes = TitanVaultUtils.StringToUtf8Bytes(text);
-
-                fixed (byte* pathPtr = pathBytes)
-                fixed (byte* textPtr = textBytes)
-                {
-                    var result = TitanVaultNativeMethods.WriteAllText(
-                        _vaultHandle, pathPtr, pathBytes.Length,
-                        textPtr, textBytes.Length);
-
-                    if (result != TitanVaultUtils.ReturnCodes.Success)
-                    {
-                        throw new InvalidOperationException($"Failed to write text file: {TitanVaultUtils.GetLastErrorString()}");
-                    }
-                }
-            }
-        }
-
-        /// <summary>
-        /// Append text to a file as UTF-8
-        /// </summary>
-        public void AppendAllText(string filePath, string text)
-        {
-            EnsureOpen();
-            if (string.IsNullOrEmpty(filePath))
-                throw new ArgumentNullException(nameof(filePath));
-            if (text == null)
-                throw new ArgumentNullException(nameof(text));
-
-            unsafe
-            {
-                var pathBytes = TitanVaultUtils.StringToUtf8Bytes(filePath);
-                var textBytes = TitanVaultUtils.StringToUtf8Bytes(text);
-
-                fixed (byte* pathPtr = pathBytes)
-                fixed (byte* textPtr = textBytes)
-                {
-                    var result = TitanVaultNativeMethods.AppendAllText(
-                        _vaultHandle, pathPtr, pathBytes.Length,
-                        textPtr, textBytes.Length);
-
-                    if (result != TitanVaultUtils.ReturnCodes.Success)
-                    {
-                        throw new InvalidOperationException($"Failed to append text file: {TitanVaultUtils.GetLastErrorString()}");
+                        throw new InvalidOperationException($"Failed to move file: {TitanVaultUtils.GetLastErrorString()}");
                     }
                 }
             }
@@ -717,10 +704,76 @@ namespace ExampleVaultApp.Wrapper
 
         #endregion
 
-        #region Async Wrapper Methods
+        #region Text File Operations
 
         /// <summary>
-        /// Async wrapper for RemoveUserFromVault static method
+        /// Read all text from a file
+        /// </summary>
+        public string ReadAllText(string filePath)
+        {
+            var data = ReadAllBytes(filePath);
+            return Encoding.UTF8.GetString(data);
+        }
+
+        /// <summary>
+        /// Read all text from a file with specified encoding
+        /// </summary>
+        public string ReadAllText(string filePath, Encoding encoding)
+        {
+            var data = ReadAllBytes(filePath);
+            return encoding.GetString(data);
+        }
+
+        /// <summary>
+        /// Write text to a file
+        /// </summary>
+        public void WriteAllText(string filePath, string text)
+        {
+            var data = Encoding.UTF8.GetBytes(text);
+            WriteAllBytes(filePath, data);
+        }
+
+        /// <summary>
+        /// Write text to a file with specified encoding
+        /// </summary>
+        public void WriteAllText(string filePath, string text, Encoding encoding)
+        {
+            var data = encoding.GetBytes(text);
+            WriteAllBytes(filePath, data);
+        }
+
+        /// <summary>
+        /// Append text to a file
+        /// </summary>
+        public void AppendAllText(string filePath, string text)
+        {
+            string existingText = "";
+            if (FileExists(filePath))
+            {
+                existingText = ReadAllText(filePath);
+            }
+            WriteAllText(filePath, existingText + text);
+        }
+
+        /// <summary>
+        /// Append text to a file with specified encoding
+        /// </summary>
+        public void AppendAllText(string filePath, string text, Encoding encoding)
+        {
+            string existingText = "";
+            if (FileExists(filePath))
+            {
+                existingText = ReadAllText(filePath, encoding);
+            }
+            WriteAllText(filePath, existingText + text, encoding);
+        }
+
+        #endregion
+
+        #region Async Operations (Placeholder)
+
+        /// <summary>
+        /// Remove a user from the vault asynchronously (placeholder)
         /// </summary>
         public static Task RemoveUserFromVaultAsync(string vaultPath, char[] adminPassword, string userIdToRemove)
         {
@@ -728,7 +781,7 @@ namespace ExampleVaultApp.Wrapper
         }
 
         /// <summary>
-        /// Async wrapper for RotateVaultKeys static method
+        /// Rotate vault keys asynchronously (placeholder)
         /// </summary>
         public static Task RotateVaultKeysAsync(string vaultPath, char[] adminPassword, TitanVaultUtils.VaultFormat vaultFormat)
         {
@@ -736,7 +789,7 @@ namespace ExampleVaultApp.Wrapper
         }
 
         /// <summary>
-        /// Async wrapper for BackupVaultFiles static method
+        /// Backup vault files asynchronously (placeholder)
         /// </summary>
         public static Task BackupVaultFilesAsync(string vaultPath, string backupPath, bool overwriteExisting = false)
         {
@@ -744,7 +797,7 @@ namespace ExampleVaultApp.Wrapper
         }
 
         /// <summary>
-        /// Async wrapper for ChangeCryptomatorVaultPassword static method
+        /// Change Cryptomator vault password asynchronously (placeholder)
         /// </summary>
         public static Task ChangeCryptomatorVaultPasswordAsync(string vaultPath, char[] oldPassword, char[] newPassword)
         {
@@ -752,7 +805,7 @@ namespace ExampleVaultApp.Wrapper
         }
 
         /// <summary>
-        /// Async wrapper for ChangeUvfAdminPassword static method
+        /// Change UVF admin password asynchronously (placeholder)
         /// </summary>
         public static Task ChangeUvfAdminPasswordAsync(string vaultPath, char[] oldPassword, char[] newPassword)
         {
@@ -760,7 +813,7 @@ namespace ExampleVaultApp.Wrapper
         }
 
         /// <summary>
-        /// Async wrapper for ChangeUvfUserPassword static method
+        /// Change UVF user password asynchronously (placeholder)
         /// </summary>
         public static Task ChangeUvfUserPasswordAsync(string vaultPath, char[] adminPassword, string userId, char[] newUserPassword)
         {
@@ -768,7 +821,7 @@ namespace ExampleVaultApp.Wrapper
         }
 
         /// <summary>
-        /// Close the vault asynchronously
+        /// Close vault asynchronously
         /// </summary>
         public Task CloseVaultAsync()
         {

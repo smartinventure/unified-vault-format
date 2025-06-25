@@ -1231,26 +1231,8 @@ namespace UvfLib.Vault
             // CryptomatorV8 DirectoryMetadataImpl stores DirId as byte[] internally
             byte[] uuidBytes = System.Text.Encoding.ASCII.GetBytes(uuidString);
             
-            // Create a temporary DirectoryMetadata with this DirId to calculate the path
-            var dirCryptor = _cryptor.DirectoryContentCryptor();
-            if (dirCryptor == null) throw new InvalidOperationException("Directory cryptor not available.");
-
-            // Create new metadata and set the DirId to our UUID bytes
-            var coreMetadata = dirCryptor.NewDirectoryMetadata();
-            
-            // Use reflection to set the _dirId field with byte[] (not string)
-            var metadataType = coreMetadata.GetType();
-            var dirIdField = metadataType.GetField("_dirId", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-            if (dirIdField != null)
-            {
-                // Set the field with byte[] directly - this is what CryptomatorV8 DirectoryMetadataImpl expects
-                dirIdField.SetValue(coreMetadata, uuidBytes);
-            }
-            else
-            {
-                // Fallback: try to find the field by other names or create a new metadata instance
-                throw new InvalidOperationException("Unable to set DirId on CryptomatorV8 DirectoryMetadata - field not found");
-            }
+            // Create DirectoryMetadata directly instead of using reflection (AOT-compatible)
+            var coreMetadata = new UvfLib.Core.CryptomatorV8.DirectoryMetadataImpl(uuidBytes);
 
             // Use the existing directory path calculation
             return VaultDirectoryHelper.GetDirectoryPathInternal(_cryptor, coreMetadata);
@@ -1275,28 +1257,8 @@ namespace UvfLib.Vault
             // CryptomatorV8 DirectoryMetadataImpl stores DirId as byte[] internally
             byte[] uuidBytes = System.Text.Encoding.ASCII.GetBytes(uuidString);
 
-            // Create a new DirectoryMetadata with the UUID as DirId
-            var dirCryptor = _cryptor.DirectoryContentCryptor();
-            if (dirCryptor == null) throw new InvalidOperationException("Directory cryptor not available.");
-
-            // Create new metadata and set the DirId to our UUID bytes
-            var coreMetadata = dirCryptor.NewDirectoryMetadata();
-            
-            // Use reflection to set the _dirId field with byte[] (not string)
-            var metadataType = coreMetadata.GetType();
-            var dirIdField = metadataType.GetField("_dirId", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-            if (dirIdField != null)
-            {
-                // Set the field with byte[] directly - this is what CryptomatorV8 DirectoryMetadataImpl expects
-                dirIdField.SetValue(coreMetadata, uuidBytes);
-            }
-            else
-            {
-                // Fallback: try to find the field by other names or create a new metadata instance
-                throw new InvalidOperationException("Unable to set DirId on CryptomatorV8 DirectoryMetadata - field not found");
-            }
-
-            return coreMetadata;
+            // Create DirectoryMetadata directly instead of using reflection (AOT-compatible)
+            return new UvfLib.Core.CryptomatorV8.DirectoryMetadataImpl(uuidBytes);
         }
 
         // --- Symlink Operations (UVF only) ---

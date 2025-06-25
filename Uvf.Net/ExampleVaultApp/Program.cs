@@ -64,7 +64,16 @@ namespace ExampleVaultApp
                         break;
 
                     case "cstyle":
-                        await TestCStyleWrapper();
+                        // Validate that format is explicitly specified for cstyle command
+                        if (!args.Contains("--uvf") && !args.Contains("--cryptomator"))
+                        {
+                            Console.WriteLine("❌ Error: The 'cstyle' command requires either --uvf or --cryptomator to be specified.");
+                            Console.WriteLine("Examples:");
+                            Console.WriteLine("  ExampleVaultApp cstyle --uvf");
+                            Console.WriteLine("  ExampleVaultApp cstyle --cryptomator");
+                            return;
+                        }
+                        await TestCStyleWrapper(vaultFormat);
                         break;
 
                     default:
@@ -96,7 +105,7 @@ namespace ExampleVaultApp
             Console.WriteLine("  backuptest        : Test vault backup functionality");
             Console.WriteLine("  multiusertest     : Test multi-user UVF vault functionality");
             Console.WriteLine("  manageduvf         : Test managed UVF functionality");
-            Console.WriteLine("  cstyle           : Test C-style wrapper functionality");
+            Console.WriteLine("  cstyle           : Test C-style wrapper functionality (requires --uvf or --cryptomator)");
 
             Console.WriteLine();
             Console.WriteLine("Format Options (choose one):");
@@ -119,6 +128,8 @@ namespace ExampleVaultApp
             Console.WriteLine("  ExampleVaultApp directtest --uvf --encryptfilenames=true --keyderivation=pbkdf2");
             Console.WriteLine("  ExampleVaultApp changepassword --uvf --encryptfilenames=true");
             Console.WriteLine("  ExampleVaultApp backuptest");
+            Console.WriteLine("  ExampleVaultApp cstyle --uvf");
+            Console.WriteLine("  ExampleVaultApp cstyle --cryptomator");
 
             Console.WriteLine();
             Console.WriteLine("Notes:");
@@ -457,14 +468,40 @@ namespace ExampleVaultApp
 
         #endregion
 
-        private static async Task TestCStyleWrapper()
+        private static async Task TestCStyleWrapper(VaultFormat vaultFormat)
         {
-            Console.WriteLine("🧪 Testing C-Style Wrapper Functionality...");
-            string testVaultPath = @"D:\temp\uvf-cstyle-test";
-            string testPassword = "TestPassword123";
+            Console.WriteLine($"🧪 Testing C-Style Wrapper Functionality for {vaultFormat} format...");
             
-            var cStyleTest = new SimpleUvfTestCStyle(testVaultPath, testPassword, true);
-            await cStyleTest.RunTestAsync();
+            switch (vaultFormat)
+            {
+                case VaultFormat.UVF:
+                    Console.WriteLine("\n=== UVF C-Style Wrapper Test ===");
+                    
+                    var uvfCStyleTest = new SimpleUvfTestCStyle(
+                        SourceFolderPath, 
+                        VaultFolderPath, 
+                        DecryptedFolderPath, 
+                        Password, 
+                        true);
+                    await uvfCStyleTest.RunTestAsync();
+                    break;
+
+                case VaultFormat.Cryptomator:
+                    Console.WriteLine("\n=== Cryptomator C-Style Wrapper Test ===");
+                    
+                    var cryptomatorCStyleTest = new CryptomatorTestCStyle(
+                        SourceFolderPath, 
+                        VaultFolderPath, 
+                        DecryptedFolderPath, 
+                        Password);
+                    await cryptomatorCStyleTest.RunTestAsync();
+                    break;
+
+                default:
+                    throw new ArgumentException($"Unsupported vault format for C-style testing: {vaultFormat}");
+            }
+            
+            Console.WriteLine($"\n✅ C-Style wrapper test for {vaultFormat} completed successfully!");
         }
 
         private static async Task TestManagedUvfDirectly()

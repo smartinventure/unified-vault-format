@@ -100,7 +100,7 @@ namespace DemoApp
             
             // Create a larger file to test streaming (1MB)
             Console.WriteLine("📄 Creating large test file (1MB) to demonstrate streaming...");
-            await CreateLargeTestFileAsync(Path.Combine(_sourceFolderPath, "large_file.txt"), 1024 * 1024 * 1024); // 1GB
+            await CreateLargeTestFileAsync(Path.Combine(_sourceFolderPath, "large_file.txt"), 1024 * 1024); // 1GB
             
             var allFiles = Directory.GetFiles(_sourceFolderPath, "*", SearchOption.AllDirectories);
             var totalSize = allFiles.Sum(f => new System.IO.FileInfo(f).Length);

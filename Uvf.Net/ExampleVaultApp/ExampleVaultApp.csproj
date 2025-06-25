@@ -22,13 +22,4 @@
     <Compile Remove="MultiUserVaultTest.cs" />
   </ItemGroup>
 
-  <!-- Exclude problematic wrapper files that depend on methods we haven't implemented -->
-  <ItemGroup>
-    <Compile Remove="Wrapper\\TitanVault.cs" />
-    <Compile Remove="Wrapper\\TitanVaultStatic.cs" />
-    <Compile Remove="Wrapper\\TitanVaultStream.cs" />
-    <Compile Remove="Wrapper\\TitanVaultLibraryLoader.cs" />
-    <Compile Remove="TitanVaultWrapper.cs" />
-  </ItemGroup>
-
 </Project>

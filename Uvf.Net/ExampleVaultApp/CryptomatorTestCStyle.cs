@@ -7,36 +7,33 @@ using ExampleVaultApp.Wrapper;
 namespace ExampleVaultApp
 {
     /// <summary>
-    /// Tests UVF vault functionality using C-style wrapper calls (but with managed implementation).
+    /// Tests Cryptomator vault functionality using C-style wrapper calls (but with managed implementation).
     /// This allows testing the same wrapper logic that the AOT exports use, but with debugging capability.
     /// </summary>
-    public class SimpleUvfTestCStyle
+    public class CryptomatorTestCStyle
     {
         private readonly string _sourceFolderPath;
         private readonly string _vaultFolderPath;
         private readonly string _decryptedFolderPath;
         private readonly string _password;
-        private readonly bool _encryptFilenames;
 
         private readonly Stopwatch _stopwatch = new();
         private long _totalBytesProcessed = 0;
 
-        public SimpleUvfTestCStyle(string sourceFolderPath, string vaultFolderPath, string decryptedFolderPath, string password, bool encryptFilenames = true)
+        public CryptomatorTestCStyle(string sourceFolderPath, string vaultFolderPath, string decryptedFolderPath, string password)
         {
             _sourceFolderPath = sourceFolderPath ?? throw new ArgumentNullException(nameof(sourceFolderPath));
             _vaultFolderPath = vaultFolderPath ?? throw new ArgumentNullException(nameof(vaultFolderPath));
             _decryptedFolderPath = decryptedFolderPath ?? throw new ArgumentNullException(nameof(decryptedFolderPath));
             _password = password ?? throw new ArgumentNullException(nameof(password));
-            _encryptFilenames = encryptFilenames;
         }
 
         public async Task RunTestAsync()
         {
-            Console.WriteLine("===== SimpleUvfTestCStyle - C-Style Wrapper (Managed Implementation) =====");
+            Console.WriteLine("===== CryptomatorTestCStyle - C-Style Wrapper (Managed Implementation) =====");
             Console.WriteLine($"Source: {_sourceFolderPath}");
             Console.WriteLine($"Vault: {_vaultFolderPath}");
             Console.WriteLine($"Decrypted: {_decryptedFolderPath}");
-            Console.WriteLine($"Filename Encryption: {(_encryptFilenames ? "Enabled" : "Disabled")}");
             Console.WriteLine();
 
             try
@@ -57,11 +54,11 @@ namespace ExampleVaultApp
                 // Phase 5: Verification phase (File vs File)
                 await VerificationPhaseAsync();
                 
-                Console.WriteLine("✅ SimpleUvfTestCStyle completed successfully!");
+                Console.WriteLine("✅ CryptomatorTestCStyle completed successfully!");
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"❌ SimpleUvfTestCStyle failed: {ex.Message}");
+                Console.WriteLine($"❌ CryptomatorTestCStyle failed: {ex.Message}");
                 Console.WriteLine($"Stack trace: {ex.StackTrace}");
                 throw;
             }
@@ -69,7 +66,7 @@ namespace ExampleVaultApp
 
         private unsafe Task CreateVaultWithCStyleAsync()
         {
-            Console.WriteLine($"\n🆕 Creating UVF vault using C-style wrapper (filename encryption: {(_encryptFilenames ? "Enabled" : "Disabled")})...");
+            Console.WriteLine("\n🆕 Creating Cryptomator vault using C-style wrapper...");
             
             // Phase 2: Create fresh vault directory
             Directory.CreateDirectory(_vaultFolderPath);
@@ -82,12 +79,9 @@ namespace ExampleVaultApp
             fixed (byte* vaultPathPtr = vaultPathBytes)
             fixed (byte* passwordPtr = passwordBytes)
             {
-                int result = TitanVaultNativeMethods.CreateUvfVault(
+                int result = TitanVaultNativeMethods.CreateCryptomatorVault(
                     vaultPathPtr, vaultPathBytes.Length,
-                    passwordPtr, passwordBytes.Length,
-                    _encryptFilenames ? 1 : 0,  // encryptFilenames
-                    0,                          // kdfMethod (0 = PBKDF2)
-                    64000                       // kdfIterations
+                    passwordPtr, passwordBytes.Length
                 );
 
                 if (result != 0)
@@ -104,21 +98,31 @@ namespace ExampleVaultApp
                         TitanVaultNativeMethods.FreeString(errorPtr);
                     }
                     
-                    throw new Exception($"Failed to create UVF vault. Error code: {result}, Message: {errorMessage}");
+                    throw new Exception($"Failed to create Cryptomator vault. Error code: {result}, Message: {errorMessage}");
                 }
             }
 
-            Console.WriteLine("✅ UVF vault created successfully using C-style wrapper");
+            Console.WriteLine("✅ Cryptomator vault created successfully using C-style wrapper");
 
-            // Verify vault creation
-            string vaultFile = Path.Combine(_vaultFolderPath, "vault.uvf");
-            if (!File.Exists(vaultFile))
+            // Verify vault creation - Cryptomator vaults have different file structure
+            string masterkeyFile = Path.Combine(_vaultFolderPath, "masterkey.cryptomator");
+            string vaultConfigFile = Path.Combine(_vaultFolderPath, "vault.cryptomator");
+            
+            if (!File.Exists(masterkeyFile))
             {
-                throw new Exception("vault.uvf file was not created");
+                throw new Exception("masterkey.cryptomator file was not created");
+            }
+            
+            if (!File.Exists(vaultConfigFile))
+            {
+                throw new Exception("vault.cryptomator file was not created");
             }
 
-            var fileInfo = new System.IO.FileInfo(vaultFile);
-            Console.WriteLine($"✅ Vault file created: {vaultFile} ({fileInfo.Length} bytes)");
+            var masterkeyInfo = new System.IO.FileInfo(masterkeyFile);
+            var vaultConfigInfo = new System.IO.FileInfo(vaultConfigFile);
+            
+            Console.WriteLine($"✅ Masterkey file created: {masterkeyFile} ({masterkeyInfo.Length} bytes)");
+            Console.WriteLine($"✅ Vault config file created: {vaultConfigFile} ({vaultConfigInfo.Length} bytes)");
             
             return Task.CompletedTask;
         }
@@ -167,7 +171,7 @@ namespace ExampleVaultApp
             char[] passwordChars = _password.ToCharArray();
             try
             {
-                return TitanVaultWrapper.TitanVault.LoadUvfVault(_vaultFolderPath, passwordChars);
+                return TitanVaultWrapper.TitanVault.LoadCryptomatorVault(_vaultFolderPath, passwordChars);
             }
             finally
             {
