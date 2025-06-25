@@ -1,5 +1,6 @@
-﻿using UvfLib;
-using UvfLib.VaultHelpers;
+﻿using UvfLib.Vault;
+using UvfLib.Vault.VaultHelpers;
+using UvfLib.Core.Api;
 using System.Diagnostics;
 using System.Linq;
 using System.Collections.Generic;
@@ -291,14 +292,14 @@ namespace UvfConsole
             {
                 // For Cryptomator V8, create both masterkey.cryptomator and vault.cryptomator
                 string vaultDirectory = Path.GetDirectoryName(vaultFilePath) ?? throw new InvalidOperationException("Invalid vault file path");
-                Vault.CreateNewCryptomatorV8VaultComplete(vaultDirectory, Password);
+                VaultHandler.CreateNewCryptomatorV8VaultComplete(vaultDirectory, Password);
                 Console.WriteLine($"New {vaultFormat} vault files created (masterkey.cryptomator and vault.cryptomator).");
                 return File.ReadAllBytes(vaultFilePath);
             }
             else
             {
                 // For UVF format, create single file
-                byte[] vaultFileContent = Vault.CreateNewUvfVaultFileContent(Password);
+                byte[] vaultFileContent = VaultHandler.CreateNewUvfVaultFileContent(Password);
                 File.WriteAllBytes(vaultFilePath, vaultFileContent);
                 Console.WriteLine($"New {vaultFormat} vault file created.");
                 return vaultFileContent;
@@ -365,14 +366,14 @@ namespace UvfConsole
                     if (File.Exists(Path.Combine(vaultDirectory, "vault.cryptomator")))
                         File.Delete(Path.Combine(vaultDirectory, "vault.cryptomator"));
 
-                    Vault.CreateNewCryptomatorV8VaultComplete(vaultDirectory, Password);
+                    VaultHandler.CreateNewCryptomatorV8VaultComplete(vaultDirectory, Password);
                     vaultFileContentEnc = File.ReadAllBytes(vaultFilePath);
                     Console.WriteLine($"New {vaultFormat} vault files created for test run encryption (masterkey.cryptomator and vault.cryptomator).");
                 }
                 else
                 {
                     // For UVF format, create single file
-                    vaultFileContentEnc = Vault.CreateNewUvfVaultFileContent(Password);
+                    vaultFileContentEnc = VaultHandler.CreateNewUvfVaultFileContent(Password);
                     File.WriteAllBytes(vaultFilePath, vaultFileContentEnc);
                     Console.WriteLine($"New {vaultFormat} vault file created for test run encryption.");
                 }
@@ -380,7 +381,7 @@ namespace UvfConsole
                 _totalBytesProcessedOverall = 0;
                 _overallStopwatch.Restart();
 
-                using (Vault vault = LoadVault(vaultFileContentEnc, Password, vaultFormat))
+                using (VaultHandler vault = LoadVault(vaultFileContentEnc, Password, vaultFormat))
                 {
                     DirectoryMetadata rootMetadataEnc = vault.GetRootDirectoryMetadata();
                     string rootDirPhysicalPathEnc = Path.Combine(VaultFolderPath, vault.GetRootDirectoryPath());
@@ -406,7 +407,7 @@ namespace UvfConsole
                 _totalBytesProcessedOverall = 0;
                 _overallStopwatch.Restart();
 
-                using (Vault vault = LoadVault(vaultFileContentDec, Password, vaultFormat))
+                using (VaultHandler vault = LoadVault(vaultFileContentDec, Password, vaultFormat))
                 {
                     string rootDirPhysicalPathDec = Path.Combine(VaultFolderPath, vault.GetRootDirectoryPath());
                     string rootDirUvfPathDec = Path.Combine(rootDirPhysicalPathDec, vault.GetDirectoryMetadataFilename());
@@ -459,20 +460,20 @@ namespace UvfConsole
         /// <summary>
         /// Loads a vault using the appropriate method based on the vault format
         /// </summary>
-        private static Vault LoadVault(byte[] vaultFileContent, string password, VaultFormat vaultFormat)
+        private static VaultHandler LoadVault(byte[] vaultFileContent, string password, VaultFormat vaultFormat)
         {
             return vaultFormat switch
             {
-                VaultFormat.UVF => Vault.LoadUvfVault(vaultFileContent, password),
-                VaultFormat.CryptomatorV8 => Vault.LoadCryptomatorV8Vault(vaultFileContent, password),
-                _ => Vault.LoadUvfVault(vaultFileContent, password)
+                VaultFormat.UVF => VaultHandler.LoadUvfVault(vaultFileContent, password),
+                VaultFormat.CryptomatorV8 => VaultHandler.LoadCryptomatorV8Vault(vaultFileContent, password),
+                _ => VaultHandler.LoadUvfVault(vaultFileContent, password)
             };
         }
 
         private static void ProcessVault(string mode, byte[] vaultFileContent, VaultFormat vaultFormat)
         {
             Console.WriteLine($"Loading {vaultFormat} vault...");
-            using (Vault vault = LoadVault(vaultFileContent, Password, vaultFormat))
+            using (VaultHandler vault = LoadVault(vaultFileContent, Password, vaultFormat))
             {
                 Console.WriteLine("Vault loaded successfully.");
 
@@ -497,7 +498,7 @@ namespace UvfConsole
             }
         }
 
-        private static DirectoryMetadata HandleRootMetadataForEncryption(Vault vault, string rootDirUvfPath)
+        private static DirectoryMetadata HandleRootMetadataForEncryption(VaultHandler vault, string rootDirUvfPath)
         {
             if (File.Exists(rootDirUvfPath))
             {
@@ -520,7 +521,7 @@ namespace UvfConsole
             return vault.GetRootDirectoryMetadata();
         }
 
-        private static long ProcessDirectory(Vault vault, string sourceDir, DirectoryMetadata currentDirMetadata, string currentDirPhysicalVaultPath, string metadataPath = null)
+        private static long ProcessDirectory(VaultHandler vault, string sourceDir, DirectoryMetadata currentDirMetadata, string currentDirPhysicalVaultPath, string metadataPath = null)
         {
             // dirMetadataStorePath is where metadata *about* currentDir (like its dir.uvf) would be stored.
             // For UVF, this is relevant. For Cryptomator, dirid.c9r is in the content path.
@@ -604,7 +605,7 @@ namespace UvfConsole
             {
                 string plainName = Path.GetFileName(sourceFilePath);
                 long sourceFileSize = new FileInfo(sourceFilePath).Length;
-                long expectedEncryptedSize = Vault.CalculateExpectedEncryptedSize(sourceFileSize);
+                long expectedEncryptedSize = VaultHandler.CalculateExpectedEncryptedSize(sourceFileSize);
 
                 Console.WriteLine($"  Processing file: {plainName} ({sourceFileSize:N0} bytes, expected encrypted: {expectedEncryptedSize:N0} bytes)");
 
@@ -796,7 +797,7 @@ namespace UvfConsole
             return bytesProcessedInThisCall;
         }
 
-        private static long DecryptDirectory(Vault vault, DirectoryMetadata currentDirectoryMetadata, string currentDirPhysicalVaultPath, string targetDecryptedPath)
+        private static long DecryptDirectory(VaultHandler vault, DirectoryMetadata currentDirectoryMetadata, string currentDirPhysicalVaultPath, string targetDecryptedPath)
         {
             //Console.WriteLine($"  DEBUG: DecryptDirectory START - CurrentDirPhysicalPath: {currentDirPhysicalVaultPath}, TargetDecryptedPath: {targetDecryptedPath}, CurrentDirMetadata (DirId: {currentDirectoryMetadata.DirId}, SeedId: {currentDirectoryMetadata.SeedId})");
             Console.WriteLine($"Decrypting directory from: {currentDirPhysicalVaultPath} -> to: {targetDecryptedPath} (DirId: {currentDirectoryMetadata.DirId})");
@@ -865,7 +866,7 @@ namespace UvfConsole
                     Console.WriteLine($"    Decrypted filename: {encryptedName} -> {decryptedName}");
 
                     long encryptedFileSize = new FileInfo(encryptedFilePath).Length;
-                    long expectedDecryptedSize = Vault.CalculateExpectedDecryptedSize(encryptedFileSize);
+                    long expectedDecryptedSize = VaultHandler.CalculateExpectedDecryptedSize(encryptedFileSize);
 
                     Console.WriteLine($"\nSize Analysis for {encryptedName} -> {decryptedName}:");
                     Console.WriteLine($"  Encrypted size: {encryptedFileSize:N0} bytes");
@@ -1543,7 +1544,7 @@ namespace UvfConsole
             Console.WriteLine("--- End of Test Run Summary ---");
         }
 
-        private static void ProcessVault(Vault vault, CancellationToken cancellationToken)
+        private static void ProcessVault(VaultHandler vault, CancellationToken cancellationToken)
         {
             Console.WriteLine("Using programmatically generated root metadata for Cryptomator v8 decryption");
 
@@ -1559,7 +1560,7 @@ namespace UvfConsole
             }
         }
 
-        private static void ProcessCryptomatorV8Vault(Vault vault, CancellationToken cancellationToken)
+        private static void ProcessCryptomatorV8Vault(VaultHandler vault, CancellationToken cancellationToken)
         {
             Console.WriteLine("\n--- Cryptomator v8 Direct Root Access ---");
 
@@ -1584,7 +1585,7 @@ namespace UvfConsole
             DecryptDirectory(vault, rootMetadata, fullRootPath, DecryptedFolderPath);
         }
 
-        private static void ProcessStandardVault(Vault vault, CancellationToken cancellationToken)
+        private static void ProcessStandardVault(VaultHandler vault, CancellationToken cancellationToken)
         {
             // Get the root directory metadata and path
             var rootMetadata = vault.GetRootDirectoryMetadata();
@@ -1840,7 +1841,7 @@ namespace UvfConsole
                             try
                             {
                                 byte[] masterkeyBytes = File.ReadAllBytes(masterkeyPath);
-                                using (var vault = Vault.LoadCryptomatorV8Vault(masterkeyBytes, Password))
+                                using (var vault = VaultHandler.LoadCryptomatorV8Vault(masterkeyBytes, Password))
                                 {
                                     Console.WriteLine("✅ Our library can load the masterkey successfully.");
                                     // Try creating root metadata to see if vault works
@@ -1905,12 +1906,12 @@ namespace UvfConsole
 
                 // 2. Get MAC key from vault instance
                 byte[] masterkeyBytes = File.ReadAllBytes(masterkeyPath);
-                using (var vault = Vault.LoadCryptomatorV8Vault(masterkeyBytes, Password))
+                using (var vault = VaultHandler.LoadCryptomatorV8Vault(masterkeyBytes, Password))
                 {
                     Console.WriteLine("✅ Vault loaded successfully");
 
                     // Access the private field to get the perpetual masterkey
-                    var vaultType = typeof(Vault);
+                    var vaultType = typeof(VaultHandler);
                     var perpetualMasterkeyField = vaultType.GetField("_perpetualMasterkey",
                         System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
 
@@ -2162,7 +2163,7 @@ namespace UvfConsole
                             try
                             {
                                 byte[] masterkeyBytes = File.ReadAllBytes(masterkeyPath);
-                                using (var vault = Vault.LoadCryptomatorV8Vault(masterkeyBytes, Password))
+                                using (var vault = VaultHandler.LoadCryptomatorV8Vault(masterkeyBytes, Password))
                                 {
                                     Console.WriteLine("✅ Our library can load the masterkey successfully.");
                                     // Try creating root metadata to see if vault works
@@ -2227,12 +2228,12 @@ namespace UvfConsole
 
                 // 2. Get MAC key by unlocking the masterkey (what Cryptomator would derive)
                 byte[] masterkeyBytes = File.ReadAllBytes(masterkeyPath);
-                using (var vault = Vault.LoadCryptomatorV8Vault(masterkeyBytes, Password))
+                using (var vault = VaultHandler.LoadCryptomatorV8Vault(masterkeyBytes, Password))
                 {
                     Console.WriteLine("✅ Vault loaded successfully");
 
                     // Access the perpetual masterkey using reflection to get the derived MAC key
-                    var vaultType = typeof(Vault);
+                    var vaultType = typeof(VaultHandler);
                     var perpetualMasterkeyField = vaultType.GetField("_perpetualMasterkey",
                         System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
 
@@ -2451,7 +2452,7 @@ namespace UvfConsole
             {
                 // Load the real Cryptomator vault
                 byte[] realMasterkeyBytes = File.ReadAllBytes(realMasterkeyPath);
-                using (var vault = Vault.LoadCryptomatorV8Vault(realMasterkeyBytes, realPassword))
+                using (var vault = VaultHandler.LoadCryptomatorV8Vault(realMasterkeyBytes, realPassword))
                 {
                     Console.WriteLine("✅ Real vault loaded successfully");
 
@@ -2595,7 +2596,7 @@ namespace UvfConsole
                     Console.WriteLine($"📋 Testing file: {ourDiridPath}");
 
                     byte[] ourMasterkeyBytes = File.ReadAllBytes(ourMasterkeyPath);
-                    using (var ourVault = Vault.LoadCryptomatorV8Vault(ourMasterkeyBytes, realPassword))
+                    using (var ourVault = VaultHandler.LoadCryptomatorV8Vault(ourMasterkeyBytes, realPassword))
                     {
                         byte[] ourEncryptedDiridBytes = File.ReadAllBytes(ourDiridPath);
                         using (var encryptedStream = new MemoryStream(ourEncryptedDiridBytes))
@@ -2653,7 +2654,7 @@ namespace UvfConsole
             try
             {
                 byte[] ourMasterkeyBytes = File.ReadAllBytes(ourMasterkeyPath);
-                using (var ourVault = Vault.LoadCryptomatorV8Vault(ourMasterkeyBytes, ourPassword))
+                using (var ourVault = VaultHandler.LoadCryptomatorV8Vault(ourMasterkeyBytes, ourPassword))
                 {
                     Console.WriteLine("✅ Our vault loaded successfully");
 
@@ -2748,7 +2749,7 @@ namespace UvfConsole
             {
                 // Load the REAL Cryptomator vault with its REAL keys
                 byte[] realMasterkeyBytes = File.ReadAllBytes(realMasterkeyPath);
-                using var realVault = Vault.LoadCryptomatorV8Vault(realMasterkeyBytes, realPassword);
+                using var realVault = VaultHandler.LoadCryptomatorV8Vault(realMasterkeyBytes, realPassword);
 
                 // Verify this is actually a CryptomatorV8 vault
                 if (!realVault.IsCryptomatorV8())
@@ -2806,7 +2807,7 @@ namespace UvfConsole
             {
                 // Load the REAL Cryptomator vault with its REAL keys
                 byte[] realMasterkeyBytes = File.ReadAllBytes(realMasterkeyPath);
-                using var realVault = Vault.LoadCryptomatorV8Vault(realMasterkeyBytes, realPassword);
+                using var realVault = VaultHandler.LoadCryptomatorV8Vault(realMasterkeyBytes, realPassword);
 
                 Console.WriteLine("✅ Successfully loaded REAL Cryptomator vault");
                 Console.WriteLine();
@@ -3071,7 +3072,7 @@ namespace UvfConsole
             {
                 // Load the REAL Cryptomator vault with its REAL keys
                 byte[] realMasterkeyBytes = File.ReadAllBytes(realMasterkeyPath);
-                using var realVault = Vault.LoadCryptomatorV8Vault(realMasterkeyBytes, realPassword);
+                using var realVault = VaultHandler.LoadCryptomatorV8Vault(realMasterkeyBytes, realPassword);
 
                 Console.WriteLine("Step 1: Our implementation result using REAL vault keys");
                 string ourPath = realVault.GetCryptomatorV8DirectoryPathByUuid(testUuid);
@@ -3165,7 +3166,7 @@ namespace UvfConsole
                 // Step 1: Show our implementation result using REAL vault keys
                 Console.WriteLine("📊 Step 1: Our Implementation Using REAL Vault Keys");
                 byte[] realMasterkeyBytes = File.ReadAllBytes(realMasterkeyPath);
-                using var realVault = Vault.LoadCryptomatorV8Vault(realMasterkeyBytes, realPassword);
+                using var realVault = VaultHandler.LoadCryptomatorV8Vault(realMasterkeyBytes, realPassword);
 
                 Console.WriteLine("✅ Successfully loaded REAL Cryptomator vault");
 
@@ -3271,7 +3272,7 @@ namespace UvfConsole
             try
             {
                 byte[] realMasterkeyBytes = File.ReadAllBytes(@"D:\cyptomatortest\martintest\masterkey.cryptomator");
-                using var realVault = Vault.LoadCryptomatorV8Vault(realMasterkeyBytes, "your-super-secret-password");
+                using var realVault = VaultHandler.LoadCryptomatorV8Vault(realMasterkeyBytes, "your-super-secret-password");
 
                 string calculatedPath = realVault.GetCryptomatorV8DirectoryPathByUuid("5255bfb8-615a-4c7b-9415-577f94386f98");
                 Console.WriteLine($"Calculated path: {calculatedPath}");
@@ -3292,7 +3293,7 @@ namespace UvfConsole
             try
             {
                 byte[] ourMasterkeyBytes = File.ReadAllBytes(@"D:\temp\uvf\EncryptionTestVault\masterkey.cryptomator");
-                using var ourVault = Vault.LoadCryptomatorV8Vault(ourMasterkeyBytes, "your-super-secret-password");
+                using var ourVault = VaultHandler.LoadCryptomatorV8Vault(ourMasterkeyBytes, "your-super-secret-password");
 
                 string calculatedPath = ourVault.GetCryptomatorV8DirectoryPathByUuid("4cf27cc8-ed7e-45af-ad7b-f6cf46e1079d");
                 Console.WriteLine($"Calculated path: {calculatedPath}");
@@ -3326,7 +3327,7 @@ namespace UvfConsole
             try
             {
                 byte[] masterkeyBytes = File.ReadAllBytes(masterkeyPath);
-                using var vault = Vault.LoadCryptomatorV8Vault(masterkeyBytes, password);
+                using var vault = VaultHandler.LoadCryptomatorV8Vault(masterkeyBytes, password);
 
                 Console.WriteLine("✅ Vault loaded successfully");
 
@@ -3456,7 +3457,7 @@ namespace UvfConsole
             try
             {
                 byte[] masterkeyBytes = File.ReadAllBytes(masterkeyPath);
-                using var vault = Vault.LoadCryptomatorV8Vault(masterkeyBytes, password);
+                using var vault = VaultHandler.LoadCryptomatorV8Vault(masterkeyBytes, password);
 
                 // Find all dirid.c9r files
                 string[] diridFiles = Directory.GetFiles(vaultPath, "dirid.c9r", SearchOption.AllDirectories);
@@ -3557,7 +3558,7 @@ namespace UvfConsole
             try
             {
                 byte[] masterkeyBytes = File.ReadAllBytes(masterkeyPath);
-                using var vault = Vault.LoadCryptomatorV8Vault(masterkeyBytes, password);
+                using var vault = VaultHandler.LoadCryptomatorV8Vault(masterkeyBytes, password);
 
                 // Find all dir.c9r files
                 string[] dirC9rFiles = Directory.GetFiles(vaultPath, "dir.c9r", SearchOption.AllDirectories);
@@ -3727,10 +3728,10 @@ namespace UvfConsole
                 string ourMasterkeyPath = Path.Combine(testVaultPath, "masterkey.cryptomator");
                 byte[] masterkeyBytes = File.ReadAllBytes(ourMasterkeyPath);
 
-                using (var vault = Vault.LoadCryptomatorV8Vault(masterkeyBytes, password))
+                using (var vault = VaultHandler.LoadCryptomatorV8Vault(masterkeyBytes, password))
                 {
                     // Get MAC key for signing
-                    var vaultType = typeof(Vault);
+                    var vaultType = typeof(VaultHandler);
                     var perpetualMasterkeyField = vaultType.GetField("_perpetualMasterkey",
                         System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
 
@@ -3804,12 +3805,12 @@ namespace UvfConsole
                 byte[] masterkeyBytes = File.ReadAllBytes(realMasterkeyPath);
                 Console.WriteLine($"📄 Masterkey size: {masterkeyBytes.Length} bytes");
 
-                using (var vault = Vault.LoadCryptomatorV8Vault(masterkeyBytes, password))
+                using (var vault = VaultHandler.LoadCryptomatorV8Vault(masterkeyBytes, password))
                 {
                     Console.WriteLine("✅ Vault loaded successfully");
 
                     // Extract MAC key using reflection (same as our previous method)
-                    var vaultType = typeof(Vault);
+                    var vaultType = typeof(VaultHandler);
                     var perpetualMasterkeyField = vaultType.GetField("_perpetualMasterkey",
                         System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
 

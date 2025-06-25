@@ -22,35 +22,25 @@ namespace UvfLib.Core.Common
         /// Derives a key using the scrypt algorithm.
         /// Matches the signature called by ScryptTest.cs.
         /// </summary>
-        /// <param name="password">The password as a string.</param>
+        /// <param name="passwordBytes">The password as UTF-8 encoded bytes.</param>
         /// <param name="salt">The salt.</param>
         /// <param name="n">The CPU/memory cost parameter N (e.g., 16384).</param>
         /// <param name="r">The block size parameter r (e.g., 8).</param>
         /// <param name="dkLen">The desired key length in bytes (e.g., 64).</param>
         /// <returns>The derived key.</returns>
-        public static byte[] ScryptDeriveBytes(string password, byte[] salt, int n, int r, int dkLen)
+        public static byte[] ScryptDeriveBytes(byte[] passwordBytes, byte[] salt, int n, int r, int dkLen)
         {
             // Parameter validation
             if (n < 2 || (n & (n - 1)) != 0) throw new ArgumentException("N must be > 1 and a power of 2.", nameof(n));
             if (r <= 0) throw new ArgumentException("r must be positive.", nameof(r));
             if (dkLen <= 0) throw new ArgumentException("dkLen must be positive.", nameof(dkLen));
             if (salt == null) throw new ArgumentNullException(nameof(salt));
-            if (password == null) throw new ArgumentNullException(nameof(password));
+            if (passwordBytes == null) throw new ArgumentNullException(nameof(passwordBytes));
             // Assume p = 1 for this public signature
             const int p = DEFAULT_P;
 
-            byte[] passwordBytes = Encoding.UTF8.GetBytes(password);
-            byte[] derivedKey = null;
-            try
-            {
-                // Call the internal implementation with all parameters (N, r, p)
-                derivedKey = DeriveKeyInternal(passwordBytes, salt, dkLen, n, r, p);
-            }
-            finally
-            {
-                Array.Clear(passwordBytes, 0, passwordBytes.Length);
-            }
-            return derivedKey;
+            // Direct use of password bytes - no encoding needed
+            return DeriveKeyInternal(passwordBytes, salt, dkLen, n, r, p);
         }
 
         // Internal implementation - kept private

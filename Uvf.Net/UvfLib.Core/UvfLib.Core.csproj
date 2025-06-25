@@ -49,7 +49,7 @@
 
   <ItemGroup>
     <InternalsVisibleTo Include="UvfLib.Core.Tests" />
-    <InternalsVisibleTo Include="UvfLib.FileSystem" />
+    <InternalsVisibleTo Include="UvfLib.Storage" />
   </ItemGroup>
 
 </Project> 

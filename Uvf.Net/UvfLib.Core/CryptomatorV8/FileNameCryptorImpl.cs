@@ -69,7 +69,7 @@ namespace UvfLib.Core.CryptomatorV8
                 
                 // Use Google Guava compatible Base32 encoding (no padding)
                 string result = ToBase32GoogleGuava(hashedBytes);
-                Console.WriteLine($"DEBUG: v2 algorithm (CORRECT key order) for dirId (length {cleartextDirectoryId.Length}): {result}");
+                //Console.WriteLine($"DEBUG: v2 algorithm (CORRECT key order) for dirId (length {cleartextDirectoryId.Length}): {result}");
                 
                 return result;
             }

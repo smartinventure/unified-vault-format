@@ -1,0 +1,141 @@
+# Uvf.Net Project Architecture & Developer Guide
+
+## 1. Overview
+
+*   **Purpose:** A cross-platform .NET library for developers to integrate strong, transparent file and directory "VAULT" encryption into their applications.
+*   **Future Vision:** The ultimate goal is to create a native, AOT-compiled library with a C-style interface, enabling bindings for other languages (Python, PHP, Node.js, Go).
+*   **Dual-Format Support:** The library supports two distinct and powerful vault formats:
+    *   **Cryptomator V8:** A mature, widely-used format for encrypted vaults.
+    *   **Unified Vault Format (UVF):** A modern, flexible format designed for high performance. The full specification is located in the solution at `Resources/unified-vault-format-develop`.
+
+## 2. Current Implementation Status
+
+*   ✅ **Cryptomator V8:** Fully implemented and production-ready. A working example demonstrating its usage can be found in the `ExampleVaultApp.csproj` project.
+*   ✅ **Unified Vault Format (UVF):** Also implemented
+
+## 3. Core Architecture: A Layered Approach
+
+The project uses a clean, layered architecture that separates concerns, from low-level cryptography to high-level storage abstractions.
+
+### ASCII Diagram: Project Structure
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                           🎯 APPLICATION LAYER                              │
+│  ┌───────────────────────────────────────────────────────────────────────┐  │
+│  │    Your Application / ExampleVaultApp / UvfConsole                    │  │
+│  │  (Uses VaultManager for all vault operations)                         │  │
+│  └───────────────────────────────────┬───────────────────────────────────┘  │
+└──────────────────────────────────────┼──────────────────────────────────────┘
+┌──────────────────────────────────────▼──────────────────────────────────────┐
+│                       📦 HIGH-LEVEL ABSTRACTION LAYER                       │
+│  ┌───────────────────────────────────────────────────────────────────────┐  │
+│  │ UvfLib.Storage                                                        │  │
+│  │ ┌───────────────────────────────────────────────────────────────────┐ │  │
+│  │ │ 🤵 VaultManager                                                   │ │  │
+│  │ │  - The main, easy-to-use entry point for the library.             │ │  │
+│  │ │  - Creates and manages vaults (Cryptomator or UVF).               │ │  │
+│  │ │  - Provides simple file/directory operations (ReadAllText, etc.). │ │  │
+│  │ └───────────────────────────────────────────────────────────────────┘ │  │
+│  │ ┌───────────────────────────────────────────────────────────────────┐ │  │
+│  │ │ 🔒 Storage Decorators                                             │ │  │
+│  │ │  - CryptomatorStorageDecorator, UvfStorageDecorator               │ │  │
+│  │ │  - Implements IStreamStorage from StorageLib.                     │ │  │
+│  │ │  - Translates paths and encrypts/decrypts data on the fly.        │ │  │
+│  │ └───────────────────────────────────────────────────────────────────┘ │  │
+│  └───────────────────────────────────┬───────────────────────────────────┘  │
+└──────────────────────────────────────┼──────────────────────────────────────┘
+┌──────────────────────────────────────▼──────────────────────────────────────┐
+│                         🛠️ VAULT & CRYPTO CORE LAYER                        │
+│  ┌─────────────────────────────┐       ┌─────────────────────────────────┐  │
+│  │ UvfLib.Vault                │       │ UvfLib.Core                     │  │
+│  │ - VaultHandler              │       │ - Low-level crypto algorithms   │  │
+│  │ - Masterkey management      │──uses─►│ - Path encryption/decryption    │  │
+│  │ - Vault config parsing      │       │ - File content encryption       │  │
+│  │ - (For Cryptomator & UVF)   │       │ - (For Cryptomator & UVF)       │  │
+│  └─────────────────────────────┘       └─────────────────────────────────┘  │
+└──────────────────────────────────────┬──────────────────────────────────────┘
+┌──────────────────────────────────────▼──────────────────────────────────────┐
+│                      🔗 EXTERNAL ABSTRACTION LAYER                          │
+│  ┌───────────────────────────────────────────────────────────────────────┐  │
+│  │ StorageLib (External NuGet Package: FolderMagic.StorageLib)           │  │
+│  │ - Provides IStorage / IStreamStorage interfaces.                      │  │
+│  │ - Contains concrete storage backends (LocalStorage, MemoryStorage).   │  │
+│  │ - Used by our other product, FolderMagic (out of scope here).         │  │
+│  └───────────────────────────────────────────────────────────────────────┘  │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+## 4. The Power of the Decorator Pattern
+
+Our architecture's key strength is its use of the **Decorator Pattern**. The `UvfLib.Storage` project contains decorators that wrap a generic storage provider and add encryption capabilities to it.
+
+*   **How it Works:**
+    1.  You start with a concrete storage implementation that conforms to the `IStorage` interface from `StorageLib` (e.g., `LocalStorage`, `AzureStorage`, `S3Storage`).
+    2.  When you create a vault using `VaultManager`, it instantiates the appropriate decorator (`CryptomatorStorageDecorator` or `UvfStorageDecorator`).
+    3.  This decorator is given the `IStorage` instance you provided. It *also* implements the `IStreamStorage` interface itself.
+    4.  Your application then performs all file operations (read, write, list directory) on the decorator.
+    5.  The decorator transparently encrypts file/directory names, encrypts/decrypts file content, and then delegates the actual reading/writing of the modified data to the underlying `IStorage` instance.
+
+### ASCII Diagram: Decorator Flow
+```
+Your Code           VaultManager        Storage Decorator           Underlying Storage
+(App Layer)         (Facade)            (Encryption Layer)          (Physical Layer)
+   │                    │                         │                         │
+   │──OpenRead("/a.txt")─►                        │                         │
+   │                    │──OpenRead("/a.txt")───► │                         │
+   │                    │                         │-- EncryptPath("/a.txt") --> "Fx...Y.c9r"
+   │                    │                         │                         │
+   │                    │                         │-- Open("Fx...Y.c9r") ---► │
+   │                    │                         │                         │── Reads encrypted
+   │                    │                         │                         │   bytes from disk
+   │                    │                         │                         │   or cloud.
+   │                    │                         │◄─── returns encrypted_bytes
+   │                    │                         │                         │
+   │                    │                         │-- Decrypt(encrypted_bytes) --> "plain text"
+   │                    │                         │                         │
+   │                    │◄── returns plain_text_stream                      │
+   │◄── returns plain_text_stream                                           │
+   │                    │                         │                         │
+```
+
+*   **Benefit:** This design is incredibly flexible. The encryption logic is completely decoupled from the physical storage. You can store your vault on a local disk, in Azure Blob Storage, or on Amazon S3 just by swapping out the underlying `IStorage` object, with no changes to the encryption code.
+
+## 5. Project Breakdown
+
+*   **`StorageLib` (External NuGet: `FolderMagic.StorageLib`)**
+    *   **Role:** The foundational storage abstraction layer.
+    *   **Key Interfaces:** `IStorage` (for basic block-based I/O) and `IStreamStorage` (for convenient stream-based I/O).
+    *   **Note:** This is a shared, proprietary library that we control. It is also used by our "FolderMagic" product. Understanding its internals is not necessary to use `Uvf.Net`.
+
+*   **`UvfLib.Core`**
+    *   **Role:** The cryptographic heart of the library. Contains no high-level logic.
+    *   **Contents:** Low-level, format-specific cryptographic primitives for both Cryptomator V8 and UVF V3. This includes algorithms for key derivation, filename encryption, and file content encryption/decryption. This will be open-sourced (the only part, which will be open source)
+
+*   **`UvfLib.Vault`**
+    *   **Role:** Manages the vault's metadata and lifecycle.
+    *   **Contents:** The `VaultHandler` class, which is responsible for creating, loading, and parsing the vault's masterkey file (`masterkey.cryptomator` or `vault.uvf`). It uses `UvfLib.Core` to perform cryptographic operations needed to unlock the vault's keys.
+
+*   **`UvfLib.Storage`**
+    *   **Role:** The glue between the vault logic and the storage abstraction.
+    *   **Contents:**
+        *   The **Storage Decorators** (`CryptomatorStorageDecorator`, `UvfStorageDecorator`) that implement the `IStreamStorage` interface.
+        *   Path translators that convert plaintext paths to encrypted ciphertext paths.
+        *   The `VaultManager`, which is the primary public-facing class for developers to interact with.
+
+*   **`ExampleVaultApp`**
+    *   **Role:** A console application demonstrating how to use the `VaultManager` to perform common vault operations.
+    *   **Current State:** Only contains examples for Cryptomator V8. This should be expanded to include UVF examples.
+	*  **IMPORTANT:** This MUST ONLY use the UvfLib.Storage (not the UvfLib.Vault or UvfLib.Core)!!!
+
+## 6. Next Steps for Development
+
+*   **Finalize UVF Implementation:**
+    1.  Thoroughly review and test all UVF-related code paths within `VaultManager.cs` and `UvfStorageDecorator.cs`.
+    2.  Ensure all file and directory operations (create, read, write, delete, list, move) work correctly for the UVF format.
+    3.  Pay close attention to edge cases, especially concerning long filenames and directory structures, as defined in the UVF specification (`Resources/unified-vault-format-develop`).
+*   **Update Example Application:**
+    1.  Add a new section to `ExampleVaultApp` to demonstrate creating, loading, and interacting with a UVF vault.
+    2.  This will serve as a crucial test case and reference for future developers.
+	
+	IMPORTANT information: There is a legacy project called UvfConsole. It has a Program.cs, which has a mode "testrun --uvf". This actually worked with the old 
+	libraries (without using the newer Storage Decorators and IStorage). So, in essence, this is a very good point to look at.

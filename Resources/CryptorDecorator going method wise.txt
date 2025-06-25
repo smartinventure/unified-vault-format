@@ -1,0 +1,6 @@
+I want you to double check, if the implementation is really correct. To do this, please go into @Program.cs and see the route that the application takes for cryptomator and for "testrun". The testrun was a proof-of-concept, where we have 3 folders: 
+A source folder with unencrypted dirs / files
+A vault folder
+a decrypted folder
+The testrun first clears everything in the vault and decrypted folder so no duplicates are created and then it encrypts into vault. Then, it derypts into the decrypted folder. With this, we could prove that everything worked as expected.
+Therefore, for our CreateDirectory, double check with this, if we create the directoriy and all the necessary files for cryptomator correctly.

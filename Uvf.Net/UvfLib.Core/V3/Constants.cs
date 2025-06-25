@@ -51,5 +51,10 @@ namespace UvfLib.Core.V3
         /// Prefix for vault-internal directory paths.
         /// </summary>
         public const string VAULT_DIR_PREFIX = "d/";
+
+        /// <summary>
+        /// Name of the file that stores the symlink target in UVF directories.
+        /// </summary>
+        public const string SYMLINK_FILE = "symlink.uvf";
     }
 } 

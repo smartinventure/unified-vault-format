@@ -1,5 +1,7 @@
 using UvfLib;
-using UvfLib.VaultHelpers;
+using UvfLib.Vault;
+using UvfLib.Vault.VaultHelpers;
+using UvfLib.Core.Api;
 using System;
 using System.Collections.Generic;
 using System.IO;
@@ -45,7 +47,7 @@ namespace UvfConsole
                 // First, analyze the real vault structure to build correct mapping
                 Console.WriteLine("🔍 ANALYZING REAL VAULT STRUCTURE:");
                 byte[] realMasterkeyBytes = File.ReadAllBytes(realMasterkeyPath);
-                using var analyzeVault = Vault.LoadCryptomatorV8Vault(realMasterkeyBytes, password);
+                using var analyzeVault = VaultHandler.LoadCryptomatorV8Vault(realMasterkeyBytes, password);
 
                 // Get the correct directory mapping from the real vault
                 var directoryMapping = AnalyzeRealVaultStructure(analyzeVault, realVaultPath, password);
@@ -63,7 +65,7 @@ namespace UvfConsole
                 Console.WriteLine("✅ Copied real masterkey to test vault");
 
                 // Load vault with real masterkey
-                using var vault = Vault.LoadCryptomatorV8Vault(realMasterkeyBytes, password);
+                using var vault = VaultHandler.LoadCryptomatorV8Vault(realMasterkeyBytes, password);
                 Console.WriteLine("✅ Loaded vault with real masterkey");
 
                 // Create root directory structure (same as real vault)
@@ -127,7 +129,7 @@ namespace UvfConsole
                 // Create properly signed vault.cryptomator file
                 Console.WriteLine("\n🔧 Creating properly signed vault.cryptomator...");
                 byte[] masterkeyContent = File.ReadAllBytes(testMasterkeyPath);
-                var createConfigMethod = typeof(Vault).GetMethod("CreateNewCryptomatorV8VaultConfigContentSigned",
+                var createConfigMethod = typeof(VaultHandler).GetMethod("CreateNewCryptomatorV8VaultConfigContentSigned",
                     System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
 
                 if (createConfigMethod != null)
@@ -171,7 +173,7 @@ namespace UvfConsole
         /// <param name="realVaultPath">Path to the real Cryptomator vault</param>
         /// <param name="password">Vault password</param>
         /// <returns>Dictionary mapping UUID to plaintext directory name</returns>
-        private static Dictionary<string, string> AnalyzeRealVaultStructure(Vault vault, string realVaultPath, string password)
+        private static Dictionary<string, string> AnalyzeRealVaultStructure(VaultHandler vault, string realVaultPath, string password)
         {
             var directoryMapping = new Dictionary<string, string>();
             
@@ -255,7 +257,7 @@ namespace UvfConsole
         /// <param name="sourcePath">Path to source files</param>
         /// <param name="vaultPath">Path to the vault being created</param>
         /// <param name="directoryMapping">Mapping of UUID to directory name</param>
-        private static void PopulateVaultWithCorrectMapping(Vault vault, string sourcePath, string vaultPath, Dictionary<string, string> directoryMapping)
+        private static void PopulateVaultWithCorrectMapping(VaultHandler vault, string sourcePath, string vaultPath, Dictionary<string, string> directoryMapping)
         {
             // Get root metadata and path
             DirectoryMetadata rootMetadata = vault.GetRootDirectoryMetadata();
