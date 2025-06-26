@@ -13,6 +13,9 @@ namespace DemoApp
     /// </summary>
     public class UvfDemo
     {
+        // Configurable buffer size for streaming operations (can be tuned for performance)
+        private const int STREAMING_BUFFER_SIZE = 64 * 1024; // 64KB default
+        
         private readonly string _sourceFolderPath;
         private readonly string _vaultFolderPath;
         private readonly string _decryptedFolderPath;
@@ -98,9 +101,9 @@ namespace DemoApp
             await File.WriteAllTextAsync(Path.Combine(subDir2, "sub2_file.txt"), "Content in subdirectory 2");
             await File.WriteAllTextAsync(Path.Combine(subDir2, "another.json"), "{\"sub\": \"directory2\"}");
             
-            // Create a larger file to test streaming (1MB)
-            Console.WriteLine("📄 Creating large test file (1MB) to demonstrate streaming...");
-            await CreateLargeTestFileAsync(Path.Combine(_sourceFolderPath, "large_file.txt"), 1024 * 1024); // 1GB
+            // Create a larger file to test streaming (1GB)
+            Console.WriteLine("📄 Creating large test file (1GB) to demonstrate streaming...");
+            await CreateLargeTestFileAsync(Path.Combine(_sourceFolderPath, "large_file.txt"), 1024 * 1024 * 1024); // 1GB
             
             var allFiles = Directory.GetFiles(_sourceFolderPath, "*", SearchOption.AllDirectories);
             var totalSize = allFiles.Sum(f => new System.IO.FileInfo(f).Length);
@@ -109,15 +112,22 @@ namespace DemoApp
         
         private async Task CreateLargeTestFileAsync(string filePath, long targetSize)
         {
-            const int bufferSize = 64 * 1024; // 64KB buffer
-            var buffer = new byte[bufferSize];
+            Console.WriteLine($"📄 Creating large test file ({targetSize / (1024 * 1024):N0}MB) to demonstrate streaming...");
             
-            // Fill buffer with test data pattern
+            // Pre-allocate buffer to avoid measuring allocation time
+            const int bufferSize = 1024 * 1024; // 1MB buffer for file creation
+            byte[] buffer = new byte[bufferSize];
+            
+            // Fill buffer with test data pattern (measure this separately)
+            var patternStopwatch = Stopwatch.StartNew();
             for (int i = 0; i < bufferSize; i++)
             {
                 buffer[i] = (byte)('A' + (i % 26)); // Repeating A-Z pattern
             }
+            patternStopwatch.Stop();
             
+            // Measure only the actual file write time
+            var writeStopwatch = Stopwatch.StartNew();
             using (var stream = new FileStream(filePath, FileMode.Create, FileAccess.Write))
             {
                 long bytesWritten = 0;
@@ -129,8 +139,12 @@ namespace DemoApp
                 }
                 await stream.FlushAsync();
             }
+            writeStopwatch.Stop();
             
+            // Calculate and report raw write performance
+            double rawWriteSpeed = (targetSize / (1024.0 * 1024.0)) / writeStopwatch.Elapsed.TotalSeconds;
             Console.WriteLine($"   Created: large_file.txt ({targetSize:N0} bytes) [STREAMED CREATION]");
+            Console.WriteLine($"   📊 Raw Write Speed: {rawWriteSpeed:F2} MB/s (pattern: {patternStopwatch.ElapsedMilliseconds}ms, write: {writeStopwatch.ElapsedMilliseconds}ms)");
         }
 
         private void TestNativeWrapper()
@@ -279,8 +293,7 @@ namespace DemoApp
             var fileName = Path.GetFileName(sourceFilePath);
             
             // Use streaming for large file support
-            const int bufferSize = 64 * 1024; // 64KB buffer - good balance of memory usage and performance
-            var buffer = new byte[bufferSize];
+            var buffer = new byte[STREAMING_BUFFER_SIZE];
             long totalBytesProcessed = 0;
             
             // Track write operation timing
@@ -290,7 +303,7 @@ namespace DemoApp
             using (var vaultStream = vault.OpenWriteStream(vaultVirtualPath))
             {
                 int bytesRead;
-                while ((bytesRead = await sourceStream.ReadAsync(buffer, 0, bufferSize)) > 0)
+                while ((bytesRead = await sourceStream.ReadAsync(buffer, 0, STREAMING_BUFFER_SIZE)) > 0)
                 {
                     await vaultStream.WriteAsync(buffer, 0, bytesRead);
                     totalBytesProcessed += bytesRead;
@@ -360,8 +373,7 @@ namespace DemoApp
             var fileName = Path.GetFileName(vaultVirtualPath);
             
             // Use streaming for large file support
-            const int bufferSize = 64 * 1024; // 64KB buffer - good balance of memory usage and performance
-            var buffer = new byte[bufferSize];
+            var buffer = new byte[STREAMING_BUFFER_SIZE];
             long totalBytesProcessed = 0;
             
             // Track read operation timing
@@ -371,7 +383,7 @@ namespace DemoApp
             using (var targetStream = new FileStream(targetFilePath, FileMode.Create, FileAccess.Write))
             {
                 int bytesRead;
-                while ((bytesRead = await vaultStream.ReadAsync(buffer, 0, bufferSize)) > 0)
+                while ((bytesRead = await vaultStream.ReadAsync(buffer, 0, STREAMING_BUFFER_SIZE)) > 0)
                 {
                     await targetStream.WriteAsync(buffer, 0, bytesRead);
                     totalBytesProcessed += bytesRead;

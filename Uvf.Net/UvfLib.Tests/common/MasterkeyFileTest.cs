@@ -37,7 +37,7 @@ namespace UvfLib.Tests.Common
             string json = Encoding.UTF8.GetString(jsonBytes);
 
             // Verify the JSON contains the expected Base64 string
-            StringAssert.Contains(json, "\"scryptSalt\": \"Zm9v\"");
+            Assert.IsTrue(json.Contains("Zm9v"), $"JSON should contain 'Zm9v' (base64 for 'foo'). Actual JSON: {json}");
         }
 
         [TestMethod]

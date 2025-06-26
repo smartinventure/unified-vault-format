@@ -9,6 +9,9 @@ namespace DemoApp
     /// </summary>
     public class CryptomatorDemo
     {
+        // Configurable buffer size for streaming operations (can be tuned for performance)
+        private const int STREAMING_BUFFER_SIZE = 64 * 1024; // 64KB default
+        
         private readonly string _sourceFolderPath;
         private readonly string _vaultFolderPath;
         private readonly string _decryptedFolderPath;
@@ -95,8 +98,8 @@ namespace DemoApp
             await File.WriteAllTextAsync(Path.Combine(subDir2, "another.json"), "{\"sub\": \"directory2\"}");
             
             // Create a larger file to test streaming (1MB) (EXACTLY same as UvfDemo)
-            Console.WriteLine("📄 Creating large test file (1MB) to demonstrate streaming...");
-            await CreateLargeTestFileAsync(Path.Combine(_sourceFolderPath, "large_file.txt"), 1024 * 1024); // 1MB
+            Console.WriteLine("📄 Creating large test file (1GB) to demonstrate streaming...");
+            await CreateLargeTestFileAsync(Path.Combine(_sourceFolderPath, "large_file.txt"), 1024 * 1024 * 1024); // 1GB
             
             var allFiles = Directory.GetFiles(_sourceFolderPath, "*", SearchOption.AllDirectories);
             var totalSize = allFiles.Sum(f => new System.IO.FileInfo(f).Length);
@@ -105,15 +108,22 @@ namespace DemoApp
         
         private async Task CreateLargeTestFileAsync(string filePath, long targetSize)
         {
-            const int bufferSize = 64 * 1024; // 64KB buffer
-            var buffer = new byte[bufferSize];
+            Console.WriteLine($"📄 Creating large test file ({targetSize / (1024 * 1024):N0}MB) to demonstrate streaming...");
             
-            // Fill buffer with test data pattern
+            // Pre-allocate buffer to avoid measuring allocation time
+            const int bufferSize = 1024 * 1024; // 1MB buffer for file creation
+            byte[] buffer = new byte[bufferSize];
+            
+            // Fill buffer with test data pattern (measure this separately)
+            var patternStopwatch = Stopwatch.StartNew();
             for (int i = 0; i < bufferSize; i++)
             {
                 buffer[i] = (byte)('A' + (i % 26)); // Repeating A-Z pattern
             }
+            patternStopwatch.Stop();
             
+            // Measure only the actual file write time
+            var writeStopwatch = Stopwatch.StartNew();
             using (var stream = new FileStream(filePath, FileMode.Create, FileAccess.Write))
             {
                 long bytesWritten = 0;
@@ -125,8 +135,12 @@ namespace DemoApp
                 }
                 await stream.FlushAsync();
             }
+            writeStopwatch.Stop();
             
+            // Calculate and report raw write performance
+            double rawWriteSpeed = (targetSize / (1024.0 * 1024.0)) / writeStopwatch.Elapsed.TotalSeconds;
             Console.WriteLine($"   Created: large_file.txt ({targetSize:N0} bytes) [STREAMED CREATION]");
+            Console.WriteLine($"   📊 Raw Write Speed: {rawWriteSpeed:F2} MB/s (pattern: {patternStopwatch.ElapsedMilliseconds}ms, write: {writeStopwatch.ElapsedMilliseconds}ms)");
         }
 
         private void TestNativeWrapper()
@@ -266,6 +280,7 @@ namespace DemoApp
             
             long totalBytes = 0;
             bool useStreaming = true;
+            var operationStopwatch = Stopwatch.StartNew();
             
             try
             {
@@ -274,8 +289,7 @@ namespace DemoApp
                 using var vaultStream = vault.OpenWriteStream(vaultVirtualPath);
                 
                 // Stream copy with buffer for large files
-                const int bufferSize = 64 * 1024; // 64KB buffer
-                var buffer = new byte[bufferSize];
+                var buffer = new byte[STREAMING_BUFFER_SIZE];
                 int bytesRead;
                 
                 while ((bytesRead = await sourceStream.ReadAsync(buffer, 0, buffer.Length)) > 0)
@@ -299,7 +313,12 @@ namespace DemoApp
                 Console.WriteLine($"   ✅ {operation} complete (fallback): {Path.GetFileName(vaultVirtualPath)} ({totalBytes:N0} bytes)");
             }
             
+            operationStopwatch.Stop();
+            
+            // Update tracking variables
             _totalBytesProcessed += totalBytes;
+            _totalBytesWritten += totalBytes;
+            _writeElapsed = _writeElapsed.Add(operationStopwatch.Elapsed);
         }
 
         private async Task ProcessVaultDirectoryForDecryption(TitanVaultWrapper.TitanVault vault)
@@ -353,6 +372,7 @@ namespace DemoApp
             
             long totalBytes = 0;
             bool useStreaming = true;
+            var operationStopwatch = Stopwatch.StartNew();
             
             try
             {
@@ -361,8 +381,7 @@ namespace DemoApp
                 using var targetStream = File.Create(targetFilePath);
                 
                 // Stream copy with buffer for large files
-                const int bufferSize = 64 * 1024; // 64KB buffer
-                var buffer = new byte[bufferSize];
+                var buffer = new byte[STREAMING_BUFFER_SIZE];
                 int bytesRead;
                 
                 while ((bytesRead = await vaultStream.ReadAsync(buffer, 0, buffer.Length)) > 0)
@@ -386,7 +405,12 @@ namespace DemoApp
                 Console.WriteLine($"   ✅ {operation} complete (fallback): {Path.GetFileName(targetFilePath)} ({totalBytes:N0} bytes)");
             }
             
+            operationStopwatch.Stop();
+            
+            // Update tracking variables
             _totalBytesProcessed += totalBytes;
+            _totalBytesRead += totalBytes;
+            _readElapsed = _readElapsed.Add(operationStopwatch.Elapsed);
         }
 
         private void CleanupDirectory(string directoryPath, string directoryName)

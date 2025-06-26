@@ -11,6 +11,14 @@
     "CryptomatorDemo": {
       "commandName": "Project",
       "commandLineArgs": "cryptomator"
+    },
+    "UvfMultiuser": {
+      "commandName": "Project",
+      "commandLineArgs": "multiuser"
+    },
+    "password": {
+      "commandName": "Project",
+      "commandLineArgs": "password"
     }
   }
 }

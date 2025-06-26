@@ -10,8 +10,6 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <Compile Remove="MultiUserUvfDemo.cs" />
-    <Compile Remove="PasswordChangeDemo.cs" />
   </ItemGroup>
 
   <!-- Only UvfLib.Core needed for basic types -->
@@ -24,8 +22,7 @@
     <None Include="..\UvfLib.Master\bin\Release\net8.0\win-x64\publish\TitanVault.pdb">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>
-    <None Include="MultiUserUvfDemo.cs" />
-    <None Include="PasswordChangeDemo.cs" />
+
   </ItemGroup>
 
   <!-- Post-build step to replace managed DLL with native AOT DLL -->

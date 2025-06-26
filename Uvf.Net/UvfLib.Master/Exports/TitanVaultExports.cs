@@ -647,7 +647,7 @@ namespace UvfLib.Master.Exports
             try
             {
                 if (vaultHandle == IntPtr.Zero || filePathBytes == null || 
-                    filePathLength <= 0 || buffer == IntPtr.Zero || bufferSize == IntPtr.Zero)
+                    filePathLength <= 0 || bufferSize == IntPtr.Zero)
                 {
                     SetLastError("Invalid parameters");
                     return TITAN_VAULT_ERROR_INVALID_PARAMETER;
@@ -667,20 +667,58 @@ namespace UvfLib.Master.Exports
                     return TITAN_VAULT_ERROR_INVALID_PARAMETER;
                 }
 
-                var fileData = vault.ReadAllBytesAsync(filePath).Result;
-                var requiredSize = fileData.Length;
+                // Get file size first to determine buffer requirements
                 var availableSize = Marshal.ReadInt32(bufferSize);
-
-                // Write the required size back
-                Marshal.WriteInt32(bufferSize, requiredSize);
-
-                if (availableSize < requiredSize)
+                
+                // Try to get file size without reading content
+                long fileSize;
+                try
                 {
-                    SetLastError($"Buffer too small. Required: {requiredSize}, Available: {availableSize}");
-                    return TITAN_VAULT_ERROR_INSUFFICIENT_BUFFER;
+                    // Use FileExists to check if file exists, then get its size
+                    if (!vault.FileExistsAsync(filePath).Result)
+                    {
+                        SetLastError($"File not found: {filePath}");
+                        return TITAN_VAULT_ERROR_VAULT_NOT_FOUND;
+                    }
+                    
+                    // For the first call (buffer == IntPtr.Zero), we need to determine the file size
+                    // without actually reading the file content
+                    if (buffer == IntPtr.Zero)
+                    {
+                        // Try to read the file to get its size
+                        var fileData = vault.ReadAllBytesAsync(filePath).Result;
+                        fileSize = fileData.Length;
+                        
+                        // Write the required size back
+                        Marshal.WriteInt32(bufferSize, (int)fileSize);
+                        
+                        SetLastError($"Buffer too small. Required: {fileSize}, Available: {availableSize}");
+                        return TITAN_VAULT_ERROR_INSUFFICIENT_BUFFER;
+                    }
+                    else
+                    {
+                        // Second call - read the actual file content
+                        var fileData = vault.ReadAllBytesAsync(filePath).Result;
+                        fileSize = fileData.Length;
+                        
+                        // Write the actual size back
+                        Marshal.WriteInt32(bufferSize, (int)fileSize);
+                        
+                        if (availableSize < fileSize)
+                        {
+                            SetLastError($"Buffer too small. Required: {fileSize}, Available: {availableSize}");
+                            return TITAN_VAULT_ERROR_INSUFFICIENT_BUFFER;
+                        }
+                        
+                        Marshal.Copy(fileData, 0, buffer, fileData.Length);
+                    }
                 }
-
-                Marshal.Copy(fileData, 0, buffer, fileData.Length);
+                catch (Exception readEx)
+                {
+                    // If we can't read the file, we still need to set bufferSize to 0 for consistency
+                    Marshal.WriteInt32(bufferSize, 0);
+                    throw; // Re-throw to be handled by outer catch
+                }
                 return TITAN_VAULT_SUCCESS;
             }
             catch (AggregateException ex) when (ex.InnerException != null)

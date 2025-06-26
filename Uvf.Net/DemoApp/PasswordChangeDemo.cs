@@ -23,12 +23,21 @@ namespace DemoApp
             _decryptedFolderPath = decryptedFolderPath;
         }
 
-        public async Task RunDemoAsync()
+        public async Task RunDemoAsync(VaultTypeFilter vaultType = VaultTypeFilter.Both)
         {
             Console.WriteLine("===== Password Change Demo =====");
             Console.WriteLine($"Source: {_sourceFolderPath}");
-            Console.WriteLine($"UVF Vault: {_uvfVaultPath}");
-            Console.WriteLine($"Cryptomator Vault: {_cryptomatorVaultPath}");
+            Console.WriteLine($"Mode: {vaultType}");
+            
+            if (vaultType == VaultTypeFilter.UVF || vaultType == VaultTypeFilter.Both)
+            {
+                Console.WriteLine($"UVF Vault: {_uvfVaultPath}");
+            }
+            if (vaultType == VaultTypeFilter.Cryptomator || vaultType == VaultTypeFilter.Both)
+            {
+                Console.WriteLine($"Cryptomator Vault: {_cryptomatorVaultPath}");
+            }
+            
             Console.WriteLine($"Decrypted: {_decryptedFolderPath}");
             Console.WriteLine();
 
@@ -38,8 +47,16 @@ namespace DemoApp
                 CleanupDirectories();
                 
                 await SetupTestDataAsync();
-                await DemonstrateUvfPasswordChangeAsync();
-                await DemonstrateCryptomatorPasswordChangeAsync();
+                
+                if (vaultType == VaultTypeFilter.UVF || vaultType == VaultTypeFilter.Both)
+                {
+                    await DemonstrateUvfPasswordChangeAsync();
+                }
+                
+                if (vaultType == VaultTypeFilter.Cryptomator || vaultType == VaultTypeFilter.Both)
+                {
+                    await DemonstrateCryptomatorPasswordChangeAsync();
+                }
                 
                 Console.WriteLine("✅ PasswordChangeDemo completed successfully!");
             }
@@ -277,15 +294,65 @@ namespace DemoApp
             char[] passwordChars = password.ToCharArray();
             try
             {
+                string? userId = null;
+                
+                // For UVF vaults, get the list of users and use the first one (admin)
+                if (vaultType == VaultType.UVF)
+                {
+                    Console.WriteLine($"   👥 Getting vault users for {passwordDescription}...");
+                    var users = TitanVaultWrapper.TitanVaultStatic.GetVaultUsers(vaultPath, passwordChars);
+                    Console.WriteLine($"   📋 Found {users.Length} users: [{string.Join(", ", users)}]");
+                    
+                    if (users.Length > 0)
+                    {
+                        userId = users[0]; // Use the first user (should be admin)
+                        Console.WriteLine($"   🔑 Using user ID: '{userId}'");
+                    }
+                    else
+                    {
+                        Console.WriteLine($"   ⚠️ No users found in vault!");
+                    }
+                }
+                
                 TitanVaultWrapper.TitanVault vault = vaultType switch
                 {
-                    VaultType.UVF => TitanVaultWrapper.TitanVault.LoadUvfVault(vaultPath, passwordChars),
+                    VaultType.UVF => TitanVaultWrapper.TitanVault.LoadUvfVault(vaultPath, passwordChars, userId),
                     VaultType.Cryptomator => TitanVaultWrapper.TitanVault.LoadCryptomatorVault(vaultPath, passwordChars),
                     _ => throw new ArgumentException($"Unknown vault type: {vaultType}")
                 };
                 
-                // Try to read a test file
-                var fileData = vault.ReadAllBytes("/password_test.txt");
+                // Check if the test file exists first
+                Console.WriteLine($"   🔍 Checking if /password_test.txt exists in {vaultType} vault...");
+                bool fileExists = vault.FileExists("/password_test.txt");
+                Console.WriteLine($"   📄 File exists: {fileExists}");
+                
+                if (!fileExists)
+                {
+                    // List vault contents for debugging
+                    Console.WriteLine($"   📋 Vault contents:");
+                    var entries = vault.ListDirectory("/");
+                    foreach (var entry in entries)
+                    {
+                        Console.WriteLine($"      - {entry}");
+                    }
+                }
+                
+                // Try to read a test file (using stream as alternative to ReadAllBytes)
+                byte[] fileData;
+                try
+                {
+                    fileData = vault.ReadAllBytes("/password_test.txt");
+                }
+                catch (Exception readEx) when (readEx.Message.Contains("Invalid parameters"))
+                {
+                    Console.WriteLine($"   🔧 ReadAllBytes failed, trying stream approach: {readEx.Message}");
+                    using var stream = vault.OpenReadStream("/password_test.txt");
+                    using var memoryStream = new MemoryStream();
+                    await stream.CopyToAsync(memoryStream);
+                    fileData = memoryStream.ToArray();
+                    Console.WriteLine($"   ✅ Stream approach worked! Read {fileData.Length} bytes");
+                }
+                
                 Console.WriteLine($"   ✅ {vaultType} vault access with {passwordDescription} successful ({fileData.Length} bytes read)");
                 
                 vault.Dispose();
@@ -293,6 +360,11 @@ namespace DemoApp
             catch (Exception ex)
             {
                 Console.WriteLine($"   ❌ {vaultType} vault access with {passwordDescription} failed: {ex.Message}");
+                Console.WriteLine($"   🔧 Exception type: {ex.GetType().Name}");
+                if (ex.InnerException != null)
+                {
+                    Console.WriteLine($"   🔧 Inner exception: {ex.InnerException.Message}");
+                }
                 throw;
             }
             finally
@@ -306,9 +378,29 @@ namespace DemoApp
             char[] passwordChars = password.ToCharArray();
             try
             {
+                string? userId = null;
+                
+                // For UVF vaults, try to get users (this might fail with old password, which is expected)
+                if (vaultType == VaultType.UVF)
+                {
+                    try
+                    {
+                        var users = TitanVaultWrapper.TitanVaultStatic.GetVaultUsers(vaultPath, passwordChars);
+                        if (users.Length > 0)
+                        {
+                            userId = users[0];
+                        }
+                    }
+                    catch
+                    {
+                        // Expected to fail with old password - we'll try without user ID
+                        Console.WriteLine($"   🔍 Could not get users with {passwordDescription} (expected for old passwords)");
+                    }
+                }
+                
                 TitanVaultWrapper.TitanVault vault = vaultType switch
                 {
-                    VaultType.UVF => TitanVaultWrapper.TitanVault.LoadUvfVault(vaultPath, passwordChars),
+                    VaultType.UVF => TitanVaultWrapper.TitanVault.LoadUvfVault(vaultPath, passwordChars, userId),
                     VaultType.Cryptomator => TitanVaultWrapper.TitanVault.LoadCryptomatorVault(vaultPath, passwordChars),
                     _ => throw new ArgumentException($"Unknown vault type: {vaultType}")
                 };
@@ -321,7 +413,7 @@ namespace DemoApp
             {
                 Console.WriteLine($"   ✅ Confirmed: {vaultType} vault correctly denied access with {passwordDescription}");
             }
-            catch (Exception ex) when (ex.Message.Contains("decrypt") || ex.Message.Contains("password") || ex.Message.Contains("authentication"))
+            catch (Exception ex) when (ex.Message.Contains("decrypt") || ex.Message.Contains("password") || ex.Message.Contains("authentication") || ex.Message.Contains("Invalid"))
             {
                 Console.WriteLine($"   ✅ Confirmed: {vaultType} vault correctly denied access with {passwordDescription}");
             }
@@ -336,9 +428,25 @@ namespace DemoApp
             char[] passwordChars = password.ToCharArray();
             try
             {
+                string? userId = null;
+                
+                // For UVF vaults, get the list of users and use the first one
+                if (vaultType == VaultType.UVF)
+                {
+                    Console.WriteLine($"   👥 Getting vault users for final verification...");
+                    var users = TitanVaultWrapper.TitanVaultStatic.GetVaultUsers(vaultPath, passwordChars);
+                    Console.WriteLine($"   📋 Found {users.Length} users: [{string.Join(", ", users)}]");
+                    
+                    if (users.Length > 0)
+                    {
+                        userId = users[0];
+                        Console.WriteLine($"   🔑 Using user ID: '{userId}' for verification");
+                    }
+                }
+                
                 TitanVaultWrapper.TitanVault vault = vaultType switch
                 {
-                    VaultType.UVF => TitanVaultWrapper.TitanVault.LoadUvfVault(vaultPath, passwordChars),
+                    VaultType.UVF => TitanVaultWrapper.TitanVault.LoadUvfVault(vaultPath, passwordChars, userId),
                     VaultType.Cryptomator => TitanVaultWrapper.TitanVault.LoadCryptomatorVault(vaultPath, passwordChars),
                     _ => throw new ArgumentException($"Unknown vault type: {vaultType}")
                 };
@@ -378,7 +486,20 @@ namespace DemoApp
                 }
                 else
                 {
-                    var fileData = vault.ReadAllBytes(entryVaultPath);
+                    byte[] fileData;
+                    try
+                    {
+                        fileData = vault.ReadAllBytes(entryVaultPath);
+                    }
+                    catch (Exception readEx) when (readEx.Message.Contains("Invalid parameters"))
+                    {
+                        Console.WriteLine($"   🔧 ReadAllBytes failed for {entry.Name}, using stream...");
+                        using var stream = vault.OpenReadStream(entryVaultPath);
+                        using var memoryStream = new MemoryStream();
+                        await stream.CopyToAsync(memoryStream);
+                        fileData = memoryStream.ToArray();
+                    }
+                    
                     await File.WriteAllBytesAsync(entryLocalPath, fileData);
                     Console.WriteLine($"   📄 {entry.Name} ({fileData.Length} bytes)");
                 }

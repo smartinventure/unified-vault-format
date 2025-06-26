@@ -31,6 +31,7 @@
   <ItemGroup>
     <ProjectReference Include="..\UvfLib.Core\UvfLib.Core.csproj" />
     <ProjectReference Include="..\UvfLib.Vault\UvfLib.Vault.csproj" />
+    <ProjectReference Include="..\UvfLib.Master\UvfLib.Master.csproj" />
   </ItemGroup>
 
 </Project>

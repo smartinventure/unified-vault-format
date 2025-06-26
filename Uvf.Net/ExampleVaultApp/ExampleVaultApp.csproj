@@ -16,7 +16,6 @@
   <!-- Temporarily exclude problematic test files to focus on simple tests -->
   <ItemGroup>
     <Compile Remove="ChangePwCryptomatorTest.cs" />
-    <Compile Remove="ChangePwUvfTest.cs" />
     <Compile Remove="DirectCryptomatorTest.cs" />
     <Compile Remove="DirectUvfTest.cs" />
     <Compile Remove="MultiUserVaultTest.cs" />

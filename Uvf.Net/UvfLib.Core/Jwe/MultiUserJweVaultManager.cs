@@ -294,17 +294,17 @@ namespace UvfLib.Core.Jwe
                 }
                 existingRecipients.Add(newRecipient);
 
-                // Create updated JWE with new recipient
-                var updatedJwe = new
+                // Create updated JWE with new recipient using the proper JweJson class
+                var updatedJwe = new JweJson
                 {
-                    @protected = root.GetProperty("protected").GetString(),
-                    recipients = existingRecipients,
-                    iv = root.GetProperty("iv").GetString(),
-                    ciphertext = root.GetProperty("ciphertext").GetString(),
-                    tag = root.GetProperty("tag").GetString()
+                    Protected = root.GetProperty("protected").GetString()!,
+                    Recipients = existingRecipients,
+                    Iv = root.GetProperty("iv").GetString()!,
+                    Ciphertext = root.GetProperty("ciphertext").GetString()!,
+                    Tag = root.GetProperty("tag").GetString()!
                 };
 
-                return JsonSerializer.Serialize(updatedJwe, (JsonTypeInfo<object>)UvfJsonContext.Default.Object);
+                return JsonSerializer.Serialize(updatedJwe, UvfJsonContext.Default.JweJson);
             }
             finally
             {
@@ -356,17 +356,17 @@ namespace UvfLib.Core.Jwe
                 newRecipients.Add(JsonSerializer.Deserialize<object>(recipient.GetRawText(), UvfJsonContext.Default.Object)!);
             }
 
-            // Recreate JWE with updated recipients
-            var updatedJwe = new
+            // Recreate JWE with updated recipients using the proper JweJson class
+            var updatedJwe = new JweJson
             {
-                @protected = root.GetProperty("protected").GetString(),
-                recipients = newRecipients,
-                iv = root.GetProperty("iv").GetString(),
-                ciphertext = root.GetProperty("ciphertext").GetString(),
-                tag = root.GetProperty("tag").GetString()
+                Protected = root.GetProperty("protected").GetString()!,
+                Recipients = newRecipients,
+                Iv = root.GetProperty("iv").GetString()!,
+                Ciphertext = root.GetProperty("ciphertext").GetString()!,
+                Tag = root.GetProperty("tag").GetString()!
             };
 
-            return JsonSerializer.Serialize(updatedJwe, (JsonTypeInfo<object>)UvfJsonContext.Default.Object);
+            return JsonSerializer.Serialize(updatedJwe, UvfJsonContext.Default.JweJson);
         }
 
         /// <summary>

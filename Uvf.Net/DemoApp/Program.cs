@@ -2,6 +2,13 @@
 
 namespace DemoApp
 {
+    public enum VaultTypeFilter
+    {
+        UVF,
+        Cryptomator, 
+        Both
+    }
+
     public class Program
     {
         // Test paths for demo operations
@@ -42,7 +49,7 @@ namespace DemoApp
                         break;
 
                     case "password":
-                        await RunPasswordChangeDemoAsync();
+                        await RunPasswordChangeDemoAsync(args);
                         break;
 
                     case "native":
@@ -86,6 +93,8 @@ namespace DemoApp
             Console.WriteLine("Options:");
             Console.WriteLine("  --encryptfilenames=true   : Enable filename encryption (default, UVF only)");
             Console.WriteLine("  --encryptfilenames=false  : Disable filename encryption (UVF only)");
+            Console.WriteLine("  --uvf                     : Run UVF operations only (password command)");
+            Console.WriteLine("  --cryptomator             : Run Cryptomator operations only (password command)");
             Console.WriteLine();
             Console.WriteLine("Examples:");
             Console.WriteLine("  DemoApp test");
@@ -93,6 +102,8 @@ namespace DemoApp
             Console.WriteLine("  DemoApp cryptomator");
             Console.WriteLine("  DemoApp multiuser");
             Console.WriteLine("  DemoApp password");
+            Console.WriteLine("  DemoApp password --uvf");
+            Console.WriteLine("  DemoApp password --cryptomator");
             Console.WriteLine("  DemoApp native");
             Console.WriteLine("  DemoApp info");
             Console.WriteLine();
@@ -112,6 +123,21 @@ namespace DemoApp
             }
             
             return true; // Default to true
+        }
+
+        private static VaultTypeFilter ParseVaultType(string[] args)
+        {
+            if (args.Any(arg => arg.Equals("--uvf", StringComparison.OrdinalIgnoreCase)))
+            {
+                return VaultTypeFilter.UVF;
+            }
+            
+            if (args.Any(arg => arg.Equals("--cryptomator", StringComparison.OrdinalIgnoreCase)))
+            {
+                return VaultTypeFilter.Cryptomator;
+            }
+            
+            return VaultTypeFilter.Both; // Default to both
         }
 
         private static async Task RunUvfDemoAsync(bool encryptFilenames)
@@ -164,11 +190,6 @@ namespace DemoApp
             Console.WriteLine("🔧 Running Multi-User UVF Demo");
             Console.WriteLine();
 
-            // TODO: Re-enable when MultiUserUvfDemo is updated for native exports
-            Console.WriteLine("⚠️ Multi-user demo temporarily disabled - being updated for native exports");
-            Console.WriteLine("   This demo will be re-enabled once the native wrapper supports all required operations");
-
-            /*
             var demo = new MultiUserUvfDemo(
                 SourceFolderPath + "_multiuser",
                 VaultFolderPath + "_multiuser",
@@ -185,36 +206,40 @@ namespace DemoApp
             Console.WriteLine($"   Source files:    {SourceFolderPath}_multiuser");
             Console.WriteLine($"   Multi-user vault: {VaultFolderPath}_multiuser");
             Console.WriteLine($"   Decrypted files: {DecryptedFolderPath}_multiuser");
-            */
         }
 
-        private static async Task RunPasswordChangeDemoAsync()
+        private static async Task RunPasswordChangeDemoAsync(string[] args)
         {
             Console.WriteLine("🔧 Running Password Change Demo");
             Console.WriteLine();
 
-            // TODO: Re-enable when PasswordChangeDemo is updated for native exports
-            Console.WriteLine("⚠️ Password change demo temporarily disabled - being updated for native exports");
-            Console.WriteLine("   This demo will be re-enabled once the native wrapper supports all required operations");
-
-            /*
+            // Parse vault type from arguments
+            var vaultType = ParseVaultType(args);
+            
             var demo = new PasswordChangeDemo(
                 SourceFolderPath + "_password",
                 VaultFolderPath + "_uvf_password",
                 VaultFolderPath + "_cryptomator_password",
                 DecryptedFolderPath + "_password");
 
-            await demo.RunDemoAsync();
+            await demo.RunDemoAsync(vaultType);
 
             Console.WriteLine();
             Console.WriteLine("🎉 Password change demo completed successfully!");
             Console.WriteLine();
             Console.WriteLine("📁 You can inspect the results at:");
             Console.WriteLine($"   Source files:     {SourceFolderPath}_password");
-            Console.WriteLine($"   UVF vault:        {VaultFolderPath}_uvf_password");
-            Console.WriteLine($"   Cryptomator vault: {VaultFolderPath}_cryptomator_password");
+            
+            if (vaultType == VaultTypeFilter.UVF || vaultType == VaultTypeFilter.Both)
+            {
+                Console.WriteLine($"   UVF vault:        {VaultFolderPath}_uvf_password");
+            }
+            if (vaultType == VaultTypeFilter.Cryptomator || vaultType == VaultTypeFilter.Both)
+            {
+                Console.WriteLine($"   Cryptomator vault: {VaultFolderPath}_cryptomator_password");
+            }
+            
             Console.WriteLine($"   Decrypted files:  {DecryptedFolderPath}_password");
-            */
         }
 
         private static void TestNativeLibraryOnly()

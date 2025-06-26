@@ -521,8 +521,45 @@ namespace ExampleVaultApp.Wrapper
             byte* newPasswordBytes,
             int newPasswordLength)
         {
-            SetLastError("ChangeUvfAdminPassword not implemented in managed wrapper");
-            return TITAN_VAULT_ERROR_UNSUPPORTED_FORMAT;
+            try
+            {
+                if (vaultPathBytes == null || vaultPathLength <= 0 ||
+                    oldPasswordBytes == null || oldPasswordLength <= 0 ||
+                    newPasswordBytes == null || newPasswordLength <= 0)
+                {
+                    SetLastError("Invalid parameters");
+                    return TITAN_VAULT_ERROR_INVALID_PARAMETER;
+                }
+
+                var vaultPath = GetUtf8String((IntPtr)vaultPathBytes, vaultPathLength);
+                var oldPasswordChars = GetPasswordChars((IntPtr)oldPasswordBytes, oldPasswordLength);
+                var newPasswordChars = GetPasswordChars((IntPtr)newPasswordBytes, newPasswordLength);
+
+                if (string.IsNullOrEmpty(vaultPath) || oldPasswordChars == null || newPasswordChars == null)
+                {
+                    SetLastError("Failed to decode parameters");
+                    return TITAN_VAULT_ERROR_INVALID_PARAMETER;
+                }
+
+                // Use VaultManager to change the password
+                VaultManager.ChangeUvfAdminPasswordAsync(vaultPath, oldPasswordChars, newPasswordChars).Wait();
+                return TITAN_VAULT_SUCCESS;
+            }
+            catch (UnauthorizedAccessException ex)
+            {
+                SetLastError($"Invalid password: {ex.Message}");
+                return TITAN_VAULT_ERROR_INVALID_PASSWORD;
+            }
+            catch (AggregateException ex) when (ex.InnerException != null)
+            {
+                SetLastError($"Failed to change password: {ex.InnerException.Message}");
+                return TITAN_VAULT_ERROR_INTERNAL;
+            }
+            catch (Exception ex)
+            {
+                SetLastError($"Failed to change password: {ex.Message}");
+                return TITAN_VAULT_ERROR_INTERNAL;
+            }
         }
 
         /// <summary>
@@ -607,22 +644,60 @@ namespace ExampleVaultApp.Wrapper
                     return TITAN_VAULT_ERROR_INVALID_PARAMETER;
                 }
 
-                var fileData = vault.ReadAllBytesAsync(filePath).Result;
-                var requiredSize = fileData.Length;
+                // Get file size first to determine buffer requirements
                 var availableSize = *bufferSize;
-
-                // Write the required size back
-                *bufferSize = requiredSize;
-
-                if (buffer == null || availableSize < requiredSize)
+                
+                // Try to get file size without reading content
+                long fileSize;
+                try
                 {
-                    SetLastError($"Buffer too small. Required: {requiredSize}, Available: {availableSize}");
-                    return TITAN_VAULT_ERROR_INSUFFICIENT_BUFFER;
+                    // Use FileExists to check if file exists, then get its size
+                    if (!vault.FileExistsAsync(filePath).Result)
+                    {
+                        SetLastError($"File not found: {filePath}");
+                        return TITAN_VAULT_ERROR_VAULT_NOT_FOUND;
+                    }
+                    
+                    // For the first call (buffer == null), we need to determine the file size
+                    // without actually reading the file content
+                    if (buffer == null)
+                    {
+                        // Try to read the file to get its size
+                        var fileData = vault.ReadAllBytesAsync(filePath).Result;
+                        fileSize = fileData.Length;
+                        
+                        // Write the required size back
+                        *bufferSize = (int)fileSize;
+                        
+                        SetLastError($"Buffer too small. Required: {fileSize}, Available: {availableSize}");
+                        return TITAN_VAULT_ERROR_INSUFFICIENT_BUFFER;
+                    }
+                    else
+                    {
+                        // Second call - read the actual file content
+                        var fileData = vault.ReadAllBytesAsync(filePath).Result;
+                        fileSize = fileData.Length;
+                        
+                        // Write the actual size back
+                        *bufferSize = (int)fileSize;
+                        
+                        if (availableSize < fileSize)
+                        {
+                            SetLastError($"Buffer too small. Required: {fileSize}, Available: {availableSize}");
+                            return TITAN_VAULT_ERROR_INSUFFICIENT_BUFFER;
+                        }
+                        
+                        fixed (byte* fileDataPtr = fileData)
+                        {
+                            Buffer.MemoryCopy(fileDataPtr, buffer, availableSize, fileData.Length);
+                        }
+                    }
                 }
-
-                fixed (byte* fileDataPtr = fileData)
+                catch (Exception readEx)
                 {
-                    Buffer.MemoryCopy(fileDataPtr, buffer, availableSize, fileData.Length);
+                    // If we can't read the file, we still need to set bufferSize to 0 for consistency
+                    *bufferSize = 0;
+                    throw; // Re-throw to be handled by outer catch
                 }
                 return TITAN_VAULT_SUCCESS;
             }

@@ -51,6 +51,22 @@ namespace ExampleVaultApp
                         await RunChangePasswordTestAsync(vaultFormat, encryptFilenames);
                         break;
 
+                    case "debugpwchange":
+                        await RunDebugPasswordChangeTestAsync(encryptFilenames);
+                        break;
+
+                    case "testscenarios":
+                        await RunPasswordChangeScenarios(encryptFilenames);
+                        break;
+
+                    case "testkeyunwrap":
+                        await RunKeyUnwrappingTests(encryptFilenames);
+                        break;
+
+                    case "testnative":
+                        await RunNativeStylePasswordChangeTest(encryptFilenames);
+                        break;
+
                     case "backuptest":
                         await RunBackupTestAsync(vaultFormat);
                         break;
@@ -102,6 +118,10 @@ namespace ExampleVaultApp
             Console.WriteLine("  simpletest        : Full encrypt + decrypt + verify cycle using VaultManager streams API");
             Console.WriteLine("  directtest        : Full encrypt + decrypt + verify cycle using low-level IStorage interface");
             Console.WriteLine("  changepassword    : Test password change functionality");
+            Console.WriteLine("  debugpwchange     : Debug UVF password change (allows step-by-step debugging of ReadAllBytes issue)");
+            Console.WriteLine("  testscenarios     : Run multiple password change scenarios to find AES Key Wrap error");
+            Console.WriteLine("  testkeyunwrap     : Run key unwrapping tests to trigger AES Key Wrap error");
+            Console.WriteLine("  testnative        : Run native-style password change test using TitanVaultNativeMethods");
             Console.WriteLine("  backuptest        : Test vault backup functionality");
             Console.WriteLine("  multiusertest     : Test multi-user UVF vault functionality");
             Console.WriteLine("  manageduvf         : Test managed UVF functionality");
@@ -127,6 +147,7 @@ namespace ExampleVaultApp
             Console.WriteLine("  ExampleVaultApp simpletest --uvf --keyderivation=scrypt");
             Console.WriteLine("  ExampleVaultApp directtest --uvf --encryptfilenames=true --keyderivation=pbkdf2");
             Console.WriteLine("  ExampleVaultApp changepassword --uvf --encryptfilenames=true");
+            Console.WriteLine("  ExampleVaultApp debugpwchange --encryptfilenames=true");
             Console.WriteLine("  ExampleVaultApp backuptest");
             Console.WriteLine("  ExampleVaultApp cstyle --uvf");
             Console.WriteLine("  ExampleVaultApp cstyle --cryptomator");
@@ -307,6 +328,47 @@ namespace ExampleVaultApp
                     throw new ArgumentException($"Unsupported vault format: {format}");
             }
             */
+        }
+
+        private static async Task RunDebugPasswordChangeTestAsync(bool encryptFilenames)
+        {
+            Console.WriteLine($"🔧 Running Debug Password Change Test for UVF format...");
+            Console.WriteLine($"🔧 UVF Filename Encryption: {(encryptFilenames ? "Enabled" : "Disabled")}");
+            Console.WriteLine("🔧 This test allows step-by-step debugging of the ReadAllBytes issue");
+            
+            var uvfTest = new ChangePwUvfTest(encryptFilenames);
+            await uvfTest.RunPasswordChangeTestAsync();
+        }
+
+        private static async Task RunPasswordChangeScenarios(bool encryptFilenames)
+        {
+            Console.WriteLine("🧪 Running Multiple Password Change Scenarios to Find AES Key Wrap Error...");
+            Console.WriteLine($"🔧 UVF Filename Encryption: {(encryptFilenames ? "Enabled" : "Disabled")}");
+            Console.WriteLine("🔧 This test tries different scenarios to reproduce the error");
+            
+            var test = new ChangePwUvfTest(encryptFilenames);
+            await test.RunMultiplePasswordChangeScenarios();
+        }
+
+        private static async Task RunKeyUnwrappingTests(bool encryptFilenames)
+        {
+            Console.WriteLine("🔐 Running Key Unwrapping Tests to Find AES Key Wrap Error...");
+            Console.WriteLine($"🔧 UVF Filename Encryption: {(encryptFilenames ? "Enabled" : "Disabled")}");
+            Console.WriteLine("🔧 This test specifically targets key unwrapping scenarios");
+            
+            var test = new ChangePwUvfTest(encryptFilenames);
+            await test.TestKeyUnwrappingScenarios();
+        }
+
+        private static async Task RunNativeStylePasswordChangeTest(bool encryptFilenames)
+        {
+            Console.WriteLine("🔧 Running Native-Style Password Change Test...");
+            Console.WriteLine($"🔧 UVF Filename Encryption: {(encryptFilenames ? "Enabled" : "Disabled")}");
+            Console.WriteLine("🔧 This test uses TitanVaultNativeMethods directly to reproduce ReadAllBytes issues");
+            Console.WriteLine("🔧 You can set breakpoints in TitanVaultNativeMethods.ReadFile to debug line by line");
+            
+            var test = new ChangePwUvfTest(encryptFilenames);
+            await test.RunNativeStylePasswordChangeTestAsync();
         }
 
         private static async Task RunBackupTestAsync(VaultFormat format)

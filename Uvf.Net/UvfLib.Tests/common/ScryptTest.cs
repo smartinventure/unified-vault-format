@@ -16,7 +16,7 @@ namespace UvfLib.Tests.Common
         public void TestEmptyString()
         {
             // Generate key using Scrypt with empty strings
-            byte[] key = Scrypt.ScryptDeriveBytes("", Encoding.ASCII.GetBytes(""), 16, 1, 64);
+            byte[] key = Scrypt.ScryptDeriveBytes(Encoding.UTF8.GetBytes(""), Encoding.ASCII.GetBytes(""), 16, 1, 64);
 
             // Expected result from RFC 7914
             byte[] expected = new byte[] {
@@ -38,7 +38,7 @@ namespace UvfLib.Tests.Common
         public void TestPleaseLetMeInString()
         {
             // Generate key using Scrypt with test vector
-            byte[] key = Scrypt.ScryptDeriveBytes("pleaseletmein", Encoding.ASCII.GetBytes("SodiumChloride"), 16384, 8, 64);
+            byte[] key = Scrypt.ScryptDeriveBytes(Encoding.UTF8.GetBytes("pleaseletmein"), Encoding.ASCII.GetBytes("SodiumChloride"), 16384, 8, 64);
 
             // Expected result from RFC 7914
             byte[] expected = new byte[] {
@@ -61,19 +61,19 @@ namespace UvfLib.Tests.Common
         {
             // Test with invalid cost parameter (not a power of 2)
             Assert.ThrowsException<ArgumentException>(() =>
-                Scrypt.ScryptDeriveBytes("test", Encoding.ASCII.GetBytes("salt"), 15, 1, 64));
+                Scrypt.ScryptDeriveBytes(Encoding.UTF8.GetBytes("test"), Encoding.ASCII.GetBytes("salt"), 15, 1, 64));
 
             // Test with too small cost parameter
             Assert.ThrowsException<ArgumentException>(() =>
-                Scrypt.ScryptDeriveBytes("test", Encoding.ASCII.GetBytes("salt"), 0, 1, 64));
+                Scrypt.ScryptDeriveBytes(Encoding.UTF8.GetBytes("test"), Encoding.ASCII.GetBytes("salt"), 0, 1, 64));
 
             // Test with too small block size
             Assert.ThrowsException<ArgumentException>(() =>
-                Scrypt.ScryptDeriveBytes("test", Encoding.ASCII.GetBytes("salt"), 16, 0, 64));
+                Scrypt.ScryptDeriveBytes(Encoding.UTF8.GetBytes("test"), Encoding.ASCII.GetBytes("salt"), 16, 0, 64));
 
             // Test with invalid output length
             Assert.ThrowsException<ArgumentException>(() =>
-                Scrypt.ScryptDeriveBytes("test", Encoding.ASCII.GetBytes("salt"), 16, 1, 0));
+                Scrypt.ScryptDeriveBytes(Encoding.UTF8.GetBytes("test"), Encoding.ASCII.GetBytes("salt"), 16, 1, 0));
         }
     }
 }
