@@ -103,40 +103,40 @@ namespace ExampleVaultApp
             Console.WriteLine($"🔍 DEBUG: Vault path: {_testVaultPath}");
             
             try
-            {
-                // Use auto-detection when loading vault for verification
+        {
+            // Use auto-detection when loading vault for verification
                 Console.WriteLine($"🔍 DEBUG: About to call VaultManager.LoadUvfVaultAsync()...");
                 using var vault = await VaultManager.LoadUvfVaultAsync(_testVaultPath, passwordChars);
                 Console.WriteLine($"🔍 DEBUG: VaultManager.LoadUvfVaultAsync() succeeded!");
-                
-                // Try to detect and display the actual setting
-                try
-                {
-                    string vaultUvfFile = Path.Combine(_testVaultPath, "vault.uvf");
-                    byte[] vaultFileContent = await File.ReadAllBytesAsync(vaultUvfFile);
+            
+            // Try to detect and display the actual setting
+            try
+            {
+                string vaultUvfFile = Path.Combine(_testVaultPath, "vault.uvf");
+                byte[] vaultFileContent = await File.ReadAllBytesAsync(vaultUvfFile);
                     // Convert char[] to byte[] for VaultHandler
                     byte[] passwordBytes = Encoding.UTF8.GetBytes(passwordChars);
                     bool detectedEncryptFilenames = VaultHandler.DetectFilenameEncryption(vaultFileContent, passwordBytes);
-                    Console.WriteLine($"🔍 Auto-detected filename encryption during {passwordType} password verification: {(detectedEncryptFilenames ? "Enabled" : "Disabled")}");
-                }
-                catch (Exception ex)
-                {
-                    Console.WriteLine($"⚠️ Could not detect filename encryption setting: {ex.Message}");
-                }
-                
+                Console.WriteLine($"🔍 Auto-detected filename encryption during {passwordType} password verification: {(detectedEncryptFilenames ? "Enabled" : "Disabled")}");
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"⚠️ Could not detect filename encryption setting: {ex.Message}");
+            }
+            
                 Console.WriteLine($"🔍 DEBUG: About to read test file 'test.txt'...");
-                // Try to read the test file
-                var data = await vault.ReadAllBytesAsync("test.txt");
-                var content = Encoding.UTF8.GetString(data);
+            // Try to read the test file
+            var data = await vault.ReadAllBytesAsync("test.txt");
+            var content = Encoding.UTF8.GetString(data);
                 Console.WriteLine($"🔍 DEBUG: Read {data.Length} bytes from test.txt");
-                
-                if (content == "Hello, UVF World!")
-                {
-                    Console.WriteLine($"✅ UVF vault successfully opened with {passwordType} password");
-                }
-                else
-                {
-                    throw new Exception($"UVF vault opened but content mismatch. Expected 'Hello, UVF World!', got '{content}'");
+            
+            if (content == "Hello, UVF World!")
+            {
+                Console.WriteLine($"✅ UVF vault successfully opened with {passwordType} password");
+            }
+            else
+            {
+                throw new Exception($"UVF vault opened but content mismatch. Expected 'Hello, UVF World!', got '{content}'");
                 }
             }
             catch (System.Security.Cryptography.CryptographicException ex) when (ex.Message.Contains("AES Key Wrap integrity check failed"))
@@ -196,9 +196,9 @@ namespace ExampleVaultApp
                 
                 try
                 {
-                    // Use the static method to change the password
+                // Use the static method to change the password
                     await VaultManager.ChangeUvfAdminPasswordAsync(_testVaultPath, oldPasswordChars, newPasswordChars);
-                    Console.WriteLine("✅ Password changed successfully using VaultManager static API");
+                Console.WriteLine("✅ Password changed successfully using VaultManager static API");
                 }
                 catch (System.Security.Cryptography.CryptographicException ex) when (ex.Message.Contains("AES Key Wrap integrity check failed"))
                 {

@@ -224,6 +224,15 @@ namespace DemoApp.Wrapper
             byte* filePathBytes, int filePathLength);
 
         /// <summary>
+        /// Open file with specific flags as stream
+        /// </summary>
+        [DllImport(LibraryName, CallingConvention = CallingConvention.Cdecl, EntryPoint = "titan_vault_open_stream_with_flags")]
+        public static extern unsafe IntPtr OpenStreamWithFlags(
+            IntPtr vaultHandle,
+            byte* filePathBytes, int filePathLength,
+            int openFlags);
+
+        /// <summary>
         /// Read from stream
         /// </summary>
         [DllImport(LibraryName, CallingConvention = CallingConvention.Cdecl, EntryPoint = "titan_vault_stream_read")]

@@ -196,7 +196,7 @@ namespace UvfLib.Vault
                 {
                     new PayloadSeed
                     {
-                        Id = "1",
+                        Id = JwtBase64Url.Encode(BitConverter.GetBytes(1).Reverse().ToArray()), // Encode integer 1 as Base64URL (big-endian)
                         Created = DateTimeOffset.UtcNow.ToUnixTimeSeconds().ToString(),
                         Value = Convert.ToBase64String(new byte[32]) // Initial seed (32 random bytes)
                     }
@@ -696,6 +696,40 @@ namespace UvfLib.Vault
         {
             if (_disposed) throw new ObjectDisposedException(nameof(VaultHandler));
             return new VaultHelpers.EncryptingStream(_cryptor, outputStream, leaveOpen);
+        }
+
+        public Stream GetEncryptingStreamWithExistingHeader(Stream outputStream, bool leaveOpen = false)
+        {
+            if (_disposed) throw new ObjectDisposedException(nameof(VaultHandler));
+            if (outputStream == null) throw new ArgumentNullException(nameof(outputStream));
+            if (!outputStream.CanWrite) throw new ArgumentException("Output stream must be writable", nameof(outputStream));
+
+            // CRITICAL FIX: Always read header from the beginning of the stream
+            long originalPosition = outputStream.CanSeek ? outputStream.Position : 0;
+            if (outputStream.CanSeek)
+            {
+                outputStream.Position = 0;
+            }
+
+            // Read the existing header from the stream
+            byte[] encryptedHeader = new byte[UvfLib.Core.V3.FileHeaderImpl.SIZE];
+            int bytesRead = outputStream.Read(encryptedHeader, 0, encryptedHeader.Length);
+            if (bytesRead < encryptedHeader.Length)
+            {
+                throw new InvalidOperationException("Stream ended before header could be fully read.");
+            }
+            
+            var existingHeader = _cryptor.FileHeaderCryptor().DecryptHeader(encryptedHeader);
+            
+            // CRITICAL FIX: Restore original position after reading header
+            // This ensures WriteOnly streams continue from their original position
+            if (outputStream.CanSeek)
+            {
+                outputStream.Position = originalPosition;
+            }
+            
+            // Create encrypting stream with existing header to preserve the header nonce
+            return new VaultHelpers.EncryptingStream(_cryptor, outputStream, leaveOpen, existingHeader);
         }
 
         /// <summary>
@@ -1400,6 +1434,70 @@ namespace UvfLib.Vault
             if (IsCryptomatorV8()) throw new InvalidOperationException("Symlinks are only supported in UVF format");
             
             return UvfLib.Core.V3.Constants.SYMLINK_FILE;
+        }
+
+        /// <summary>
+        /// Returns a Stream that encrypts data with support for random writes and read-modify-write operations.
+        /// This stream supports seeking and writing to any position within the file, making it suitable
+        /// for scenarios that require random access to encrypted files.
+        /// </summary>
+        /// <param name="outputStream">The stream to write encrypted data to.</param>
+        /// <param name="existingHeader">Optional existing file header to preserve when opening existing files.</param>
+        /// <param name="leaveOpen">Whether to leave the underlying outputStream open when the encrypting stream is disposed.</param>
+        /// <returns>A Stream wrapper that performs encryption with random write support.</returns>
+        /// <exception cref="ArgumentNullException">If outputStream is null.</exception>
+        /// <exception cref="ArgumentException">If outputStream is not writable.</exception>
+        /// <exception cref="InvalidOperationException">If the vault is not initialized correctly.</exception>
+        public Stream GetChunkAwareEncryptingStream(Stream outputStream, FileHeader? existingHeader = null, bool leaveOpen = false)
+        {
+            if (_disposed) throw new ObjectDisposedException(nameof(VaultHandler));
+            if (outputStream == null) throw new ArgumentNullException(nameof(outputStream));
+            if (!outputStream.CanWrite) throw new ArgumentException("Output stream must be writable", nameof(outputStream));
+
+            FileHeader fileHeader;
+            
+            if (existingHeader != null)
+            {
+                // Use the provided existing header
+                fileHeader = existingHeader;
+            }
+            else if (outputStream.CanSeek && outputStream.Length > 0)
+            {
+                // Try to read existing header from the stream
+                long originalPosition = outputStream.Position;
+                outputStream.Position = 0;
+                
+                try
+                {
+                    byte[] encryptedHeader = new byte[UvfLib.Core.V3.FileHeaderImpl.SIZE];
+                    int bytesRead = outputStream.Read(encryptedHeader, 0, encryptedHeader.Length);
+                    if (bytesRead == encryptedHeader.Length)
+                    {
+                        fileHeader = _cryptor.FileHeaderCryptor().DecryptHeader(encryptedHeader);
+                    }
+                    else
+                    {
+                        // Not enough data for a header, create new one
+                        fileHeader = _cryptor.FileHeaderCryptor().Create();
+                    }
+                }
+                catch
+                {
+                    // If header reading fails, create a new one
+                    fileHeader = _cryptor.FileHeaderCryptor().Create();
+                }
+                finally
+                {
+                    outputStream.Position = originalPosition;
+                }
+            }
+            else
+            {
+                // Create new header for new files
+                fileHeader = _cryptor.FileHeaderCryptor().Create();
+            }
+
+            return new VaultHelpers.ChunkAwareEncryptingStream(outputStream, (ICryptor)_cryptor, fileHeader, leaveOpen);
         }
 
     }

@@ -665,8 +665,8 @@ namespace ExampleVaultApp.Wrapper
                         // Try to read the file to get its size
                         var fileData = vault.ReadAllBytesAsync(filePath).Result;
                         fileSize = fileData.Length;
-                        
-                        // Write the required size back
+
+                // Write the required size back
                         *bufferSize = (int)fileSize;
                         
                         SetLastError($"Buffer too small. Required: {fileSize}, Available: {availableSize}");
@@ -682,14 +682,14 @@ namespace ExampleVaultApp.Wrapper
                         *bufferSize = (int)fileSize;
                         
                         if (availableSize < fileSize)
-                        {
+                {
                             SetLastError($"Buffer too small. Required: {fileSize}, Available: {availableSize}");
-                            return TITAN_VAULT_ERROR_INSUFFICIENT_BUFFER;
-                        }
-                        
-                        fixed (byte* fileDataPtr = fileData)
-                        {
-                            Buffer.MemoryCopy(fileDataPtr, buffer, availableSize, fileData.Length);
+                    return TITAN_VAULT_ERROR_INSUFFICIENT_BUFFER;
+                }
+
+                fixed (byte* fileDataPtr = fileData)
+                {
+                    Buffer.MemoryCopy(fileDataPtr, buffer, availableSize, fileData.Length);
                         }
                     }
                 }

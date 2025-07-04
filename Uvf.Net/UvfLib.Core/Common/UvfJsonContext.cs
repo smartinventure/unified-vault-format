@@ -34,7 +34,7 @@ namespace UvfLib.Core.Common
     [JsonSerializable(typeof(List<JweScryptRecipient>))] // List of Scrypt recipients
 [JsonSerializable(typeof(System.Text.Json.JsonElement))] // For parsing existing JSON in AOT
 [JsonSerializable(typeof(List<object>))] // For JweJson.Recipients which can contain mixed types
-public partial class UvfJsonContext : JsonSerializerContext
+    public partial class UvfJsonContext : JsonSerializerContext
     {
     }
 } 

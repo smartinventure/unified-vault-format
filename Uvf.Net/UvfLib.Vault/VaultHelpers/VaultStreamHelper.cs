@@ -29,6 +29,16 @@ namespace UvfLib.Vault.VaultHelpers
             return new EncryptingStream(cryptor, outputStream, leaveOpen);
         }
 
+        public static Stream GetEncryptingStreamInternal(Cryptor cryptor, Stream outputStream, bool leaveOpen, FileHeader existingHeader)
+        {
+            // Validate arguments
+            if (cryptor == null) throw new ArgumentNullException(nameof(cryptor));
+            if (outputStream == null) throw new ArgumentNullException(nameof(outputStream));
+            if (!outputStream.CanWrite) throw new ArgumentException("Output stream must be writable", nameof(outputStream));
+
+            return new EncryptingStream(cryptor, outputStream, leaveOpen, existingHeader);
+        }
+
         public static Stream GetDecryptingStreamInternal(Cryptor cryptor, Stream inputStream, bool leaveOpen)
         {
             // Validate arguments

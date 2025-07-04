@@ -67,6 +67,26 @@ namespace ExampleVaultApp
                         await RunNativeStylePasswordChangeTest(encryptFilenames);
                         break;
 
+                    case "testopenflags":
+                        await OpenFlagsTest.RunTestAsync();
+                        break;
+
+                    case "testrandomwrite":
+                        await RandomWriteTest.RunTestAsync();
+                        break;
+
+                    case "debugrandomwrite":
+                        await DebugRandomWrite.RunDebugAsync();
+                        break;
+
+                    case "contextdebug":
+                        await ContextDebugTest.RunDebugAsync();
+                        break;
+
+                    case "readwritedemo":
+                        await ReadWriteStreamDemo.RunDemoAsync();
+                        break;
+
                     case "backuptest":
                         await RunBackupTestAsync(vaultFormat);
                         break;
@@ -122,6 +142,9 @@ namespace ExampleVaultApp
             Console.WriteLine("  testscenarios     : Run multiple password change scenarios to find AES Key Wrap error");
             Console.WriteLine("  testkeyunwrap     : Run key unwrapping tests to trigger AES Key Wrap error");
             Console.WriteLine("  testnative        : Run native-style password change test using TitanVaultNativeMethods");
+            Console.WriteLine("  testopenflags     : Test OpenStreamWithFlags functionality with managed code");
+            Console.WriteLine("  testrandomwrite   : Test random write functionality in encrypted files");
+            Console.WriteLine("  readwritedemo     : Demonstrate read-write stream architecture concepts");
             Console.WriteLine("  backuptest        : Test vault backup functionality");
             Console.WriteLine("  multiusertest     : Test multi-user UVF vault functionality");
             Console.WriteLine("  manageduvf         : Test managed UVF functionality");

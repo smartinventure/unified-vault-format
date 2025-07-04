@@ -31,11 +31,11 @@ namespace DemoApp
             
             if (vaultType == VaultTypeFilter.UVF || vaultType == VaultTypeFilter.Both)
             {
-                Console.WriteLine($"UVF Vault: {_uvfVaultPath}");
+            Console.WriteLine($"UVF Vault: {_uvfVaultPath}");
             }
             if (vaultType == VaultTypeFilter.Cryptomator || vaultType == VaultTypeFilter.Both)
             {
-                Console.WriteLine($"Cryptomator Vault: {_cryptomatorVaultPath}");
+            Console.WriteLine($"Cryptomator Vault: {_cryptomatorVaultPath}");
             }
             
             Console.WriteLine($"Decrypted: {_decryptedFolderPath}");
@@ -50,12 +50,12 @@ namespace DemoApp
                 
                 if (vaultType == VaultTypeFilter.UVF || vaultType == VaultTypeFilter.Both)
                 {
-                    await DemonstrateUvfPasswordChangeAsync();
+                await DemonstrateUvfPasswordChangeAsync();
                 }
                 
                 if (vaultType == VaultTypeFilter.Cryptomator || vaultType == VaultTypeFilter.Both)
                 {
-                    await DemonstrateCryptomatorPasswordChangeAsync();
+                await DemonstrateCryptomatorPasswordChangeAsync();
                 }
                 
                 Console.WriteLine("✅ PasswordChangeDemo completed successfully!");

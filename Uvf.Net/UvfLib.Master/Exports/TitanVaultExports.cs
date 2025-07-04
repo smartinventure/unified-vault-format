@@ -46,6 +46,15 @@ namespace UvfLib.Master.Exports
         public const int TITAN_VAULT_KDF_PBKDF2 = 0;
         public const int TITAN_VAULT_KDF_SCRYPT = 1;
 
+        // Open flags constants (matches StorageLib.Abstractions.OpenFlags)
+        public const int TITAN_VAULT_O_RDONLY = 0x0000;      // Open for read-only access
+        public const int TITAN_VAULT_O_WRONLY = 0x0001;      // Open for write-only access
+        public const int TITAN_VAULT_O_RDWR = 0x0002;        // Open for both reading and writing
+        public const int TITAN_VAULT_O_CREAT = 0x0040;       // Create file if it doesn't exist
+        public const int TITAN_VAULT_O_EXCL = 0x0080;        // Used with Create, fail if file exists
+        public const int TITAN_VAULT_O_TRUNC = 0x0200;       // Truncate file to zero length if it exists
+        public const int TITAN_VAULT_O_APPEND = 0x0400;      // Open the file in append mode
+
         #endregion
 
         #region Handle Management
@@ -688,8 +697,8 @@ namespace UvfLib.Master.Exports
                         // Try to read the file to get its size
                         var fileData = vault.ReadAllBytesAsync(filePath).Result;
                         fileSize = fileData.Length;
-                        
-                        // Write the required size back
+
+                // Write the required size back
                         Marshal.WriteInt32(bufferSize, (int)fileSize);
                         
                         SetLastError($"Buffer too small. Required: {fileSize}, Available: {availableSize}");
@@ -705,12 +714,12 @@ namespace UvfLib.Master.Exports
                         Marshal.WriteInt32(bufferSize, (int)fileSize);
                         
                         if (availableSize < fileSize)
-                        {
+                {
                             SetLastError($"Buffer too small. Required: {fileSize}, Available: {availableSize}");
-                            return TITAN_VAULT_ERROR_INSUFFICIENT_BUFFER;
-                        }
-                        
-                        Marshal.Copy(fileData, 0, buffer, fileData.Length);
+                    return TITAN_VAULT_ERROR_INSUFFICIENT_BUFFER;
+                }
+
+                Marshal.Copy(fileData, 0, buffer, fileData.Length);
                     }
                 }
                 catch (Exception readEx)
@@ -1230,6 +1239,57 @@ namespace UvfLib.Master.Exports
             catch (Exception ex)
             {
                 SetLastError($"Failed to open write stream: {ex.Message}");
+                return IntPtr.Zero;
+            }
+        }
+
+        /// <summary>
+        /// Open file with specific flags as stream.
+        /// Returns stream handle or zero on error.
+        /// </summary>
+        [UnmanagedCallersOnly(EntryPoint = "titan_vault_open_stream_with_flags")]
+        public static unsafe IntPtr OpenStreamWithFlags(
+            IntPtr vaultHandle,
+            IntPtr filePathBytes,
+            int filePathLength,
+            int openFlags)
+        {
+            try
+            {
+                if (vaultHandle == IntPtr.Zero || filePathBytes == IntPtr.Zero || filePathLength <= 0)
+                {
+                    SetLastError("Invalid parameters");
+                    return IntPtr.Zero;
+                }
+
+                var vault = GetVault(vaultHandle);
+                if (vault == null)
+                {
+                    SetLastError("Invalid vault handle");
+                    return IntPtr.Zero;
+                }
+
+                var filePath = GetUtf8String(filePathBytes, filePathLength);
+                if (string.IsNullOrEmpty(filePath))
+                {
+                    SetLastError("Failed to decode file path");
+                    return IntPtr.Zero;
+                }
+
+                // Convert integer flags to OpenFlags enum
+                var flags = (StorageLib.Abstractions.OpenFlags)openFlags;
+                
+                var stream = vault.OpenAsync(filePath, flags).Result;
+                return CreateStreamHandle(stream);
+            }
+            catch (AggregateException ex) when (ex.InnerException != null)
+            {
+                SetLastError($"Failed to open stream with flags: {ex.InnerException.Message}");
+                return IntPtr.Zero;
+            }
+            catch (Exception ex)
+            {
+                SetLastError($"Failed to open stream with flags: {ex.Message}");
                 return IntPtr.Zero;
             }
         }

@@ -52,12 +52,20 @@ namespace DemoApp
                         await RunPasswordChangeDemoAsync(args);
                         break;
 
+                    case "largefile":
+                        await RunLargeFileDemoAsync();
+                        break;
+
                     case "native":
                         TestNativeLibraryOnly();
                         break;
 
                     case "info":
                         ShowSystemInfo();
+                        break;
+
+                    case "openflags":
+                        await RunOpenFlagsDemoAsync();
                         break;
 
                     default:
@@ -87,6 +95,8 @@ namespace DemoApp
             Console.WriteLine("  cryptomator       : Run Cryptomator V8 demo (create test data, encrypt, decrypt, verify)");
             Console.WriteLine("  multiuser         : Run multi-user UVF demo (user management, access control)");
             Console.WriteLine("  password          : Run password change demo (both UVF and Cryptomator)");
+            Console.WriteLine("  largefile         : Run large file demo (>4GB) with both UVF and Cryptomator vaults");
+            Console.WriteLine("  openflags         : Test OpenStreamWithFlags functionality (create, truncate, append modes)");
             Console.WriteLine("  native            : Test native library wrapper only");
             Console.WriteLine("  info              : Show system and library information");
             Console.WriteLine();
@@ -104,6 +114,8 @@ namespace DemoApp
             Console.WriteLine("  DemoApp password");
             Console.WriteLine("  DemoApp password --uvf");
             Console.WriteLine("  DemoApp password --cryptomator");
+            Console.WriteLine("  DemoApp largefile");
+            Console.WriteLine("  DemoApp openflags");
             Console.WriteLine("  DemoApp native");
             Console.WriteLine("  DemoApp info");
             Console.WriteLine();
@@ -215,7 +227,7 @@ namespace DemoApp
 
             // Parse vault type from arguments
             var vaultType = ParseVaultType(args);
-            
+
             var demo = new PasswordChangeDemo(
                 SourceFolderPath + "_password",
                 VaultFolderPath + "_uvf_password",
@@ -232,14 +244,45 @@ namespace DemoApp
             
             if (vaultType == VaultTypeFilter.UVF || vaultType == VaultTypeFilter.Both)
             {
-                Console.WriteLine($"   UVF vault:        {VaultFolderPath}_uvf_password");
+            Console.WriteLine($"   UVF vault:        {VaultFolderPath}_uvf_password");
             }
             if (vaultType == VaultTypeFilter.Cryptomator || vaultType == VaultTypeFilter.Both)
             {
-                Console.WriteLine($"   Cryptomator vault: {VaultFolderPath}_cryptomator_password");
+            Console.WriteLine($"   Cryptomator vault: {VaultFolderPath}_cryptomator_password");
             }
             
             Console.WriteLine($"   Decrypted files:  {DecryptedFolderPath}_password");
+        }
+
+        private static async Task RunLargeFileDemoAsync()
+        {
+            Console.WriteLine("🔧 Running Large File Demo (>4GB)");
+            Console.WriteLine();
+
+            var demo = new LargeFileDemo(
+                @"D:\temp\uvf-demo\largefile",
+                "largefile_password_789");
+
+            await demo.RunDemoAsync();
+
+            Console.WriteLine();
+            Console.WriteLine("🎉 Large file demo completed successfully!");
+            Console.WriteLine("⚠️ Note: This demo creates and tests 5GB files - ensure you have sufficient disk space");
+        }
+
+        private static async Task RunOpenFlagsDemoAsync()
+        {
+            Console.WriteLine("🔧 Running Open Flags Demo - Testing file creation and writing behaviors");
+            Console.WriteLine();
+
+            var openFlagsDemo = new OpenFlagsDemo(
+                VaultFolderPath + "_openflags",
+                Password);
+
+            await openFlagsDemo.RunDemoAsync();
+
+            Console.WriteLine();
+            Console.WriteLine("🎉 Open flags demo completed successfully!");
         }
 
         private static void TestNativeLibraryOnly()

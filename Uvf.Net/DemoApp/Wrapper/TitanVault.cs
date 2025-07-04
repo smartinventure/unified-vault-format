@@ -449,6 +449,54 @@ namespace DemoApp.Wrapper
         }
 
         /// <summary>
+        /// Open a stream with specific flags for fine-grained control over file opening behavior.
+        /// Use TitanVaultUtils.OpenFlags constants to combine flags.
+        /// </summary>
+        /// <param name="filePath">Path to the file in the vault</param>
+        /// <param name="flags">Combination of TitanVaultUtils.OpenFlags constants</param>
+        /// <returns>TitanVaultStream for the file</returns>
+        /// <example>
+        /// // Create file if it doesn't exist, truncate if it does
+        /// var stream = vault.OpenStreamWithFlags("/test.txt", TitanVaultUtils.OpenFlags.WriteOnly | TitanVaultUtils.OpenFlags.Create | TitanVaultUtils.OpenFlags.Truncate);
+        /// 
+        /// // Open for appending (create if doesn't exist)
+        /// var stream = vault.OpenStreamWithFlags("/log.txt", TitanVaultUtils.OpenFlags.WriteOnly | TitanVaultUtils.OpenFlags.Create | TitanVaultUtils.OpenFlags.Append);
+        /// 
+        /// // Open existing file for reading and writing (fail if doesn't exist)
+        /// var stream = vault.OpenStreamWithFlags("/data.txt", TitanVaultUtils.OpenFlags.ReadWrite);
+        /// </example>
+        public TitanVaultStream OpenStreamWithFlags(string filePath, int flags)
+        {
+            if (string.IsNullOrEmpty(filePath))
+                throw new ArgumentNullException(nameof(filePath));
+
+            EnsureOpen();
+
+            unsafe
+            {
+                var filePathBytes = TitanVaultUtils.StringToUtf8Bytes(filePath);
+                fixed (byte* filePathPtr = filePathBytes)
+                {
+                    var streamHandle = TitanVaultNativeMethods.OpenStreamWithFlags(
+                        _vaultHandle,
+                        filePathPtr,
+                        filePathBytes.Length,
+                        flags);
+
+                    if (streamHandle == IntPtr.Zero)
+                    {
+                        throw new InvalidOperationException($"Failed to open stream with flags: {TitanVaultUtils.GetLastErrorString()}");
+                    }
+
+                    // Determine if the stream is writable based on the flags
+                    bool canWrite = (flags & (TitanVaultUtils.OpenFlags.WriteOnly | TitanVaultUtils.OpenFlags.ReadWrite)) != 0;
+
+                    return new TitanVaultStream(streamHandle, this, canWrite);
+                }
+            }
+        }
+
+        /// <summary>
         /// List directory contents (returns filenames only, for compatibility with native exports)
         /// </summary>
         public string[] ListDirectory(string directoryPath)

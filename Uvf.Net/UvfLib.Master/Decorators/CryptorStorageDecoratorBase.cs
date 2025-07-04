@@ -352,12 +352,27 @@ namespace UvfLib.Master.Decorators
                     await _underlyingStorage.CreateDirectoryAsync(physicalParentDir, cancellationToken);
                 }
                 
-                // 4. Open underlying file handle with Create flag
-                var underlyingHandle = await _underlyingStorage.OpenAsync(physicalPath, OpenFlags.Create | OpenFlags.WriteOnly, cancellationToken);
+                // 4. Open underlying file handle - use ReadWrite if file exists for random access support
+                bool physicalFileExists = await _underlyingStorage.FileExistsAsync(physicalPath, cancellationToken);
+                OpenFlags underlyingFlags = physicalFileExists 
+                    ? OpenFlags.ReadWrite  // Need read access for existing chunks in random writes
+                    : OpenFlags.Create | OpenFlags.WriteOnly;  // Pure write for new files
+                var underlyingHandle = await _underlyingStorage.OpenAsync(physicalPath, underlyingFlags, cancellationToken);
                 
-                // 5. Get underlying stream and wrap with encryption - NO IntPtr conversion!
+                // 5. Get underlying stream and wrap with encryption
                 var underlyingStream = GetStreamFromUnderlyingHandle(underlyingHandle);
+                
+                // If file exists, read the existing header to preserve the original header nonce
+                if (physicalFileExists)
+                {
+                    // Use the new method that reads existing header and preserves header nonce
+                    return _vault.GetEncryptingStreamWithExistingHeader(underlyingStream, leaveOpen: false);
+                }
+                else
+                {
+                    // New file - use standard encrypting stream with new header
                 return _vault.GetEncryptingStream(underlyingStream, leaveOpen: false);
+                }
             }
             catch (Exception ex)
             {
@@ -397,15 +412,74 @@ namespace UvfLib.Master.Decorators
         /// <summary>
         /// Opens a file with specific flags as a Stream
         /// </summary>
-        Task<Stream> IStreamStorage.OpenAsync(string path, OpenFlags flags, CancellationToken cancellationToken)
+        async Task<Stream> IStreamStorage.OpenAsync(string path, OpenFlags flags, CancellationToken cancellationToken)
         {
-            return flags switch
+            // Extract access mode (first 2 bits)
+            var accessMode = flags & OpenFlags.AccessMode;
+            
+            // Check if file should be created
+            bool shouldCreate = (flags & OpenFlags.Create) != 0;
+            bool shouldTruncate = (flags & OpenFlags.Truncate) != 0;
+            bool isExclusive = (flags & OpenFlags.Exclusive) != 0;
+            bool isAppend = (flags & OpenFlags.Append) != 0;
+
+            // Validate flag combinations
+            if (isExclusive && !shouldCreate)
             {
-                OpenFlags.ReadOnly => OpenReadAsync(path, cancellationToken),
-                OpenFlags.WriteOnly => OpenWriteAsync(path, cancellationToken),
-                OpenFlags.ReadWrite => OpenReadWriteAsync(path, cancellationToken),
-                _ => throw new ArgumentException($"Unsupported OpenFlags: {flags}", nameof(flags))
+                throw new ArgumentException("Exclusive flag can only be used with Create flag", nameof(flags));
+            }
+
+            if (isAppend && shouldTruncate)
+            {
+                throw new ArgumentException("Append and Truncate flags cannot be used together", nameof(flags));
+            }
+
+            // Check file existence
+            bool fileExists = await FileExistsAsync(path, cancellationToken);
+
+            // Handle Create + Exclusive combination
+            if (shouldCreate && isExclusive && fileExists)
+            {
+                throw new IOException($"File already exists and Exclusive flag was specified: {path}");
+            }
+
+            // Handle Create flag - create file if it doesn't exist
+            if (shouldCreate && !fileExists)
+            {
+                // Create an empty file first
+                using var createStream = await OpenWriteAsync(path, cancellationToken);
+                // File is created, now close it and proceed with the requested access
+            }
+
+            // Handle case where file doesn't exist and Create flag is not set
+            if (!fileExists && !shouldCreate)
+            {
+                throw new FileNotFoundException($"File not found and Create flag was not specified: {path}");
+            }
+
+            // Now open with the appropriate access mode
+            Stream stream = accessMode switch
+            {
+                OpenFlags.ReadOnly => await OpenReadAsync(path, cancellationToken),
+                OpenFlags.WriteOnly => await OpenWriteAsync(path, cancellationToken),
+                OpenFlags.ReadWrite => await OpenReadWriteAsync(path, cancellationToken),
+                _ => throw new ArgumentException($"Invalid access mode: {accessMode}", nameof(flags))
             };
+
+            // Handle Truncate flag - clear the file content
+            if (shouldTruncate && stream.CanWrite)
+            {
+                stream.SetLength(0);
+                stream.Position = 0;
+            }
+
+            // Handle Append flag - position at end of file
+            if (isAppend && stream.CanSeek && stream.CanWrite)
+            {
+                stream.Position = stream.Length;
+            }
+
+            return stream;
         }
 
         /// <summary>

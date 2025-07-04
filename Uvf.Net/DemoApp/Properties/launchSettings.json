@@ -19,6 +19,10 @@
     "password": {
       "commandName": "Project",
       "commandLineArgs": "password"
+    },
+    "largefile": {
+      "commandName": "Project",
+      "commandLineArgs": "largefile"
     }
   }
 }

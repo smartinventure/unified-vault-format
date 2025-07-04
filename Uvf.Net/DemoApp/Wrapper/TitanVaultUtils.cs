@@ -79,5 +79,22 @@ namespace DemoApp.Wrapper
             public const int UnsupportedFormat = -7;
             public const int InternalError = -100;
         }
+
+        /// <summary>
+        /// Open flags constants for file operations
+        /// </summary>
+        public static class OpenFlags
+        {
+            // Access mode flags
+            public const int ReadOnly = 0x0000;      // Open for read-only access
+            public const int WriteOnly = 0x0001;     // Open for write-only access
+            public const int ReadWrite = 0x0002;     // Open for both reading and writing
+            
+            // File creation and status flags
+            public const int Create = 0x0040;        // Create file if it doesn't exist
+            public const int Exclusive = 0x0080;     // Used with Create, fail if file exists
+            public const int Truncate = 0x0200;      // Truncate file to zero length if it exists
+            public const int Append = 0x0400;        // Open the file in append mode
+        }
     }
 } 
