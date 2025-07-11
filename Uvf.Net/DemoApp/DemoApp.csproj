@@ -12,34 +12,38 @@
   <ItemGroup>
   </ItemGroup>
 
-  <!-- Only UvfLib.Core needed for basic types -->
+  <!-- Native AOT library handles all vault operations -->
 
-  <!-- Native AOT Library from UvfLib.Master publish output -->
-  <ItemGroup>
-    <None Include="..\UvfLib.Master\bin\Release\net8.0\win-x64\publish\TitanVault.dll">
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-    </None>
-    <None Include="..\UvfLib.Master\bin\Release\net8.0\win-x64\publish\TitanVault.pdb">
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-    </None>
+  <!-- Native AOT Library files will be copied by post-build target -->
 
-  </ItemGroup>
-
-  <!-- Post-build step to replace managed DLL with native AOT DLL -->
+  <!-- Post-build step to build and copy native AOT DLL -->
   <Target Name="CopyNativeAotLibrary" AfterTargets="Build">
     <PropertyGroup>
-      <NativeAotPath>..\UvfLib.Master\bin\Release\net8.0\win-x64\publish\TitanVault.dll</NativeAotPath>
-      <TargetPath>$(OutputPath)TitanVault.dll</TargetPath>
+      <NativeAotDllPath>..\UvfLib.Master\bin\Release\net8.0\win-x64\publish\TitanVault.dll</NativeAotDllPath>
+      <NativeAotPdbPath>..\UvfLib.Master\bin\Release\net8.0\win-x64\publish\TitanVault.pdb</NativeAotPdbPath>
+      <TargetDllPath>$(OutputPath)TitanVault.dll</TargetDllPath>
+      <TargetPdbPath>$(OutputPath)TitanVault.pdb</TargetPdbPath>
+      <MasterProjectPath>..\UvfLib.Master\UvfLib.Master.csproj</MasterProjectPath>
     </PropertyGroup>
     
     <Message Text="🔧 Checking for native AOT library..." Importance="high" />
     
-    <!-- Only copy if native AOT library exists and is larger than managed version -->
-    <Copy SourceFiles="$(NativeAotPath)" DestinationFiles="$(TargetPath)" Condition="Exists('$(NativeAotPath)')" OverwriteReadOnlyFiles="true" />
+    <!-- Build AOT library if it doesn't exist -->
+    <Message Text="⚠️ TitanVault.dll not found. Building AOT library..." Importance="high" Condition="!Exists('$(NativeAotDllPath)')" />
+    
+    <Exec Command="dotnet publish &quot;$(MasterProjectPath)&quot; --configuration Release --runtime win-x64 --self-contained true /p:PublishAot=true --verbosity minimal" 
+          Condition="!Exists('$(NativeAotDllPath)')" 
+          ContinueOnError="false" />
+          
+    <Message Text="✅ TitanVault AOT library built successfully" Importance="high" Condition="!Exists('$(NativeAotDllPath)')" />
+    
+    <!-- Copy the AOT library files to output directory -->
+    <Copy SourceFiles="$(NativeAotDllPath)" DestinationFiles="$(TargetDllPath)" Condition="Exists('$(NativeAotDllPath)')" OverwriteReadOnlyFiles="true" />
+    <Copy SourceFiles="$(NativeAotPdbPath)" DestinationFiles="$(TargetPdbPath)" Condition="Exists('$(NativeAotPdbPath)')" OverwriteReadOnlyFiles="true" />
       
-    <Message Text="✅ Native AOT library copied to output directory" Importance="high" Condition="Exists('$(NativeAotPath)')" />
+    <Message Text="✅ Native AOT library files copied to output directory" Importance="high" Condition="Exists('$(NativeAotDllPath)')" />
       
-    <Message Text="⚠️ Native AOT library not found. Run: dotnet publish -c Release in UvfLib.Master" Importance="high" Condition="!Exists('$(NativeAotPath)')" />
+    <Error Text="❌ Failed to build or find TitanVault.dll. Please check the build logs." Condition="!Exists('$(NativeAotDllPath)')" />
   </Target>
 
 </Project>

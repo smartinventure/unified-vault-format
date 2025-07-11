@@ -31,7 +31,7 @@ namespace UvfLib.Vault.VaultHelpers
     /// Stream wrapper that encrypts data using Cryptomator V3 file format as it's written.
     /// </summary>
     internal class EncryptingStream : Stream
-    {
+    {        
         private readonly Cryptor _cryptor;
         private readonly Stream _outputStream;
         private readonly bool _leaveOpen;
@@ -201,8 +201,11 @@ namespace UvfLib.Vault.VaultHelpers
         }
 
         private void HandlePendingSeek()
-        {
-            Console.WriteLine($"🔍 HandlePendingSeek: _pendingSeekPosition={_pendingSeekPosition}, _currentChunkNumber={_currentChunkNumber}, _bufferPosition={_bufferPosition}");
+        {            
+            if (Environment.GetEnvironmentVariable("UVF_DEBUG_VERBOSE") != "false")
+            {
+                Console.WriteLine($"🔍 HandlePendingSeek: _pendingSeekPosition={_pendingSeekPosition}, _currentChunkNumber={_currentChunkNumber}, _bufferPosition={_bufferPosition}");
+            }
             
             _seekPending = false;
             
@@ -210,8 +213,11 @@ namespace UvfLib.Vault.VaultHelpers
             long targetChunk = GetChunkNumber(_pendingSeekPosition);
             int offsetInChunk = GetOffsetInChunk(_pendingSeekPosition);
 
-            Console.WriteLine($"🔍 HandlePendingSeek: targetChunk={targetChunk}, offsetInChunk={offsetInChunk}");
-            Console.WriteLine($"🔍 HandlePendingSeek: Moving from chunk {_currentChunkNumber} to chunk {targetChunk}");
+            if (Environment.GetEnvironmentVariable("UVF_DEBUG_VERBOSE") != "false")
+            {
+                Console.WriteLine($"🔍 HandlePendingSeek: targetChunk={targetChunk}, offsetInChunk={offsetInChunk}");
+                Console.WriteLine($"🔍 HandlePendingSeek: Moving from chunk {_currentChunkNumber} to chunk {targetChunk}");
+            }
 
             // IMPROVED STRATEGY: Keep current chunk in memory until we move to a different chunk
             // This solves the random write issue by ensuring each chunk is only encrypted once
@@ -219,13 +225,19 @@ namespace UvfLib.Vault.VaultHelpers
             // Only flush if we're moving to a DIFFERENT chunk
             if (_bufferPosition > 0 && targetChunk != _currentChunkNumber)
             {
-                Console.WriteLine($"🔍 HandlePendingSeek: Moving to different chunk - flushing current chunk {_currentChunkNumber} with {_bufferPosition} bytes");
+                if (Environment.GetEnvironmentVariable("UVF_DEBUG_VERBOSE") != "false")
+                {
+                    Console.WriteLine($"🔍 HandlePendingSeek: Moving to different chunk - flushing current chunk {_currentChunkNumber} with {_bufferPosition} bytes");
+                }
                 
                 // We're moving to a different chunk - flush the current chunk
                 long correctChunkPosition = GetEncryptedChunkStartPosition(_currentChunkNumber);
                 if (_outputStream.CanSeek)
                 {
-                    Console.WriteLine($"🔍 HandlePendingSeek: Positioning stream to {correctChunkPosition} for chunk {_currentChunkNumber}");
+                    if (Environment.GetEnvironmentVariable("UVF_DEBUG_VERBOSE") != "false")
+                    {
+                        Console.WriteLine($"🔍 HandlePendingSeek: Positioning stream to {correctChunkPosition} for chunk {_currentChunkNumber}");
+                    }
                     _outputStream.Position = correctChunkPosition;
                 }
                 
@@ -234,23 +246,35 @@ namespace UvfLib.Vault.VaultHelpers
                 
                 // Clear the chunk buffer for the new chunk
                 Array.Clear(_cleartextChunkBuffer, 0, _cleartextChunkBuffer.Length);
-                Console.WriteLine($"🔍 HandlePendingSeek: Flushed and cleared buffer for new chunk");
+                if (Environment.GetEnvironmentVariable("UVF_DEBUG_VERBOSE") != "false")
+                {
+                    Console.WriteLine($"🔍 HandlePendingSeek: Flushed and cleared buffer for new chunk");
+                }
             }
             else if (targetChunk == _currentChunkNumber)
             {
-                Console.WriteLine($"🔍 HandlePendingSeek: Staying in same chunk {_currentChunkNumber} - keeping buffer in memory");
+                if (Environment.GetEnvironmentVariable("UVF_DEBUG_VERBOSE") != "false")
+                {
+                    Console.WriteLine($"🔍 HandlePendingSeek: Staying in same chunk {_currentChunkNumber} - keeping buffer in memory");
+                }
             }
 
             // If we're moving to a different chunk that contains existing data, read it first
             if (targetChunk != _currentChunkNumber && _pendingSeekPosition < _virtualLength)
             {
-                Console.WriteLine($"🔍 HandlePendingSeek: Moving to different chunk {targetChunk} with existing data - reading chunk");
+                if (Environment.GetEnvironmentVariable("UVF_DEBUG_VERBOSE") != "false")
+                {
+                    Console.WriteLine($"🔍 HandlePendingSeek: Moving to different chunk {targetChunk} with existing data - reading chunk");
+                }
                 // We need to read the existing chunk data into our buffer
                 ReadAndPrepareChunkForUpdate(targetChunk, offsetInChunk);
             }
             else
             {
-                Console.WriteLine($"🔍 HandlePendingSeek: Simple position update - no chunk read needed");
+                if (Environment.GetEnvironmentVariable("UVF_DEBUG_VERBOSE") != "false")
+                {
+                    Console.WriteLine($"🔍 HandlePendingSeek: Simple position update - no chunk read needed");
+                }
                 // Same chunk or new data - just update our position tracking
                 _currentChunkNumber = targetChunk;
                 _bufferPosition = offsetInChunk;
@@ -259,12 +283,18 @@ namespace UvfLib.Vault.VaultHelpers
                 if (targetChunk != GetChunkNumber(_virtualPosition) && _pendingSeekPosition >= _virtualLength)
                 {
                     Array.Clear(_cleartextChunkBuffer, 0, _cleartextChunkBuffer.Length);
-                    Console.WriteLine($"🔍 HandlePendingSeek: Cleared buffer for new chunk beyond current data");
+                    if (Environment.GetEnvironmentVariable("UVF_DEBUG_VERBOSE") != "false")
+                    {
+                        Console.WriteLine($"🔍 HandlePendingSeek: Cleared buffer for new chunk beyond current data");
+                    }
                 }
             }
 
             _virtualPosition = _pendingSeekPosition;
-            Console.WriteLine($"🔍 HandlePendingSeek: Updated _virtualPosition to {_virtualPosition}");
+            if (Environment.GetEnvironmentVariable("UVF_DEBUG_VERBOSE") != "false")
+            {
+                Console.WriteLine($"🔍 HandlePendingSeek: Updated _virtualPosition to {_virtualPosition}");
+            }
         }
 
         private void ReadAndPrepareChunkForUpdate(long chunkNumber, int offsetInChunk)
@@ -328,7 +358,10 @@ namespace UvfLib.Vault.VaultHelpers
 
         private void DecryptChunkForUpdate(byte[] encryptedData, int encryptedLength, long chunkNumber)
         {
-            Console.WriteLine($"🔍 DecryptChunkForUpdate: chunkNumber={chunkNumber}, encryptedLength={encryptedLength}");
+            if (Environment.GetEnvironmentVariable("UVF_DEBUG_VERBOSE") != "false")
+            {
+                Console.WriteLine($"🔍 DecryptChunkForUpdate: chunkNumber={chunkNumber}, encryptedLength={encryptedLength}");
+            }
             
             try
             {
@@ -340,25 +373,37 @@ namespace UvfLib.Vault.VaultHelpers
                         encryptedLength - UvfLib.Core.V3.Constants.GCM_NONCE_SIZE - UvfLib.Core.V3.Constants.GCM_TAG_SIZE);
                     var tag = encryptedData.AsSpan(encryptedLength - UvfLib.Core.V3.Constants.GCM_TAG_SIZE);
 
-                    Console.WriteLine($"🔍 Original nonce from chunk: {Convert.ToHexString(nonce)}");
-                    Console.WriteLine($"🔍 Ciphertext length: {ciphertext.Length}");
-                    Console.WriteLine($"🔍 Tag: {Convert.ToHexString(tag)}");
+                    if (Environment.GetEnvironmentVariable("UVF_DEBUG_VERBOSE") != "false")
+                    {
+                        Console.WriteLine($"🔍 Original nonce from chunk: {Convert.ToHexString(nonce)}");
+                        Console.WriteLine($"🔍 Ciphertext length: {ciphertext.Length}");
+                        Console.WriteLine($"🔍 Tag: {Convert.ToHexString(tag)}");
+                    }
 
                     // CRITICAL: Preserve the original nonce for re-encryption
                     nonce.CopyTo(_perChunkNonce);
-                    Console.WriteLine($"🔍 Preserved nonce in _perChunkNonce: {Convert.ToHexString(_perChunkNonce)}");
+                    if (Environment.GetEnvironmentVariable("UVF_DEBUG_VERBOSE") != "false")
+                    {
+                        Console.WriteLine($"🔍 Preserved nonce in _perChunkNonce: {Convert.ToHexString(_perChunkNonce)}");
+                    }
 
                     // Prepare AAD
                     BinaryPrimitives.WriteInt64BigEndian(_aadBuffer.AsSpan(0, 8), chunkNumber);
-                    Console.WriteLine($"🔍 AAD for decryption: {Convert.ToHexString(_aadBuffer)}");
+                    if (Environment.GetEnvironmentVariable("UVF_DEBUG_VERBOSE") != "false")
+                    {
+                        Console.WriteLine($"🔍 AAD for decryption: {Convert.ToHexString(_aadBuffer)}");
+                    }
 
                     // Decrypt
                     _fileContentAesGcm.Decrypt(nonce, ciphertext, tag, _cleartextChunkBuffer.AsSpan(0, ciphertext.Length), _aadBuffer);
-                    Console.WriteLine($"🔍 Successfully decrypted chunk {chunkNumber}");
-                    
-                    // Show first 20 bytes of decrypted content
-                    var preview = _cleartextChunkBuffer.AsSpan(0, Math.Min(20, ciphertext.Length));
-                    Console.WriteLine($"🔍 Decrypted content preview: '{Encoding.UTF8.GetString(preview)}'");
+                    if (Environment.GetEnvironmentVariable("UVF_DEBUG_VERBOSE") != "false")
+                    {
+                        Console.WriteLine($"🔍 Successfully decrypted chunk {chunkNumber}");
+                        
+                        // Show first 20 bytes of decrypted content
+                        var preview = _cleartextChunkBuffer.AsSpan(0, Math.Min(20, ciphertext.Length));
+                        Console.WriteLine($"🔍 Decrypted content preview: '{Encoding.UTF8.GetString(preview)}'");
+                    }
                     
                     // Clear remaining buffer
                     if (ciphertext.Length < CLEARTEXT_CHUNK_SIZE)
@@ -396,7 +441,10 @@ namespace UvfLib.Vault.VaultHelpers
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"🔍 DecryptChunkForUpdate FAILED: {ex.Message}");
+                if (Environment.GetEnvironmentVariable("UVF_DEBUG_VERBOSE") != "false")
+                {
+                    Console.WriteLine($"🔍 DecryptChunkForUpdate FAILED: {ex.Message}");
+                }
                 throw new InvalidOperationException($"Failed to decrypt existing chunk {chunkNumber} for update: {ex.Message}", ex);
             }
         }
@@ -418,29 +466,47 @@ namespace UvfLib.Vault.VaultHelpers
 
         private void EncryptAndWriteChunk(ReadOnlyMemory<byte> cleartextChunk)
         {
-            Console.WriteLine($"🔍 EncryptAndWriteChunk: chunkSize={cleartextChunk.Length}, _currentChunkNumber={_currentChunkNumber}");
+            // Check environment variable directly - works across AOT compilation boundary
+            bool isVerbose = Environment.GetEnvironmentVariable("UVF_DEBUG_VERBOSE") != "false";
+            
+            if (isVerbose)
+            {
+                Console.WriteLine($"🔍 EncryptAndWriteChunk: chunkSize={cleartextChunk.Length}, _currentChunkNumber={_currentChunkNumber}");
+            }
             
             // Only generate new nonce if we haven't preserved one from decryption
             // This happens for new chunks or when _perChunkNonce is all zeros
             bool hasPreservedNonce = !_perChunkNonce.All(b => b == 0);
-            Console.WriteLine($"🔍 hasPreservedNonce: {hasPreservedNonce}");
+            if (isVerbose)
+            {
+                Console.WriteLine($"🔍 hasPreservedNonce: {hasPreservedNonce}");
+            }
             
             if (!hasPreservedNonce)
         {
             _random.GetBytes(_perChunkNonce);
-                Console.WriteLine($"🔍 Generated NEW random nonce: {Convert.ToHexString(_perChunkNonce)}");
+                if (isVerbose)
+                {
+                    Console.WriteLine($"🔍 Generated NEW random nonce: {Convert.ToHexString(_perChunkNonce)}");
+                }
             }
             else
             {
-                Console.WriteLine($"🔍 Using PRESERVED nonce: {Convert.ToHexString(_perChunkNonce)}");
+                if (isVerbose)
+                {
+                    Console.WriteLine($"🔍 Using PRESERVED nonce: {Convert.ToHexString(_perChunkNonce)}");
+                }
             }
 
             BinaryPrimitives.WriteInt64BigEndian(_aadBuffer.AsSpan(0, 8), _currentChunkNumber);
-            Console.WriteLine($"🔍 AAD for encryption: {Convert.ToHexString(_aadBuffer)}");
-            
-            // Show first 20 bytes of content being encrypted
-            var preview = cleartextChunk.Span.Slice(0, Math.Min(20, cleartextChunk.Length));
-            Console.WriteLine($"🔍 Content being encrypted: '{Encoding.UTF8.GetString(preview)}'");
+            if (isVerbose)
+            {
+                Console.WriteLine($"🔍 AAD for encryption: {Convert.ToHexString(_aadBuffer)}");
+                
+                // Show first 20 bytes of content being encrypted
+                var preview = cleartextChunk.Span.Slice(0, Math.Min(20, cleartextChunk.Length));
+                Console.WriteLine($"🔍 Content being encrypted: '{Encoding.UTF8.GetString(preview)}'");
+            }
 
             // Handle both V3 and CryptomatorV8 implementations
             if (_cryptor.FileContentCryptor() is UvfLib.Core.V3.FileContentCryptorImpl v3Cryptor)
@@ -449,7 +515,10 @@ namespace UvfLib.Vault.VaultHelpers
                 int expectedEncryptedLength = UvfLib.Core.V3.Constants.GCM_NONCE_SIZE + cleartextChunk.Length + UvfLib.Core.V3.Constants.GCM_TAG_SIZE;
                 _ciphertextChunkBuffer.Slice(0, expectedEncryptedLength).Span.Clear();
                 
-                Console.WriteLine($"🔍 About to encrypt with V3 cryptor, expectedLength={expectedEncryptedLength}");
+                if (isVerbose)
+                {
+                    Console.WriteLine($"🔍 About to encrypt with V3 cryptor, expectedLength={expectedEncryptedLength}");
+                }
                 
                 v3Cryptor.EncryptChunk(
                     _fileContentAesGcm,
@@ -467,16 +536,25 @@ namespace UvfLib.Vault.VaultHelpers
                     throw new InvalidOperationException($"Encrypted length mismatch: expected {expectedEncryptedLength}, actual {actualEncryptedLength}");
                 }
                 
-                Console.WriteLine($"🔍 Encryption successful, writing {actualEncryptedLength} bytes to stream");
+                if (isVerbose)
+                {
+                    Console.WriteLine($"🔍 Encryption successful, writing {actualEncryptedLength} bytes to stream");
+                }
                 _outputStream.Write(_ciphertextChunkBuffer.Slice(0, actualEncryptedLength).Span);
                 
-                // Show the encrypted nonce that was written
-                var writtenNonce = _ciphertextChunkBuffer.Span.Slice(0, UvfLib.Core.V3.Constants.GCM_NONCE_SIZE);
-                Console.WriteLine($"🔍 Nonce written to file: {Convert.ToHexString(writtenNonce)}");
+                if (isVerbose)
+                {
+                    // Show the encrypted nonce that was written
+                    var writtenNonce = _ciphertextChunkBuffer.Span.Slice(0, UvfLib.Core.V3.Constants.GCM_NONCE_SIZE);
+                    Console.WriteLine($"🔍 Nonce written to file: {Convert.ToHexString(writtenNonce)}");
+                }
                 
                 // Clear preserved nonce after use
                 Array.Clear(_perChunkNonce, 0, _perChunkNonce.Length);
-                Console.WriteLine($"🔍 Cleared preserved nonce after encryption");
+                if (isVerbose)
+                {
+                    Console.WriteLine($"🔍 Cleared preserved nonce after encryption");
+                }
             }
             else if (_cryptor.FileContentCryptor() is Core.CryptomatorV8.FileContentCryptorImpl v8Cryptor)
             {

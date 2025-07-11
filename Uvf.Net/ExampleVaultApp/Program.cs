@@ -1,14 +1,13 @@
-﻿using ExampleVaultApp;
-using UvfLib.Master;
+﻿using UvfLib.Master;
 
 namespace ExampleVaultApp
 {
     public class Program
     {
         // Test paths for all operations
-        private const string SourceFolderPath = @"D:\temp\uvf\EncryptionTestSource";
-        private const string VaultFolderPath = @"D:\temp\uvf\EncryptionTestVault";
-        private const string DecryptedFolderPath = @"D:\temp\uvf\EncryptionTestDecrypted";
+        private const string SourceFolderPath = @"D:\temp\uvf-demo\source";
+        private const string VaultFolderPath = @"D:\temp\uvf-demo\vault";
+        private const string DecryptedFolderPath = @"D:\temp\uvf-demo\decrypted";
         private const string BackupFolderPath = @"D:\temp\uvf\VaultBackup";
         private const string Password = "your-super-secret-password";
 
@@ -23,7 +22,7 @@ namespace ExampleVaultApp
         public static async Task Main(string[] args)
         {
             Console.WriteLine("ExampleVaultApp - Testing UvfLib.Master Implementation");
-            
+
             if (args.Length == 0)
             {
                 ShowUsage();
@@ -34,6 +33,10 @@ namespace ExampleVaultApp
             var vaultFormat = ParseVaultFormat(args);
             var encryptFilenames = ParseEncryptFilenames(args);
             var keyDerivationParams = ParseKeyDerivation(args);
+            var isQuietMode = ParseQuietMode(args);
+
+            // Set debug mode based on quiet flag
+            SetDebugMode(!isQuietMode);
 
             try
             {
@@ -163,6 +166,9 @@ namespace ExampleVaultApp
             Console.WriteLine("  --keyderivation=pbkdf2    : Use PBKDF2-HMAC-SHA512 with 64,000 iterations (default)");
             Console.WriteLine("  --keyderivation=scrypt    : Use Scrypt with N=32768, r=8, p=1 (enhanced security)");
             Console.WriteLine();
+            Console.WriteLine("Output Options:");
+            Console.WriteLine("  --quiet, -q       : Suppress encryption debug output");
+            Console.WriteLine();
             Console.WriteLine("Examples:");
             Console.WriteLine("  ExampleVaultApp simpletest --cryptomator");
             Console.WriteLine("  ExampleVaultApp directtest --uvf");
@@ -174,6 +180,8 @@ namespace ExampleVaultApp
             Console.WriteLine("  ExampleVaultApp backuptest");
             Console.WriteLine("  ExampleVaultApp cstyle --uvf");
             Console.WriteLine("  ExampleVaultApp cstyle --cryptomator");
+            Console.WriteLine("  ExampleVaultApp simpletest --uvf --quiet");
+            Console.WriteLine("  ExampleVaultApp simpletest --uvf -q");
 
             Console.WriteLine();
             Console.WriteLine("Notes:");
@@ -182,16 +190,17 @@ namespace ExampleVaultApp
             Console.WriteLine("  - PBKDF2 key derivation is used by default for backward compatibility");
             Console.WriteLine("  - --encryptfilenames and --keyderivation options only apply to UVF format");
             Console.WriteLine("  - Scrypt provides enhanced security but may be slower than PBKDF2");
+            Console.WriteLine("  - Use --quiet to suppress verbose encryption debug output");
         }
 
         private static VaultFormat ParseVaultFormat(string[] args)
         {
             if (args.Contains("--cryptomator"))
                 return VaultFormat.Cryptomator;
-            
+
             if (args.Contains("--uvf"))
                 return VaultFormat.UVF;
-            
+
             // Default to UVF (the future format)
             return VaultFormat.UVF;
         }
@@ -205,7 +214,7 @@ namespace ExampleVaultApp
                 var value = encryptFilenamesArg.Split('=')[1].ToLowerInvariant();
                 return value == "true";
             }
-            
+
             // Default to true (encrypted filenames like Cryptomator)
             return true;
         }
@@ -228,9 +237,20 @@ namespace ExampleVaultApp
                         return VaultManager.KeyDerivationParameters.Default();
                 }
             }
-            
+
             // Default to PBKDF2 for backward compatibility
             return VaultManager.KeyDerivationParameters.Default();
+        }
+
+        private static bool ParseQuietMode(string[] args)
+        {
+            return args.Contains("--quiet") || args.Contains("-q");
+        }
+
+        private static void SetDebugMode(bool enableDebug)
+        {
+            // Set environment variable to control debug output
+            Environment.SetEnvironmentVariable("UVF_DEBUG_VERBOSE", enableDebug ? "true" : "false");
         }
 
         #region Command Implementations
@@ -243,23 +263,23 @@ namespace ExampleVaultApp
                 Console.WriteLine($"🔧 UVF Filename Encryption: {(encryptFilenames ? "Enabled" : "Disabled")}");
                 Console.WriteLine($"🔧 UVF Key Derivation: {keyDerivationParams.Method} {GetKeyDerivationDetails(keyDerivationParams)}");
             }
-            
+
             switch (format)
             {
                 case VaultFormat.Cryptomator:
                     var cryptomatorTest = new SimpleCryptomatorTest(
-                        SourceFolderPath, 
-                        VaultFolderPath, 
-                        DecryptedFolderPath, 
+                        SourceFolderPath,
+                        VaultFolderPath,
+                        DecryptedFolderPath,
                         Password);
                     await cryptomatorTest.RunTestAsync();
                     break;
 
                 case VaultFormat.UVF:
                     var uvfTest = new SimpleUvfTest(
-                        SourceFolderPath, 
-                        VaultFolderPath, 
-                        DecryptedFolderPath, 
+                        SourceFolderPath,
+                        VaultFolderPath,
+                        DecryptedFolderPath,
                         Password,
                         encryptFilenames,
                         keyDerivationParams);
@@ -279,7 +299,7 @@ namespace ExampleVaultApp
                 Console.WriteLine($"🔧 UVF Filename Encryption: {(encryptFilenames ? "Enabled" : "Disabled")}");
                 Console.WriteLine($"🔧 UVF Key Derivation: {keyDerivationParams.Method} {GetKeyDerivationDetails(keyDerivationParams)}");
             }
-            
+
             // Temporarily disabled - test classes excluded from build
             Console.WriteLine("⚠️ Direct tests temporarily disabled - test classes need password API updates");
             /*
@@ -331,7 +351,7 @@ namespace ExampleVaultApp
             {
                 Console.WriteLine($"🔧 UVF Filename Encryption: {(encryptFilenames ? "Enabled" : "Disabled")}");
             }
-            
+
             // Temporarily disabled - test classes excluded from build
             Console.WriteLine("⚠️ Password change tests temporarily disabled - test classes need password API updates");
             /*
@@ -358,7 +378,7 @@ namespace ExampleVaultApp
             Console.WriteLine($"🔧 Running Debug Password Change Test for UVF format...");
             Console.WriteLine($"🔧 UVF Filename Encryption: {(encryptFilenames ? "Enabled" : "Disabled")}");
             Console.WriteLine("🔧 This test allows step-by-step debugging of the ReadAllBytes issue");
-            
+
             var uvfTest = new ChangePwUvfTest(encryptFilenames);
             await uvfTest.RunPasswordChangeTestAsync();
         }
@@ -368,7 +388,7 @@ namespace ExampleVaultApp
             Console.WriteLine("🧪 Running Multiple Password Change Scenarios to Find AES Key Wrap Error...");
             Console.WriteLine($"🔧 UVF Filename Encryption: {(encryptFilenames ? "Enabled" : "Disabled")}");
             Console.WriteLine("🔧 This test tries different scenarios to reproduce the error");
-            
+
             var test = new ChangePwUvfTest(encryptFilenames);
             await test.RunMultiplePasswordChangeScenarios();
         }
@@ -378,7 +398,7 @@ namespace ExampleVaultApp
             Console.WriteLine("🔐 Running Key Unwrapping Tests to Find AES Key Wrap Error...");
             Console.WriteLine($"🔧 UVF Filename Encryption: {(encryptFilenames ? "Enabled" : "Disabled")}");
             Console.WriteLine("🔧 This test specifically targets key unwrapping scenarios");
-            
+
             var test = new ChangePwUvfTest(encryptFilenames);
             await test.TestKeyUnwrappingScenarios();
         }
@@ -389,7 +409,7 @@ namespace ExampleVaultApp
             Console.WriteLine($"🔧 UVF Filename Encryption: {(encryptFilenames ? "Enabled" : "Disabled")}");
             Console.WriteLine("🔧 This test uses TitanVaultNativeMethods directly to reproduce ReadAllBytes issues");
             Console.WriteLine("🔧 You can set breakpoints in TitanVaultNativeMethods.ReadFile to debug line by line");
-            
+
             var test = new ChangePwUvfTest(encryptFilenames);
             await test.RunNativeStylePasswordChangeTestAsync();
         }
@@ -397,7 +417,7 @@ namespace ExampleVaultApp
         private static async Task RunBackupTestAsync(VaultFormat format)
         {
             Console.WriteLine($"🔧 Running Backup Test with {format} format...");
-            
+
             switch (format)
             {
                 case VaultFormat.Cryptomator:
@@ -413,7 +433,7 @@ namespace ExampleVaultApp
                 default:
                     throw new ArgumentException($"Unsupported vault format: {format}");
             }
-            
+
             Console.WriteLine("\n✅ Backup test completed successfully!");
         }
 
@@ -450,7 +470,7 @@ namespace ExampleVaultApp
                 // Verify the backup by checking file existence and format detection
                 var detectedFormat = VaultManager.DetectVaultFormat(backupPath);
                 Console.WriteLine($"🔍 Backup format correctly detected as: {detectedFormat}");
-                
+
                 // Test backup can be used to restore access
                 Console.WriteLine("🔄 Testing backup integrity by loading from backup location...");
                 using (var restoredVault = await VaultManager.LoadCryptomatorVaultAsync(backupPath, GetPasswordAsCharArray()))
@@ -503,7 +523,7 @@ namespace ExampleVaultApp
                 // Verify the backup by checking file existence and format detection
                 var detectedFormat = VaultManager.DetectVaultFormat(backupPath);
                 Console.WriteLine($"🔍 Backup format correctly detected as: {detectedFormat}");
-                
+
                 // Test backup can be used to restore access
                 Console.WriteLine("🔄 Testing backup integrity by loading from backup location...");
                 using (var restoredVault = await VaultManager.LoadUvfVaultAsync(backupPath, GetPasswordAsCharArray()))
@@ -556,28 +576,28 @@ namespace ExampleVaultApp
         private static async Task TestCStyleWrapper(VaultFormat vaultFormat)
         {
             Console.WriteLine($"🧪 Testing C-Style Wrapper Functionality for {vaultFormat} format...");
-            
+
             switch (vaultFormat)
             {
                 case VaultFormat.UVF:
                     Console.WriteLine("\n=== UVF C-Style Wrapper Test ===");
-                    
+
                     var uvfCStyleTest = new SimpleUvfTestCStyle(
-                        SourceFolderPath, 
-                        VaultFolderPath, 
-                        DecryptedFolderPath, 
-                        Password, 
+                        SourceFolderPath,
+                        VaultFolderPath,
+                        DecryptedFolderPath,
+                        Password,
                         true);
                     await uvfCStyleTest.RunTestAsync();
                     break;
 
                 case VaultFormat.Cryptomator:
                     Console.WriteLine("\n=== Cryptomator C-Style Wrapper Test ===");
-                    
+
                     var cryptomatorCStyleTest = new CryptomatorTestCStyle(
-                        SourceFolderPath, 
-                        VaultFolderPath, 
-                        DecryptedFolderPath, 
+                        SourceFolderPath,
+                        VaultFolderPath,
+                        DecryptedFolderPath,
                         Password);
                     await cryptomatorCStyleTest.RunTestAsync();
                     break;
@@ -585,7 +605,7 @@ namespace ExampleVaultApp
                 default:
                     throw new ArgumentException($"Unsupported vault format for C-style testing: {vaultFormat}");
             }
-            
+
             Console.WriteLine($"\n✅ C-Style wrapper test for {vaultFormat} completed successfully!");
         }
 

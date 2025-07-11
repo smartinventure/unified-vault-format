@@ -6,7 +6,7 @@
     },
     "UvfDemo": {
       "commandName": "Project",
-      "commandLineArgs": "uvf"
+      "commandLineArgs": "uvf --quiet --rebuild"
     },
     "CryptomatorDemo": {
       "commandName": "Project",
@@ -14,7 +14,7 @@
     },
     "UvfMultiuser": {
       "commandName": "Project",
-      "commandLineArgs": "multiuser"
+      "commandLineArgs": "multiuser --uvf   --encryptfilenames=true"
     },
     "password": {
       "commandName": "Project",

@@ -1,5 +1,6 @@
 using System.Text;
 using System.Runtime.InteropServices;
+using System.Reflection;
 
 namespace DemoApp.Wrapper
 {
@@ -15,6 +16,22 @@ namespace DemoApp.Wrapper
         private TitanVault(IntPtr handle)
         {
             _vaultHandle = handle;
+        }
+
+        /// <summary>
+        /// Set debug verbosity for encryption streams (reduces console spam)
+        /// </summary>
+        public static void SetVerboseDebug(bool enabled)
+        {
+            // Set environment variable that works across AOT compilation boundary
+            Environment.SetEnvironmentVariable("UVF_DEBUG_VERBOSE", enabled ? "true" : "false");
+            
+            if (!enabled)
+            {
+                Console.WriteLine("🔇 Quiet mode enabled - reduced debug output");
+            }
+            
+            Console.WriteLine($"🔧 Set UVF_DEBUG_VERBOSE = {(enabled ? "true" : "false")}");
         }
 
         #region Factory Methods

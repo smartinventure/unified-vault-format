@@ -26,7 +26,7 @@ namespace UvfLib.Master.Decorators
         public UvfStorageDecorator(
             IStorage underlyingStorage, 
             VaultHandler vault, 
-            bool encryptFilenames = false,  // TODO: Implement full encrypted path translation, using simple mode for now
+            bool encryptFilenames = true,  // UVF encrypts filenames by default for security
             string? vaultBasePath = null,
             ILogger? logger = null)
             : base(underlyingStorage, vault, 
