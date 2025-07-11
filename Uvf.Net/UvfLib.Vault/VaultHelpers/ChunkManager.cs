@@ -239,45 +239,17 @@ namespace UvfLib.Vault.VaultHelpers
 
         private byte[] EncryptChunkData(ChunkBuffer chunk)
         {
-            // Generate a fresh random nonce (CRITICAL: never reuse nonces)
-            var nonce = new byte[12];
-            using (var rng = System.Security.Cryptography.RandomNumberGenerator.Create())
-            {
-                rng.GetBytes(nonce);
-            }
-
-            // Construct AAD: [ChunkNumber] + [HeaderNonce]
-            var aad = new byte[8 + _headerNonce.Length];
-            System.Buffers.Binary.BinaryPrimitives.WriteInt64BigEndian(aad.AsSpan(0, 8), chunk.ChunkNumber);
-            _headerNonce.CopyTo(aad.AsSpan(8));
-
             // Get the data to encrypt
             var plaintextData = chunk.GetValidData();
 
-            // Use the existing EncryptingStream approach through a temporary stream
-            // This ensures compatibility with the existing encryption infrastructure
-            using var tempStream = new MemoryStream();
-            using var encryptingStream = new EncryptingStream(_cryptor, tempStream, true);
+            // Use FileContentCryptor to encrypt the chunk directly with the correct chunk number
+            var encryptedChunk = _cryptor.FileContentCryptor().EncryptChunk(
+                plaintextData, 
+                chunk.ChunkNumber, 
+                _fileHeader
+            );
             
-            // Write the chunk data to the encrypting stream
-            encryptingStream.Write(plaintextData.Span);
-            encryptingStream.Flush();
-            
-            // Get the encrypted data (skip the header)
-            var encryptedData = tempStream.ToArray();
-            
-            // The encrypted data includes the header, but we only want the chunk data
-            // Skip the header and return just the encrypted chunk
-            var headerSize = GetHeaderSize();
-            if (encryptedData.Length > headerSize)
-            {
-                var chunkData = new byte[encryptedData.Length - headerSize];
-                Array.Copy(encryptedData, headerSize, chunkData, 0, chunkData.Length);
-                return chunkData;
-            }
-            
-            // Fallback: return the raw encrypted data
-            return encryptedData;
+            return encryptedChunk.ToArray();
         }
 
         private int GetHeaderSize()

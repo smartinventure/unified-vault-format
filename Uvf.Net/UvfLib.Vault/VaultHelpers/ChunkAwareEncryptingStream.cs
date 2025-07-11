@@ -12,19 +12,30 @@ namespace UvfLib.Vault.VaultHelpers
     {
         private readonly ChunkManager _chunkManager;
         private readonly Stream _underlyingStream;
+        private readonly ICryptor _cryptor;
+        private readonly FileHeader _fileHeader;
         private readonly bool _leaveOpen;
         
         private long _virtualPosition = 0;
         private long _virtualLength = 0;
         private bool _disposed = false;
+        private bool _headerWritten = false;
 
         public ChunkAwareEncryptingStream(Stream underlyingStream, ICryptor cryptor, FileHeader fileHeader, bool leaveOpen = false)
         {
             _underlyingStream = underlyingStream ?? throw new ArgumentNullException(nameof(underlyingStream));
+            _cryptor = cryptor ?? throw new ArgumentNullException(nameof(cryptor));
+            _fileHeader = fileHeader ?? throw new ArgumentNullException(nameof(fileHeader));
             _leaveOpen = leaveOpen;
             
             if (!_underlyingStream.CanWrite)
                 throw new ArgumentException("Underlying stream must be writable.", nameof(underlyingStream));
+            
+            // Check if header already exists (for existing files)
+            if (_underlyingStream.CanSeek && _underlyingStream.Length > 0)
+            {
+                _headerWritten = true;
+            }
             
             _chunkManager = new ChunkManager(_underlyingStream, cryptor, fileHeader, leaveOpen: true);
             
@@ -68,6 +79,17 @@ namespace UvfLib.Vault.VaultHelpers
             return virtualLength;
         }
 
+        private void EnsureHeaderWritten()
+        {
+            if (!_headerWritten)
+            {
+                Memory<byte> encryptedHeaderMemory = _cryptor.FileHeaderCryptor().EncryptHeader(_fileHeader);
+                byte[] encryptedHeaderBytes = encryptedHeaderMemory.ToArray();
+                _underlyingStream.Write(encryptedHeaderBytes, 0, encryptedHeaderBytes.Length);
+                _headerWritten = true;
+            }
+        }
+
         public override void Write(byte[] buffer, int offset, int count)
         {
             CheckDisposed();
@@ -76,6 +98,9 @@ namespace UvfLib.Vault.VaultHelpers
             if (offset < 0) throw new ArgumentOutOfRangeException(nameof(offset));
             if (count < 0) throw new ArgumentOutOfRangeException(nameof(count));
             if (buffer.Length - offset < count) throw new ArgumentException("Invalid offset/count combination.");
+
+            // Ensure header is written before any data
+            EnsureHeaderWritten();
 
             // Use ChunkManager to handle the write across potentially multiple chunks
             _chunkManager.WriteAt(_virtualPosition, buffer, offset, count);
@@ -91,6 +116,9 @@ namespace UvfLib.Vault.VaultHelpers
         public override void Flush()
         {
             CheckDisposed();
+            
+            // Ensure header is written before flushing
+            EnsureHeaderWritten();
             
             // Flush all dirty chunks to disk
             _chunkManager.FlushAll();
