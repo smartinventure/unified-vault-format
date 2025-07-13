@@ -63,4 +63,17 @@
     <Message Text="🎯 DemoApp is now ready to use the native AOT library!" Importance="high" />
   </Target>
 
+  <!-- Auto-trigger AOT compilation after Release builds -->
+  <Target Name="AutoAotBuild" AfterTargets="Build" Condition="'$(Configuration)' == 'Release' AND '$(AutoAot)' == 'true'">
+    <Message Text="🚀 Auto-triggering AOT compilation for Release build..." Importance="high" />
+    
+    <PropertyGroup>
+      <AotOutput>$(OutputPath)publish\</AotOutput>
+    </PropertyGroup>
+    
+    <Exec Command="dotnet publish $(MSBuildProjectFile) -c $(Configuration) -r win-x64 --self-contained true -p:PublishAot=true -o $(AotOutput)" 
+          ContinueOnError="false" />
+    
+    <Message Text="✅ Auto-AOT compilation completed" Importance="high" />
+  </Target>
 </Project>

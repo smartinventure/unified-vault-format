@@ -56,8 +56,6 @@ namespace UvfLib.Vault.VaultHelpers
         // Virtual position tracking for random access support
         private long _virtualPosition = 0;  // Position in the virtual (unencrypted) stream
         private long _virtualLength = 0;    // Length of the virtual (unencrypted) stream
-        private bool _seekPending = false;  // Whether we need to handle a seek before next write
-        private long _pendingSeekPosition = 0; // The position we need to seek to
 
         // Chunk calculation constants (same as DecryptingStream)
         private const int CIPHERTEXT_CHUNK_SIZE = 12 + 32 * 1024 + 16; // nonce + payload + tag
@@ -161,11 +159,10 @@ namespace UvfLib.Vault.VaultHelpers
         {
             CheckDisposed();
             
-            // Handle pending seek before writing
-            if (_seekPending)
-            {
-                HandlePendingSeek();
-            }
+            if (buffer == null) throw new ArgumentNullException(nameof(buffer));
+            if (offset < 0) throw new ArgumentOutOfRangeException(nameof(offset));
+            if (count < 0) throw new ArgumentOutOfRangeException(nameof(count));
+            if (buffer.Length - offset < count) throw new ArgumentException("Invalid offset/count combination.");
 
             EnsureHeaderWritten();
 
@@ -200,161 +197,8 @@ namespace UvfLib.Vault.VaultHelpers
             }
         }
 
-        private void HandlePendingSeek()
-        {            
-            if (Environment.GetEnvironmentVariable("UVF_DEBUG_VERBOSE") != "false")
-            {
-                Console.WriteLine($"🔍 HandlePendingSeek: _pendingSeekPosition={_pendingSeekPosition}, _currentChunkNumber={_currentChunkNumber}, _bufferPosition={_bufferPosition}");
-            }
-            
-            _seekPending = false;
-            
-            // Calculate which chunk contains the target position
-            long targetChunk = GetChunkNumber(_pendingSeekPosition);
-            int offsetInChunk = GetOffsetInChunk(_pendingSeekPosition);
 
-            if (Environment.GetEnvironmentVariable("UVF_DEBUG_VERBOSE") != "false")
-            {
-                Console.WriteLine($"🔍 HandlePendingSeek: targetChunk={targetChunk}, offsetInChunk={offsetInChunk}");
-                Console.WriteLine($"🔍 HandlePendingSeek: Moving from chunk {_currentChunkNumber} to chunk {targetChunk}");
-            }
 
-            // IMPROVED STRATEGY: Keep current chunk in memory until we move to a different chunk
-            // This solves the random write issue by ensuring each chunk is only encrypted once
-            
-            // Only flush if we're moving to a DIFFERENT chunk
-            if (_bufferPosition > 0 && targetChunk != _currentChunkNumber)
-            {
-                if (Environment.GetEnvironmentVariable("UVF_DEBUG_VERBOSE") != "false")
-                {
-                    Console.WriteLine($"🔍 HandlePendingSeek: Moving to different chunk - flushing current chunk {_currentChunkNumber} with {_bufferPosition} bytes");
-                }
-                
-                // We're moving to a different chunk - flush the current chunk
-                long correctChunkPosition = GetEncryptedChunkStartPosition(_currentChunkNumber);
-                if (_outputStream.CanSeek)
-                {
-                    if (Environment.GetEnvironmentVariable("UVF_DEBUG_VERBOSE") != "false")
-                    {
-                        Console.WriteLine($"🔍 HandlePendingSeek: Positioning stream to {correctChunkPosition} for chunk {_currentChunkNumber}");
-                    }
-                    _outputStream.Position = correctChunkPosition;
-                }
-                
-                EncryptAndWriteChunk(_cleartextChunkBuffer.AsMemory(0, _bufferPosition));
-                _bufferPosition = 0;
-                
-                // Clear the chunk buffer for the new chunk
-                Array.Clear(_cleartextChunkBuffer, 0, _cleartextChunkBuffer.Length);
-                if (Environment.GetEnvironmentVariable("UVF_DEBUG_VERBOSE") != "false")
-                {
-                    Console.WriteLine($"🔍 HandlePendingSeek: Flushed and cleared buffer for new chunk");
-                }
-            }
-            else if (targetChunk == _currentChunkNumber)
-            {
-                if (Environment.GetEnvironmentVariable("UVF_DEBUG_VERBOSE") != "false")
-                {
-                    Console.WriteLine($"🔍 HandlePendingSeek: Staying in same chunk {_currentChunkNumber} - keeping buffer in memory");
-                }
-            }
-
-            // If we're moving to a different chunk that contains existing data, read it first
-            if (targetChunk != _currentChunkNumber && _pendingSeekPosition < _virtualLength)
-            {
-                if (Environment.GetEnvironmentVariable("UVF_DEBUG_VERBOSE") != "false")
-                {
-                    Console.WriteLine($"🔍 HandlePendingSeek: Moving to different chunk {targetChunk} with existing data - reading chunk");
-                }
-                // We need to read the existing chunk data into our buffer
-                ReadAndPrepareChunkForUpdate(targetChunk, offsetInChunk);
-            }
-            else
-            {
-                if (Environment.GetEnvironmentVariable("UVF_DEBUG_VERBOSE") != "false")
-                {
-                    Console.WriteLine($"🔍 HandlePendingSeek: Simple position update - no chunk read needed");
-                }
-                // Same chunk or new data - just update our position tracking
-                _currentChunkNumber = targetChunk;
-                _bufferPosition = offsetInChunk;
-                
-                // If we're starting a completely new chunk beyond current data, clear buffer
-                if (targetChunk != GetChunkNumber(_virtualPosition) && _pendingSeekPosition >= _virtualLength)
-                {
-                    Array.Clear(_cleartextChunkBuffer, 0, _cleartextChunkBuffer.Length);
-                    if (Environment.GetEnvironmentVariable("UVF_DEBUG_VERBOSE") != "false")
-                    {
-                        Console.WriteLine($"🔍 HandlePendingSeek: Cleared buffer for new chunk beyond current data");
-                    }
-                }
-            }
-
-            _virtualPosition = _pendingSeekPosition;
-            if (Environment.GetEnvironmentVariable("UVF_DEBUG_VERBOSE") != "false")
-            {
-                Console.WriteLine($"🔍 HandlePendingSeek: Updated _virtualPosition to {_virtualPosition}");
-            }
-        }
-
-        private void ReadAndPrepareChunkForUpdate(long chunkNumber, int offsetInChunk)
-        {
-            // Calculate the encrypted position of this chunk
-            long encryptedChunkPosition = GetEncryptedChunkStartPosition(chunkNumber);
-            
-            // Check if the stream is long enough to contain this chunk
-            if (_outputStream.CanSeek && _outputStream.Length > encryptedChunkPosition)
-            {
-                // Seek to the encrypted chunk position
-                _outputStream.Position = encryptedChunkPosition;
-                
-                // Calculate the maximum possible bytes to read for this chunk
-                long remainingStreamBytes = _outputStream.Length - encryptedChunkPosition;
-                int maxBytesToRead = (int)Math.Min(CIPHERTEXT_CHUNK_SIZE, remainingStreamBytes);
-                
-                // Only proceed if we have at least the minimum required bytes (nonce + tag)
-                int minRequiredBytes = UvfLib.Core.V3.Constants.GCM_NONCE_SIZE + UvfLib.Core.V3.Constants.GCM_TAG_SIZE;
-                if (maxBytesToRead >= minRequiredBytes)
-                {
-                    // Read the existing encrypted chunk
-                    byte[] encryptedChunkData = new byte[maxBytesToRead];
-                    int bytesRead = _outputStream.Read(encryptedChunkData, 0, maxBytesToRead);
-                    
-                    if (bytesRead >= minRequiredBytes)
-                    {
-                        try
-                        {
-                            // Decrypt the existing chunk with the actual bytes read
-                            DecryptChunkForUpdate(encryptedChunkData, bytesRead, chunkNumber);
-                        }
-                        catch (Exception ex)
-                        {
-                            // If decryption fails (e.g., corrupted data, wrong position), initialize with zeros
-                            Console.WriteLine($"Warning: Failed to decrypt existing chunk {chunkNumber}, initializing with zeros: {ex.Message}");
-                            Array.Clear(_cleartextChunkBuffer, 0, _cleartextChunkBuffer.Length);
-                        }
-                    }
-                    else
-                    {
-                        // Not enough data read - initialize with zeros
-                        Array.Clear(_cleartextChunkBuffer, 0, _cleartextChunkBuffer.Length);
-                    }
-                }
-                else
-                {
-                    // Not enough bytes available - initialize with zeros
-                    Array.Clear(_cleartextChunkBuffer, 0, _cleartextChunkBuffer.Length);
-                }
-            }
-            else
-            {
-                // Stream is not long enough or doesn't support seeking - initialize with zeros
-                Array.Clear(_cleartextChunkBuffer, 0, _cleartextChunkBuffer.Length);
-            }
-            
-            _currentChunkNumber = chunkNumber;
-            _bufferPosition = offsetInChunk;
-        }
 
         private void DecryptChunkForUpdate(byte[] encryptedData, int encryptedLength, long chunkNumber)
         {
@@ -604,12 +448,6 @@ namespace UvfLib.Vault.VaultHelpers
         public override void Flush()
         {
             CheckDisposed();
-            
-            // Handle pending seek before flushing
-            if (_seekPending)
-            {
-                HandlePendingSeek();
-            }
 
             EnsureHeaderWritten(); // Ensure header is written even if no data follows
 
@@ -681,79 +519,26 @@ namespace UvfLib.Vault.VaultHelpers
         // --- Stream abstract members implementation ---
 
         public override bool CanRead => false;
-        public override bool CanSeek => _outputStream.CanSeek;
+        public override bool CanSeek => false;  // Sequential encryption stream does not support seeking - use chunk-aware stream instead
         public override bool CanWrite => true;
 
         public override long Length => _virtualLength;
         public override long Position
         {
             get => _virtualPosition;
-            set => Seek(value, SeekOrigin.Begin);
+            set => throw new NotSupportedException("Sequential EncryptingStream does not support seeking. Use OpenWriteAsync with requestRandomWrite=true for random write support.");
         }
 
         public override int Read(byte[] buffer, int offset, int count) => throw new NotSupportedException("EncryptingStream does not support reading.");
         
         public override long Seek(long offset, SeekOrigin origin)
         {
-            CheckDisposed();
-            if (!_outputStream.CanSeek)
-                throw new NotSupportedException("EncryptingStream seek requires underlying stream to support seeking.");
-
-            // Calculate the target position
-            long targetPosition;
-            switch (origin)
-            {
-                case SeekOrigin.Begin:
-                    targetPosition = offset;
-                    break;
-                case SeekOrigin.Current:
-                    targetPosition = _virtualPosition + offset;
-                    break;
-                case SeekOrigin.End:
-                    targetPosition = _virtualLength + offset;
-                    break;
-                default:
-                    throw new ArgumentException("Invalid seek origin", nameof(origin));
-            }
-
-            if (targetPosition < 0)
-                throw new IOException("Cannot seek before the beginning of the stream.");
-
-            // Set up pending seek - actual seek will be handled before next write
-            _pendingSeekPosition = targetPosition;
-            _seekPending = true;
-
-            return targetPosition;
+            throw new NotSupportedException("Sequential EncryptingStream does not support seeking. Use OpenWriteAsync with requestRandomWrite=true for random write support.");
         }
         
         public override void SetLength(long value)
         {
-            CheckDisposed();
-            if (!_outputStream.CanSeek)
-                throw new NotSupportedException("EncryptingStream SetLength requires underlying stream to support seeking.");
-            
-            if (value < 0)
-                throw new ArgumentOutOfRangeException(nameof(value), "Length cannot be negative.");
-
-            // Handle pending seek first
-            if (_seekPending)
-            {
-                HandlePendingSeek();
-            }
-
-            // Flush any pending data
-            if (_bufferPosition > 0)
-            {
-                Flush();
-            }
-            
-            _virtualLength = value;
-            
-            // Calculate the encrypted file size needed for this virtual length
-            long chunksNeeded = (value + CLEARTEXT_CHUNK_SIZE - 1) / CLEARTEXT_CHUNK_SIZE; // Ceiling division
-            long encryptedSize = _headerSize + (chunksNeeded * CIPHERTEXT_CHUNK_SIZE);
-            
-            _outputStream.SetLength(encryptedSize);
+            throw new NotSupportedException("Sequential EncryptingStream does not support SetLength. Use OpenWriteAsync with requestRandomWrite=true for random write support.");
         }
     }
 }

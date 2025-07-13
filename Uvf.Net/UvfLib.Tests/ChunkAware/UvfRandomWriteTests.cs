@@ -54,7 +54,7 @@ namespace UvfLib.Tests.ChunkAware
             
             // Write the 100KB file
             using (var fileStream = new FileStream(testFilePath, FileMode.Create, FileAccess.Write))
-            using (var encryptingStream = vault.GetChunkAwareEncryptingStream(fileStream))
+            using (var encryptingStream = vault.GetRandomWriteEncryptingStream(fileStream))
             {
                 await encryptingStream.WriteAsync(testData, 0, testData.Length);
                 await encryptingStream.FlushAsync();
@@ -98,7 +98,7 @@ namespace UvfLib.Tests.ChunkAware
 
             // Act: Create file and perform random writes within same chunk
             using (var fileStream = new FileStream(testFilePath, FileMode.Create, FileAccess.ReadWrite))
-            using (var stream = vault.GetChunkAwareEncryptingStream(fileStream))
+            using (var stream = vault.GetRandomWriteEncryptingStream(fileStream))
             {
                 // Write initial data
                 await stream.WriteAsync(initialData, 0, initialData.Length);
@@ -140,7 +140,7 @@ namespace UvfLib.Tests.ChunkAware
 
             // Act: Write data that crosses chunk boundary
             using (var fileStream = new FileStream(testFilePath, FileMode.Create, FileAccess.ReadWrite))
-            using (var stream = vault.GetChunkAwareEncryptingStream(fileStream))
+            using (var stream = vault.GetRandomWriteEncryptingStream(fileStream))
             {
                 // Write initial data
                 await stream.WriteAsync(initialData, 0, initialData.Length);
@@ -188,7 +188,7 @@ namespace UvfLib.Tests.ChunkAware
 
             // Act: Write data across three chunks
             using (var fileStream = new FileStream(testFilePath, FileMode.Create, FileAccess.ReadWrite))
-            using (var stream = vault.GetChunkAwareEncryptingStream(fileStream))
+            using (var stream = vault.GetRandomWriteEncryptingStream(fileStream))
             {
                 // Write initial data
                 await stream.WriteAsync(initialData, 0, initialData.Length);
@@ -236,7 +236,7 @@ namespace UvfLib.Tests.ChunkAware
 
             // Act: Perform multiple random writes to same chunk
             using (var fileStream = new FileStream(testFilePath, FileMode.Create, FileAccess.ReadWrite))
-            using (var stream = vault.GetChunkAwareEncryptingStream(fileStream))
+            using (var stream = vault.GetRandomWriteEncryptingStream(fileStream))
             {
                 // Write initial data
                 await stream.WriteAsync(initialData, 0, initialData.Length);
@@ -284,7 +284,7 @@ namespace UvfLib.Tests.ChunkAware
 
             // Act & Assert: Test seeking functionality
             using var fileStream = new FileStream(testFilePath, FileMode.Create, FileAccess.ReadWrite);
-            using var stream = vault.GetChunkAwareEncryptingStream(fileStream);
+            using var stream = vault.GetRandomWriteEncryptingStream(fileStream);
             
             // Test initial position
             Assert.AreEqual(0, stream.Position, "Initial position should be 0");

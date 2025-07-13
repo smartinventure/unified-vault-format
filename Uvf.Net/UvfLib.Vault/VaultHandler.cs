@@ -1448,7 +1448,7 @@ namespace UvfLib.Vault
         /// <exception cref="ArgumentNullException">If outputStream is null.</exception>
         /// <exception cref="ArgumentException">If outputStream is not writable.</exception>
         /// <exception cref="InvalidOperationException">If the vault is not initialized correctly.</exception>
-        public Stream GetChunkAwareEncryptingStream(Stream outputStream, FileHeader? existingHeader = null, bool leaveOpen = false)
+        public Stream GetRandomWriteEncryptingStream(Stream outputStream, FileHeader? existingHeader = null, bool leaveOpen = false)
         {
             if (_disposed) throw new ObjectDisposedException(nameof(VaultHandler));
             if (outputStream == null) throw new ArgumentNullException(nameof(outputStream));
@@ -1497,7 +1497,7 @@ namespace UvfLib.Vault
                 fileHeader = _cryptor.FileHeaderCryptor().Create();
             }
 
-            return new VaultHelpers.ChunkAwareEncryptingStream(outputStream, (ICryptor)_cryptor, fileHeader, leaveOpen);
+            return new VaultHelpers.RandomWriteEncryptingStream(outputStream, (ICryptor)_cryptor, fileHeader, leaveOpen);
         }
 
     }

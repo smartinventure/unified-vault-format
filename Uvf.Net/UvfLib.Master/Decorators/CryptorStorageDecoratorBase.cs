@@ -325,6 +325,18 @@ namespace UvfLib.Master.Decorators
         /// </summary>
         public virtual async Task<Stream> OpenWriteAsync(string virtualPath, CancellationToken cancellationToken = default)
         {
+            // Default to regular sequential encryption (better performance)
+            return await OpenWriteAsync(virtualPath, requestRandomWrite: false, cancellationToken);
+        }
+
+        /// <summary>
+        /// Opens a file for writing as a Stream with choice of encryption mode
+        /// </summary>
+        /// <param name="virtualPath">Virtual path to the file</param>
+        /// <param name="requestRandomWrite">If true, uses chunk-aware encryption for random write support (higher overhead). If false, uses regular sequential encryption (better performance)</param>
+        /// <param name="cancellationToken">Cancellation token</param>
+        public virtual async Task<Stream> OpenWriteAsync(string virtualPath, bool requestRandomWrite = false, CancellationToken cancellationToken = default)
+        {
             if (_disposed) throw new ObjectDisposedException(nameof(CryptorStorageDecoratorBase));
             
             try
@@ -362,16 +374,20 @@ namespace UvfLib.Master.Decorators
                 // 5. Get underlying stream and wrap with encryption
                 var underlyingStream = GetStreamFromUnderlyingHandle(underlyingHandle);
                 
-                // If file exists, read the existing header to preserve the original header nonce
-                if (physicalFileExists)
+                // Choose encryption mode based on requestRandomWrite parameter
+                if (requestRandomWrite)
                 {
-                    // Use the new method that reads existing header and preserves header nonce
-                    return _vault.GetEncryptingStreamWithExistingHeader(underlyingStream, leaveOpen: false);
+                    // Use chunk-aware stream for random write support (higher overhead)
+                    return physicalFileExists 
+                        ? _vault.GetRandomWriteEncryptingStream(underlyingStream, existingHeader: null, leaveOpen: false)
+                        : _vault.GetRandomWriteEncryptingStream(underlyingStream, existingHeader: null, leaveOpen: false);
                 }
                 else
                 {
-                    // New file - use standard encrypting stream with new header
-                return _vault.GetEncryptingStream(underlyingStream, leaveOpen: false);
+                    // Use regular sequential encryption stream (better performance)
+                    return physicalFileExists 
+                        ? _vault.GetEncryptingStreamWithExistingHeader(underlyingStream, leaveOpen: false)
+                        : _vault.GetEncryptingStream(underlyingStream, leaveOpen: false);
                 }
             }
             catch (Exception ex)

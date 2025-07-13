@@ -8,7 +8,7 @@ namespace UvfLib.Vault.VaultHelpers
     /// Stream wrapper that encrypts data using chunk-aware random write management.
     /// This stream supports random writes within encrypted files by managing chunks in memory.
     /// </summary>
-    internal class ChunkAwareEncryptingStream : Stream
+    internal class RandomWriteEncryptingStream : Stream
     {
         private readonly ChunkManager _chunkManager;
         private readonly Stream _underlyingStream;
@@ -21,7 +21,7 @@ namespace UvfLib.Vault.VaultHelpers
         private bool _disposed = false;
         private bool _headerWritten = false;
 
-        public ChunkAwareEncryptingStream(Stream underlyingStream, ICryptor cryptor, FileHeader fileHeader, bool leaveOpen = false)
+        public RandomWriteEncryptingStream(Stream underlyingStream, ICryptor cryptor, FileHeader fileHeader, bool leaveOpen = false)
         {
             _underlyingStream = underlyingStream ?? throw new ArgumentNullException(nameof(underlyingStream));
             _cryptor = cryptor ?? throw new ArgumentNullException(nameof(cryptor));
@@ -243,7 +243,7 @@ namespace UvfLib.Vault.VaultHelpers
         private void CheckDisposed()
         {
             if (_disposed)
-                throw new ObjectDisposedException(nameof(ChunkAwareEncryptingStream));
+                throw new ObjectDisposedException(nameof(RandomWriteEncryptingStream));
         }
 
         // Stream properties
