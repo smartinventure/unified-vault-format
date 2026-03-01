@@ -816,7 +816,7 @@ namespace UvfLib.Master.Decorators
                 try
                 {
                     System.Runtime.InteropServices.Marshal.Copy(originalFilenameBytes, 0, dataPtr, originalFilenameBytes.Length);
-                    await _underlyingStorage.WriteAsync(nameFileHandle, 0, originalFilenameBytes.Length, dataPtr, cancellationToken);
+                    await _underlyingStorage.WriteAsync(nameFilePath, nameFileHandle, 0, originalFilenameBytes.Length, dataPtr, cancellationToken);
                 }
                 finally
                 {
@@ -825,7 +825,7 @@ namespace UvfLib.Master.Decorators
             }
             finally
             {
-                await _underlyingStorage.CloseAsync(nameFileHandle, cancellationToken);
+                await _underlyingStorage.CloseAsync(nameFilePath, nameFileHandle, cancellationToken);
             }
         }
 
@@ -885,7 +885,7 @@ namespace UvfLib.Master.Decorators
                 IntPtr dataPtr = System.Runtime.InteropServices.Marshal.AllocHGlobal((int)fileSize);
                 try
                 {
-                    await _underlyingStorage.ReadAsync(fileHandle, 0, fileSize, dataPtr, cancellationToken);
+                    await _underlyingStorage.ReadAsync(nameFilePath, fileHandle, 0, fileSize, dataPtr, cancellationToken);
                     
                     // Copy to managed array
                     byte[] fileBytes = new byte[fileSize];
@@ -908,7 +908,7 @@ namespace UvfLib.Master.Decorators
             }
             finally
             {
-                await _underlyingStorage.CloseAsync(fileHandle, cancellationToken);
+                await _underlyingStorage.CloseAsync(nameFilePath, fileHandle, cancellationToken);
             }
         }
 
@@ -975,7 +975,7 @@ namespace UvfLib.Master.Decorators
                 try
                 {
                     System.Runtime.InteropServices.Marshal.Copy(filenameBytes, 0, dataPtr, filenameBytes.Length);
-                    await _underlyingStorage.WriteAsync(fileHandle, 0, filenameBytes.Length, dataPtr, cancellationToken);
+                    await _underlyingStorage.WriteAsync(nameFilePath, fileHandle, 0, filenameBytes.Length, dataPtr, cancellationToken);
                 }
                 finally
                 {
@@ -984,7 +984,7 @@ namespace UvfLib.Master.Decorators
             }
             finally
             {
-                await _underlyingStorage.CloseAsync(fileHandle, cancellationToken);
+                await _underlyingStorage.CloseAsync(fullNameFilePath, fileHandle, cancellationToken);
             }
         }
 

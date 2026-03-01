@@ -172,7 +172,7 @@ namespace UvfLib.Master.Decorators
             }
 
             // Close underlying handle
-            await _underlyingStorage.CloseAsync(_underlyingHandle);
+            await _underlyingStorage.CloseAsync(_storagePath, _underlyingHandle);
         }
 
         public void Dispose()
@@ -195,7 +195,7 @@ namespace UvfLib.Master.Decorators
                     // Try to close underlying handle
                     try
                     {
-                        _underlyingStorage.CloseAsync(_underlyingHandle).Wait();
+                        _underlyingStorage.CloseAsync(_storagePath, _underlyingHandle, CancellationToken.None).Wait();
                     }
                     catch
                     {

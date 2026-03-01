@@ -120,11 +120,11 @@ namespace UvfLib.Master.Decorators
                 IntPtr fileHandle = await _underlyingStorage.OpenAsync(dirUvfPath, OpenFlags.Create | OpenFlags.WriteOnly, cancellationToken);
                 try
                 {
-                    await _underlyingStorage.WriteAsync(fileHandle, 0, encryptedMetadata.Length, Marshal.UnsafeAddrOfPinnedArrayElement(encryptedMetadata, 0), cancellationToken);
+                    await _underlyingStorage.WriteAsync(dirUvfPath, fileHandle, 0, encryptedMetadata.Length, Marshal.UnsafeAddrOfPinnedArrayElement(encryptedMetadata, 0), cancellationToken);
                 }
                 finally
                 {
-                    await _underlyingStorage.CloseAsync(fileHandle, cancellationToken);
+                    await _underlyingStorage.CloseAsync(dirUvfPath, fileHandle, cancellationToken);
                 }
                 
                 // Create content directory where files will be stored
@@ -140,11 +140,11 @@ namespace UvfLib.Master.Decorators
                     // IMPORTANT: Both dir.uvf files must be encrypted independently (different ciphertexts)
                     // Even though they contain the same dirId, they must be encrypted separately
                     byte[] contentEncryptedMetadata = _vault.EncryptDirectoryMetadata(newDirMetadata);
-                    await _underlyingStorage.WriteAsync(contentFileHandle, 0, contentEncryptedMetadata.Length, Marshal.UnsafeAddrOfPinnedArrayElement(contentEncryptedMetadata, 0), cancellationToken);
+                    await _underlyingStorage.WriteAsync(contentDirUvfPath, contentFileHandle, 0, contentEncryptedMetadata.Length, Marshal.UnsafeAddrOfPinnedArrayElement(contentEncryptedMetadata, 0), cancellationToken);
                 }
                 finally
                 {
-                    await _underlyingStorage.CloseAsync(contentFileHandle, cancellationToken);
+                    await _underlyingStorage.CloseAsync(contentDirUvfPath, contentFileHandle, cancellationToken);
                 }
             }
             catch (Exception ex)
@@ -707,12 +707,12 @@ namespace UvfLib.Master.Decorators
             IntPtr fileHandle = await _underlyingStorage.OpenAsync(dirUvfPath, OpenFlags.ReadOnly, cancellationToken);
             try
             {
-                await _underlyingStorage.ReadAsync(fileHandle, 0, fileInfo.Size, Marshal.UnsafeAddrOfPinnedArrayElement(buffer, 0), cancellationToken);
+                await _underlyingStorage.ReadAsync(dirUvfPath, fileHandle, 0, fileInfo.Size, Marshal.UnsafeAddrOfPinnedArrayElement(buffer, 0), cancellationToken);
                 return _vault.DecryptDirectoryMetadata(buffer);
             }
             finally
             {
-                await _underlyingStorage.CloseAsync(fileHandle, cancellationToken);
+                await _underlyingStorage.CloseAsync(dirUvfPath, fileHandle, cancellationToken);
             }
         }
 
@@ -783,11 +783,11 @@ namespace UvfLib.Master.Decorators
                 IntPtr fileHandle = await _underlyingStorage.OpenAsync(symlinkUvfPath, OpenFlags.Create | OpenFlags.WriteOnly, cancellationToken);
                 try
                 {
-                    await _underlyingStorage.WriteAsync(fileHandle, 0, encryptedTarget.Length, Marshal.UnsafeAddrOfPinnedArrayElement(encryptedTarget, 0), cancellationToken);
+                    await _underlyingStorage.WriteAsync(symlinkUvfPath, fileHandle, 0, encryptedTarget.Length, Marshal.UnsafeAddrOfPinnedArrayElement(encryptedTarget, 0), cancellationToken);
                 }
                 finally
                 {
-                    await _underlyingStorage.CloseAsync(fileHandle, cancellationToken);
+                    await _underlyingStorage.CloseAsync(symlinkUvfPath, fileHandle, cancellationToken);
                 }
                 
                 _logger?.LogDebug("Created UVF symlink: {SymlinkPath} -> {TargetPath}", symlinkPath, targetPath);
@@ -865,12 +865,12 @@ namespace UvfLib.Master.Decorators
                 IntPtr fileHandle = await _underlyingStorage.OpenAsync(symlinkUvfPath, OpenFlags.ReadOnly, cancellationToken);
                 try
                 {
-                    await _underlyingStorage.ReadAsync(fileHandle, 0, fileInfo.Size, Marshal.UnsafeAddrOfPinnedArrayElement(buffer, 0), cancellationToken);
+                    await _underlyingStorage.ReadAsync(symlinkUvfPath, fileHandle, 0, fileInfo.Size, Marshal.UnsafeAddrOfPinnedArrayElement(buffer, 0), cancellationToken);
                     return _vault.DecryptSymlinkTarget(buffer);
                 }
                 finally
                 {
-                    await _underlyingStorage.CloseAsync(fileHandle, cancellationToken);
+                    await _underlyingStorage.CloseAsync(symlinkUvfPath, fileHandle, cancellationToken);
                 }
             }
             catch (Exception ex) when (!(ex is FileNotFoundException || ex is InvalidOperationException || ex is ArgumentException))

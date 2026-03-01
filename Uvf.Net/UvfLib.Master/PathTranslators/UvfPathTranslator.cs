@@ -250,12 +250,12 @@ namespace UvfLib.Master.PathTranslators
             IntPtr fileHandle = await _underlyingStorage.OpenAsync(dirUvfPath, OpenFlags.ReadOnly);
             try
             {
-                await _underlyingStorage.ReadAsync(fileHandle, 0, fileInfo.Size, System.Runtime.InteropServices.Marshal.UnsafeAddrOfPinnedArrayElement(buffer, 0));
+                await _underlyingStorage.ReadAsync(dirUvfPath, fileHandle, 0, fileInfo.Size, System.Runtime.InteropServices.Marshal.UnsafeAddrOfPinnedArrayElement(buffer, 0));
                 return _vault.DecryptDirectoryMetadata(buffer);
             }
             finally
             {
-                await _underlyingStorage.CloseAsync(fileHandle);
+                await _underlyingStorage.CloseAsync(dirUvfPath, fileHandle);
             }
         }
 

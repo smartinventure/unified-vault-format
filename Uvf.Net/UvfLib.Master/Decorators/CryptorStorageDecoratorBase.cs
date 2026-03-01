@@ -115,7 +115,42 @@ namespace UvfLib.Master.Decorators
                     // Close underlying handle
                     if (cryptoHandle.UnderlyingHandle != IntPtr.Zero)
                     {
-                        await _underlyingStorage.CloseAsync(cryptoHandle.UnderlyingHandle, cancellationToken);
+                        await _underlyingStorage.CloseAsync(cryptoHandle.PhysicalPath, cryptoHandle.UnderlyingHandle, cancellationToken);
+                    }
+                }
+                finally
+                {
+                    // Handle disposal is already done in cryptoHandle.Dispose()
+                }
+            }
+        }
+
+        public virtual async Task CloseAsync(string path, IntPtr fileHandle, CancellationToken cancellationToken = default)
+        {
+            if (_disposed) throw new ObjectDisposedException(nameof(CryptorStorageDecoratorBase));
+            if (fileHandle == IntPtr.Zero) return;
+
+            CryptoHandle? cryptoHandle = null;
+            
+            lock (_handlesLock)
+            {
+                if (_openHandles.TryGetValue(fileHandle, out cryptoHandle))
+                {
+                    _openHandles.Remove(fileHandle);
+                }
+            }
+
+            if (cryptoHandle != null)
+            {
+                try
+                {
+                    // Close crypto streams (both if they exist)
+                    cryptoHandle.Dispose();
+                    
+                    // Close underlying handle
+                    if (cryptoHandle.UnderlyingHandle != IntPtr.Zero)
+                    {
+                        await _underlyingStorage.CloseAsync(path, cryptoHandle.UnderlyingHandle, cancellationToken);
                     }
                 }
                 finally
@@ -148,7 +183,53 @@ namespace UvfLib.Master.Decorators
             Marshal.Copy(managedBuffer, 0, buffer, bytesRead);
         }
 
+        public virtual async Task ReadAsync(string path, IntPtr fileHandle, long offset, long size, IntPtr buffer, CancellationToken cancellationToken = default)
+        {
+            if (_disposed) throw new ObjectDisposedException(nameof(CryptorStorageDecoratorBase));
+            
+            var cryptoHandle = GetCryptoHandle(fileHandle);
+            
+            // Lazy creation of decrypting stream
+            var decryptingStream = await cryptoHandle.GetDecryptingStreamAsync(cancellationToken);
+            
+            // Use the decrypting stream
+            if (decryptingStream.CanSeek)
+            {
+                decryptingStream.Seek(offset, SeekOrigin.Begin);
+            }
+            
+            // Read decrypted data
+            byte[] managedBuffer = new byte[size];
+            int bytesRead = await decryptingStream.ReadAsync(managedBuffer, 0, (int)size, cancellationToken);
+            
+            // Copy to unmanaged buffer
+            Marshal.Copy(managedBuffer, 0, buffer, bytesRead);
+        }
+
         public virtual async Task WriteAsync(IntPtr fileHandle, long offset, long size, IntPtr buffer, CancellationToken cancellationToken = default)
+        {
+            if (_disposed) throw new ObjectDisposedException(nameof(CryptorStorageDecoratorBase));
+            
+            var cryptoHandle = GetCryptoHandle(fileHandle);
+            
+            // Lazy creation of encrypting stream
+            var encryptingStream = await cryptoHandle.GetEncryptingStreamAsync(cancellationToken);
+            
+            // Use the encrypting stream
+            if (encryptingStream.CanSeek)
+            {
+                encryptingStream.Seek(offset, SeekOrigin.Begin);
+            }
+            
+            // Copy from unmanaged buffer
+            byte[] managedBuffer = new byte[size];
+            Marshal.Copy(buffer, managedBuffer, 0, (int)size);
+            
+            // Write encrypted data
+            await encryptingStream.WriteAsync(managedBuffer, 0, (int)size, cancellationToken);
+        }
+
+        public virtual async Task WriteAsync(string path, IntPtr fileHandle, long offset, long size, IntPtr buffer, CancellationToken cancellationToken = default)
         {
             if (_disposed) throw new ObjectDisposedException(nameof(CryptorStorageDecoratorBase));
             

@@ -233,7 +233,7 @@ namespace UvfLib.Master.PathTranslators
                 IntPtr dataPtr = Marshal.AllocHGlobal((int)fileSize);
                 try
                 {
-                    await _underlyingStorage.ReadAsync(fileHandle, 0, fileSize, dataPtr, cancellationToken);
+                    await _underlyingStorage.ReadAsync(dirC9rPath, fileHandle, 0, fileSize, dataPtr, cancellationToken);
                     
                     // Copy to managed array
                     byte[] fileBytes = new byte[fileSize];
@@ -252,7 +252,7 @@ namespace UvfLib.Master.PathTranslators
             }
             finally
             {
-                await _underlyingStorage.CloseAsync(fileHandle, cancellationToken);
+                await _underlyingStorage.CloseAsync(dirC9rPath, fileHandle, cancellationToken);
             }
         }
 
@@ -328,11 +328,11 @@ namespace UvfLib.Master.PathTranslators
                         OpenFlags.Create | OpenFlags.WriteOnly | OpenFlags.Truncate, cancellationToken);
                     try
                     {
-                        await _underlyingStorage.WriteAsync(fileHandle, 0, uuidBytes.Length, dataPtr, cancellationToken);
+                        await _underlyingStorage.WriteAsync(dirC9rPath, fileHandle, 0, uuidBytes.Length, dataPtr, cancellationToken);
                     }
                     finally
                     {
-                        await _underlyingStorage.CloseAsync(fileHandle, cancellationToken);
+                        await _underlyingStorage.CloseAsync(dirC9rPath, fileHandle, cancellationToken);
                     }
                 }
                 finally
@@ -407,7 +407,7 @@ namespace UvfLib.Master.PathTranslators
                     try
                     {
                         Marshal.Copy(encryptedData, 0, diridDataPtr, encryptedData.Length);
-                        await _underlyingStorage.WriteAsync(diridHandle, 0, encryptedData.Length, diridDataPtr, cancellationToken);
+                        await _underlyingStorage.WriteAsync(diridFilePath, diridHandle, 0, encryptedData.Length, diridDataPtr, cancellationToken);
                     }
                     finally
                     {
@@ -416,7 +416,7 @@ namespace UvfLib.Master.PathTranslators
                 }
                 finally
                 {
-                    await _underlyingStorage.CloseAsync(diridHandle, cancellationToken);
+                    await _underlyingStorage.CloseAsync(diridFilePath, diridHandle, cancellationToken);
                 }
                 
                 // Move to the next level
@@ -528,7 +528,7 @@ namespace UvfLib.Master.PathTranslators
                 try
                 {
                     Marshal.Copy(filenameBytes, 0, dataPtr, filenameBytes.Length);
-                    await _underlyingStorage.WriteAsync(fileHandle, 0, filenameBytes.Length, dataPtr, cancellationToken);
+                    await _underlyingStorage.WriteAsync(fullNameFilePath, fileHandle, 0, filenameBytes.Length, dataPtr, cancellationToken);
                 }
                 finally
                 {
@@ -537,7 +537,7 @@ namespace UvfLib.Master.PathTranslators
             }
             finally
             {
-                await _underlyingStorage.CloseAsync(fileHandle, cancellationToken);
+                await _underlyingStorage.CloseAsync(fullNameFilePath, fileHandle, cancellationToken);
             }
         }
 
