@@ -34,7 +34,7 @@
   </PropertyGroup>
   
   <ItemGroup>
-    <ProjectReference Include="..\..\..\FolderMagic\FolderMagic\StorageLib\StorageLib.csproj" />
+    <PackageReference Include="SmartInVenture.StorageLib" Version="1.0.1" />
     <ProjectReference Include="..\UvfLib.Core\UvfLib.Core.csproj" />
     <ProjectReference Include="..\UvfLib.Vault\UvfLib.Vault.csproj" />
   </ItemGroup>
