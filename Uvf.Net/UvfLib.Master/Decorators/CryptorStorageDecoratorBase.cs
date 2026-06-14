@@ -160,96 +160,100 @@ namespace UvfLib.Master.Decorators
             }
         }
 
-        public virtual async Task ReadAsync(IntPtr fileHandle, long offset, long size, IntPtr buffer, CancellationToken cancellationToken = default)
+        public virtual async Task<int> ReadAsync(IntPtr fileHandle, long offset, long size, IntPtr buffer, CancellationToken cancellationToken = default)
         {
             if (_disposed) throw new ObjectDisposedException(nameof(CryptorStorageDecoratorBase));
-            
+
             var cryptoHandle = GetCryptoHandle(fileHandle);
-            
+
             // Lazy creation of decrypting stream
             var decryptingStream = await cryptoHandle.GetDecryptingStreamAsync(cancellationToken);
-            
+
             // Use the decrypting stream
             if (decryptingStream.CanSeek)
             {
                 decryptingStream.Seek(offset, SeekOrigin.Begin);
             }
-            
+
             // Read decrypted data
             byte[] managedBuffer = new byte[size];
             int bytesRead = await decryptingStream.ReadAsync(managedBuffer, 0, (int)size, cancellationToken);
-            
-            // Copy to unmanaged buffer
+
+            // Copy to unmanaged buffer (only the bytes actually read)
             Marshal.Copy(managedBuffer, 0, buffer, bytesRead);
+            return bytesRead;
         }
 
-        public virtual async Task ReadAsync(string path, IntPtr fileHandle, long offset, long size, IntPtr buffer, CancellationToken cancellationToken = default)
+        public virtual async Task<int> ReadAsync(string path, IntPtr fileHandle, long offset, long size, IntPtr buffer, CancellationToken cancellationToken = default)
         {
             if (_disposed) throw new ObjectDisposedException(nameof(CryptorStorageDecoratorBase));
-            
+
             var cryptoHandle = GetCryptoHandle(fileHandle);
-            
+
             // Lazy creation of decrypting stream
             var decryptingStream = await cryptoHandle.GetDecryptingStreamAsync(cancellationToken);
-            
+
             // Use the decrypting stream
             if (decryptingStream.CanSeek)
             {
                 decryptingStream.Seek(offset, SeekOrigin.Begin);
             }
-            
+
             // Read decrypted data
             byte[] managedBuffer = new byte[size];
             int bytesRead = await decryptingStream.ReadAsync(managedBuffer, 0, (int)size, cancellationToken);
-            
-            // Copy to unmanaged buffer
+
+            // Copy to unmanaged buffer (only the bytes actually read)
             Marshal.Copy(managedBuffer, 0, buffer, bytesRead);
+            return bytesRead;
         }
 
-        public virtual async Task WriteAsync(IntPtr fileHandle, long offset, long size, IntPtr buffer, CancellationToken cancellationToken = default)
+        public virtual async Task<int> WriteAsync(IntPtr fileHandle, long offset, long size, IntPtr buffer, CancellationToken cancellationToken = default)
         {
             if (_disposed) throw new ObjectDisposedException(nameof(CryptorStorageDecoratorBase));
-            
+
             var cryptoHandle = GetCryptoHandle(fileHandle);
-            
+
             // Lazy creation of encrypting stream
             var encryptingStream = await cryptoHandle.GetEncryptingStreamAsync(cancellationToken);
-            
+
             // Use the encrypting stream
             if (encryptingStream.CanSeek)
             {
                 encryptingStream.Seek(offset, SeekOrigin.Begin);
             }
-            
+
             // Copy from unmanaged buffer
             byte[] managedBuffer = new byte[size];
             Marshal.Copy(buffer, managedBuffer, 0, (int)size);
-            
+
             // Write encrypted data
             await encryptingStream.WriteAsync(managedBuffer, 0, (int)size, cancellationToken);
+            return (int)size;
         }
 
-        public virtual async Task WriteAsync(string path, IntPtr fileHandle, long offset, long size, IntPtr buffer, CancellationToken cancellationToken = default)
+        public virtual async Task<int> WriteAsync(string path, IntPtr fileHandle, long offset, long size, IntPtr buffer, CancellationToken cancellationToken = default)
         {
             if (_disposed) throw new ObjectDisposedException(nameof(CryptorStorageDecoratorBase));
-            
+
             var cryptoHandle = GetCryptoHandle(fileHandle);
-            
+
             // Lazy creation of encrypting stream
             var encryptingStream = await cryptoHandle.GetEncryptingStreamAsync(cancellationToken);
-            
+
             // Use the encrypting stream
             if (encryptingStream.CanSeek)
             {
                 encryptingStream.Seek(offset, SeekOrigin.Begin);
             }
-            
+
             // Copy from unmanaged buffer
             byte[] managedBuffer = new byte[size];
             Marshal.Copy(buffer, managedBuffer, 0, (int)size);
-            
+
             // Write encrypted data
             await encryptingStream.WriteAsync(managedBuffer, 0, (int)size, cancellationToken);
+            return (int)size;
         }
 
         // Path-based read/write - not implemented as we use handle-based operations
