@@ -17,8 +17,8 @@
     <Product>UVF Library</Product>
     <Copyright>Copyright (c) 2025 Smart In Venture GmbH</Copyright>
     
-    <!-- Open Source Licensing -->
-    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <!-- Open Source Licensing (dual-licensed: AGPL-3.0 or commercial on request) -->
+    <PackageLicenseExpression>AGPL-3.0-or-later</PackageLicenseExpression>
     <RepositoryUrl>https://github.com/smartinventure/uvf-core</RepositoryUrl>
     <RepositoryType>git</RepositoryType>
     <PackageProjectUrl>https://github.com/smartinventure/uvf-core</PackageProjectUrl>

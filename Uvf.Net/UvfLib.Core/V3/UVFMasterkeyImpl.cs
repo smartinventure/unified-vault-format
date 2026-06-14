@@ -301,7 +301,7 @@ namespace UvfLib.Core.V3
                 {
                     payload.Seeds.Add(new PayloadSeed
                     {
-                        Id = Jose.Base64Url.Encode(BitConverter.GetBytes(seedEntry.Key).Reverse().ToArray()), // Convert to big-endian
+                        Id = Jose.Base64Url.Encode(Enumerable.Reverse(BitConverter.GetBytes(seedEntry.Key)).ToArray()), // Convert to big-endian
                         Value = Jose.Base64Url.Encode(seedEntry.Value),
                         // Created = DateTime.UtcNow.ToString("o") // Placeholder for RFC3339 timestamp
                         // This needs to be the original creation timestamp if available, or omitted if not meaningful

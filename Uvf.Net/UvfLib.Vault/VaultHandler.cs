@@ -196,7 +196,7 @@ namespace UvfLib.Vault
                 {
                     new PayloadSeed
                     {
-                        Id = JwtBase64Url.Encode(BitConverter.GetBytes(1).Reverse().ToArray()), // Encode integer 1 as Base64URL (big-endian)
+                        Id = JwtBase64Url.Encode(Enumerable.Reverse(BitConverter.GetBytes(1)).ToArray()), // Encode integer 1 as Base64URL (big-endian)
                         Created = DateTimeOffset.UtcNow.ToUnixTimeSeconds().ToString(),
                         Value = Convert.ToBase64String(new byte[32]) // Initial seed (32 random bytes)
                     }

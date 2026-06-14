@@ -170,7 +170,7 @@ namespace UvfLib.Tests
                             System.Runtime.InteropServices.Marshal.Copy(testData, offset, unmanagedBuffer, currentChunkSize);
                             
                             // Write chunk
-                            await localStorage.WriteAsync(fileHandle, totalBytesWritten, currentChunkSize, unmanagedBuffer);
+                            await localStorage.WriteAsync(storageFilePath, fileHandle, totalBytesWritten, currentChunkSize, unmanagedBuffer);
                             totalBytesWritten += currentChunkSize;
                         }
                         finally
@@ -208,7 +208,7 @@ namespace UvfLib.Tests
                 }
                 finally
                 {
-                    await localStorage.CloseAsync(fileHandle);
+                    await localStorage.CloseAsync(storageFilePath, fileHandle);
                 }
                 
                 // Cleanup
@@ -255,7 +255,7 @@ namespace UvfLib.Tests
                         System.Runtime.InteropServices.Marshal.Copy(testData, 0, unmanagedBuffer, testData.Length);
                         
                         // Write entire file in one go
-                        await localStorage.WriteAsync(fileHandle, 0, testData.Length, unmanagedBuffer);
+                        await localStorage.WriteAsync(storageFilePath, fileHandle, 0, testData.Length, unmanagedBuffer);
                     }
                     finally
                     {
@@ -284,7 +284,7 @@ namespace UvfLib.Tests
                 }
                 finally
                 {
-                    await localStorage.CloseAsync(fileHandle);
+                    await localStorage.CloseAsync(storageFilePath, fileHandle);
                 }
                 
                 // Cleanup
@@ -338,7 +338,7 @@ namespace UvfLib.Tests
                             System.Runtime.InteropServices.Marshal.Copy(testData, offset, unmanagedBuffer, currentChunkSize);
                             
                             // Write chunk
-                            await localStorage.WriteAsync(fileHandle, totalBytesWritten, currentChunkSize, unmanagedBuffer);
+                            await localStorage.WriteAsync(storageFilePath, fileHandle, totalBytesWritten, currentChunkSize, unmanagedBuffer);
                             totalBytesWritten += currentChunkSize;
                         }
                         finally
@@ -373,7 +373,7 @@ namespace UvfLib.Tests
                 }
                 finally
                 {
-                    await localStorage.CloseAsync(fileHandle);
+                    await localStorage.CloseAsync(storageFilePath, fileHandle);
                 }
                 
                 // Cleanup

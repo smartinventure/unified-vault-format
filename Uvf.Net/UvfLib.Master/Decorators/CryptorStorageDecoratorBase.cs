@@ -320,6 +320,35 @@ namespace UvfLib.Master.Decorators
             return _underlyingStorage.SetTimesAsync(path, accessTime, modifiedTime, cancellationToken);
         }
 
+        public virtual async Task FlushAsync(string path, IntPtr fileHandle, CancellationToken cancellationToken = default)
+        {
+            if (_disposed) throw new ObjectDisposedException(nameof(CryptorStorageDecoratorBase));
+
+            CryptoHandle? cryptoHandle;
+            lock (_handlesLock)
+            {
+                _openHandles.TryGetValue(fileHandle, out cryptoHandle);
+            }
+
+            // Flush the underlying storage handle so buffered ciphertext reaches the backend.
+            if (cryptoHandle != null && cryptoHandle.UnderlyingHandle != IntPtr.Zero)
+            {
+                await _underlyingStorage.FlushAsync(cryptoHandle.PhysicalPath, cryptoHandle.UnderlyingHandle, cancellationToken);
+            }
+        }
+
+        public Task FAllocateAsync(string path, IntPtr fileHandle, int mode, long offset, long length, CancellationToken cancellationToken = default)
+        {
+            // Pre-allocation has no meaningful mapping onto chunked, authenticated vault streams.
+            throw new NotImplementedException("FAllocateAsync is not supported for vault storage");
+        }
+
+        public Task TruncateAsync(string path, IntPtr fileHandle, long size, CancellationToken cancellationToken = default)
+        {
+            // Truncating encrypted, chunked content through the handle API is not supported.
+            throw new NotImplementedException("TruncateAsync is not supported for vault storage");
+        }
+
         /// <summary>
         /// Internal method to clean up all crypto handles without closing underlying handles individually.
         /// Used by ShutdownAsync and CloseAllHandlesAsync to prevent resource leaks.
