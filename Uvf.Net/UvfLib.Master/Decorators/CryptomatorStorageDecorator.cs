@@ -437,12 +437,27 @@ namespace UvfLib.Master.Decorators
             
             try
             {
+                // Directories (incl. root) must report as a directory — the rest of this method is
+                // file-oriented and would otherwise treat a directory as a missing file.
+                if (filePath == PathNormalizer.VirtualRoot || await DirectoryExistsAsync(filePath, cancellationToken))
+                {
+                    return new FileObject(filePath)
+                    {
+                        IsDirectory = true,
+                        Filename = filePath == PathNormalizer.VirtualRoot ? "/" : Path.GetFileName(filePath),
+                        RealPath = filePath,
+                        VirtualPath = filePath,
+                        Size = 0,
+                        SC = this
+                    };
+                }
+
                 // Translate the virtual file path to the physical encrypted file path
                 var pathResult = await _cryptomatorTranslator.TranslateToStoragePathAsync(filePath);
                 string encryptedFilePath = pathResult.StoragePath;
-                
+
                 FileObject encryptedFileInfo;
-                
+
                 // Check if this is a shortened file
                 if (encryptedFilePath.EndsWith(".c9s"))
                 {
@@ -455,10 +470,10 @@ namespace UvfLib.Master.Decorators
                     // Regular file - get the encrypted file info from underlying storage
                     encryptedFileInfo = await _underlyingStorage.GetFileInfoAsync(encryptedFilePath, cancellationToken);
                 }
-                
+
                 // Calculate the decrypted size using VaultHandler
                 long decryptedSize = VaultHandler.CalculateExpectedDecryptedSize(encryptedFileInfo.Size);
-                
+
                 // Create virtual file object with decrypted information
                 var virtualFileInfo = new FileObject(filePath)
                 {
@@ -473,6 +488,16 @@ namespace UvfLib.Master.Decorators
                     SC = this
                 };
                return virtualFileInfo;
+            }
+            // Preserve not-found semantics so callers (e.g. a FUSE layer) map it to ENOENT rather than
+            // EIO — a wrapped IOException here is what makes "stat a not-yet-existing path" fail a mount.
+            catch (FileNotFoundException)
+            {
+                throw;
+            }
+            catch (DirectoryNotFoundException)
+            {
+                throw new FileNotFoundException($"File not found: {filePath}");
             }
             catch (Exception ex) when (!(ex is ArgumentException))
             {

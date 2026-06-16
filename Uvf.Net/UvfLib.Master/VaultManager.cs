@@ -604,6 +604,25 @@ namespace UvfLib.Master
             }
         }
 
+        /// <summary>
+        /// Gets the encrypting <see cref="IStorage"/> decorator for this vault — the handle-based storage
+        /// that transparently encrypts content + filenames over the underlying connector. Callers that
+        /// drive the handle-based IStorage API directly (e.g. a virtual filesystem) wrap this, while the
+        /// physical backend (via <see cref="UnderlyingStorage"/>) only ever sees ciphertext.
+        /// </summary>
+        public IStorage EncryptingStorage
+        {
+            get
+            {
+                EnsureOpen();
+                if (_vaultStorage is IStorage storage)
+                {
+                    return storage;
+                }
+                throw new InvalidOperationException("The encrypting storage is not available for the current vault type.");
+            }
+        }
+
         // Delegate remaining IStreamStorage methods to _vaultStorage
         Task<IEnumerable<FileObject>> IStreamStorage.ReadDirAsync(string directoryPath, bool readOnly, CancellationToken cancellationToken)
             => ListDirectoryAsync(directoryPath, cancellationToken);
@@ -680,6 +699,12 @@ namespace UvfLib.Master
 
                 // Load the newly created vault
                 await LoadCryptomatorVaultInternalAsync(password);
+
+                // CreateNewCryptomatorV8VaultComplete writes the masterkey + vault config but does not
+                // materialize the root CONTENT directory (d/XX/...). Create it through the storage now so
+                // the vault is immediately mountable (ReadDir("/") would otherwise fail on a fresh vault).
+                await EnsureRootContentDirectoryAsync().ConfigureAwait(false);
+
                 _isOpen = true;
             }
             catch
@@ -704,6 +729,10 @@ namespace UvfLib.Master
             {
                 // Load existing vault
                 await LoadCryptomatorVaultInternalAsync(password);
+
+                // Self-heal: ensure the root content directory exists (older/partial vaults may lack it).
+                await EnsureRootContentDirectoryAsync().ConfigureAwait(false);
+
                 _isOpen = true;
             }
             catch
@@ -755,6 +784,27 @@ namespace UvfLib.Master
                 _vaultBasePath!,
                 logger: null
             );
+        }
+
+        /// <summary>
+        /// Ensures the vault's ROOT content directory exists on the backend. A freshly created vault has
+        /// its masterkey/config written but not the root content directory (d/XX/...); without it the
+        /// first ReadDir("/") fails and the vault is not mountable. Idempotent — a no-op once the
+        /// directory exists (e.g. on subsequent loads).
+        /// </summary>
+        private async Task EnsureRootContentDirectoryAsync()
+        {
+            if (_vault == null || _baseStorage == null || string.IsNullOrEmpty(_vaultBasePath))
+            {
+                return;
+            }
+
+            string rootDirPath = Common.PathNormalizer.NormalizeVaultDirectoryPath(_vault.GetRootDirectoryPath());
+            string rootContentDir = Common.PathNormalizer.CombineWithMountPoint(_vaultBasePath, rootDirPath);
+            if (!await _baseStorage.DirectoryExistsAsync(rootContentDir).ConfigureAwait(false))
+            {
+                await _baseStorage.CreateDirectoryAsync(rootContentDir).ConfigureAwait(false);
+            }
         }
 
         #endregion

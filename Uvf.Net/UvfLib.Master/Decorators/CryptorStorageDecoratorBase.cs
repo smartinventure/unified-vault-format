@@ -778,14 +778,18 @@ namespace UvfLib.Master.Decorators
                 throw new InvalidOperationException($"Could not get stream from underlying storage handle");
             }
             
-            // Wrap the underlying stream with encryption/decryption
+            // Wrap the underlying stream with encryption/decryption. leaveOpen:true is REQUIRED here:
+            // the underlying Stream belongs to the underlying storage's file handle, which CloseAsync
+            // closes explicitly. If the crypto stream also closed it (leaveOpen:false), CloseAsync would
+            // hit an already-disposed stream (ObjectDisposedException). Disposing the encrypting stream
+            // still flushes its final ciphertext chunk + header to the underlying stream first.
             if (fileAccess == FileAccess.Read)
             {
-                return _vault.GetDecryptingStream(underlyingStream, leaveOpen: false);
+                return _vault.GetDecryptingStream(underlyingStream, leaveOpen: true);
             }
             else
             {
-                return _vault.GetEncryptingStream(underlyingStream, leaveOpen: false);
+                return _vault.GetEncryptingStream(underlyingStream, leaveOpen: true);
             }
         }
 

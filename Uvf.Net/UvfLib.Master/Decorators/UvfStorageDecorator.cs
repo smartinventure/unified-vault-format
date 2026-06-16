@@ -335,16 +335,26 @@ namespace UvfLib.Master.Decorators
         {
             try
             {
-                // Handle empty or root path - can't get file info at root level
-                if (string.IsNullOrEmpty(filePath) || filePath == "/")
+                // Directories (incl. root) must report as a directory — the rest of this method is
+                // file-oriented and would otherwise treat a directory as a missing file.
+                if (string.IsNullOrEmpty(filePath) || filePath == "/" || await DirectoryExistsAsync(filePath, cancellationToken))
                 {
-                    throw new ArgumentException("Cannot get file info for root directory or empty path", nameof(filePath));
+                    string dirPath = string.IsNullOrEmpty(filePath) ? "/" : filePath.Replace('\\', '/');
+                    return new FileObject(dirPath)
+                    {
+                        IsDirectory = true,
+                        Filename = dirPath == "/" ? "/" : Path.GetFileName(dirPath),
+                        RealPath = dirPath,
+                        VirtualPath = dirPath,
+                        Size = 0,
+                        SC = this
+                    };
                 }
 
                 // Translate the virtual file path to the physical encrypted file path
                 var pathResult = await _uvfTranslator.TranslateToStoragePathAsync(filePath);
                 string encryptedFilePath = pathResult.StoragePath;
-                
+
                 // Get the encrypted file info from underlying storage
                 var encryptedFileInfo = await _underlyingStorage.GetFileInfoAsync(encryptedFilePath, cancellationToken);
                 
@@ -367,6 +377,15 @@ namespace UvfLib.Master.Decorators
 
                 
                 return virtualFileInfo;
+            }
+            // Preserve not-found semantics so a FUSE caller maps it to ENOENT (not EIO).
+            catch (FileNotFoundException)
+            {
+                throw;
+            }
+            catch (DirectoryNotFoundException)
+            {
+                throw new FileNotFoundException($"File not found: {filePath}");
             }
             catch (Exception ex) when (!(ex is ArgumentException))
             {
