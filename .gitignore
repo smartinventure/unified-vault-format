@@ -882,3 +882,6 @@ Temporary Items
 # Local-only docs/notes (kept on disk, not published to the repository)
 # ============================================================================
 /Resources/
+
+# Vendored Cryptomator Java reference library — kept locally for reference, not published.
+/Uvf.Net/cryptolib-java/
