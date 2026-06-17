@@ -5,8 +5,21 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
-    <Description>TitanVault - High-performance native vault library for UVF and Cryptomator formats</Description>
+    <Description>UVF/Cryptomator IStorage encryption decorators (managed). The Release build also produces the native "TitanVault" AOT facade.</Description>
     <AssemblyName>TitanVault</AssemblyName>
+
+    <!-- Package information. The managed NuGet package is produced by the CI publish workflow, which
+         packs with the AOT/native settings overridden off (see .github/workflows/publish-nuget.yml). -->
+    <PackageId>UvfLib.Master</PackageId>
+    <Title>UVF Storage Decorators</Title>
+    <Authors>Smart In Venture GmbH</Authors>
+    <Company>Smart In Venture GmbH</Company>
+    <Copyright>Copyright (c) 2025 Smart In Venture GmbH</Copyright>
+    <PackageLicenseExpression>AGPL-3.0-or-later</PackageLicenseExpression>
+    <RepositoryUrl>https://github.com/smartinventure/unified-vault-format</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+    <PackageProjectUrl>https://github.com/smartinventure/unified-vault-format</PackageProjectUrl>
+    <Version>1.0.0</Version>
   </PropertyGroup>
   
   <!-- Release-only AOT Configuration -->
@@ -39,9 +52,10 @@
     <ProjectReference Include="..\UvfLib.Vault\UvfLib.Vault.csproj" />
   </ItemGroup>
   
-  <!-- Native AOT Analyzer for export validation - Release only -->
+  <!-- Native AOT Analyzer for export validation - Release only. PrivateAssets=all so it is a build-only
+       tool and never becomes a dependency of the published managed package. -->
   <ItemGroup Condition="'$(Configuration)' == 'Release'">
-    <PackageReference Include="Microsoft.DotNet.ILCompiler" Version="8.0.0" />
+    <PackageReference Include="Microsoft.DotNet.ILCompiler" Version="8.0.0" PrivateAssets="all" />
   </ItemGroup>
 
   <!-- Auto-copy AOT DLL to distribution directory after publish -->

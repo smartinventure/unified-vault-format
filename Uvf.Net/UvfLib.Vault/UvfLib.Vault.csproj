@@ -8,6 +8,18 @@
     <RootNamespace>UvfLib.Vault</RootNamespace>
     <AssemblyName>UvfLib.Vault</AssemblyName>
 
+    <!-- Package information -->
+    <PackageId>UvfLib.Vault</PackageId>
+    <Title>UVF Vault Streams</Title>
+    <Description>Vault stream + file-header orchestration for UVF and Cryptomator vaults (built on UvfLib.Core).</Description>
+    <Authors>Smart In Venture GmbH</Authors>
+    <Company>Smart In Venture GmbH</Company>
+    <Copyright>Copyright (c) 2025 Smart In Venture GmbH</Copyright>
+    <PackageLicenseExpression>AGPL-3.0-or-later</PackageLicenseExpression>
+    <RepositoryUrl>https://github.com/smartinventure/unified-vault-format</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+    <PackageProjectUrl>https://github.com/smartinventure/unified-vault-format</PackageProjectUrl>
+    <Version>1.0.0</Version>
   </PropertyGroup>
 
   <ItemGroup>

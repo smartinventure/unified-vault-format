@@ -1,0 +1,48 @@
+name: Publish to NuGet
+
+# Publishes the managed UvfLib packages (Core, Vault, Master/decorators) to nuget.org using
+# nuget.org Trusted Publishing (GitHub OIDC -> short-lived API key; no stored secrets).
+# Trigger by publishing a GitHub Release, or run manually.
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write   # REQUIRED for nuget.org trusted publishing (OIDC token issuance)
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      # Pack the three managed libraries. UvfLib.Master normally builds the native "TitanVault" AOT
+      # facade in Release; the overrides below make pack produce the plain managed assembly instead
+      # (the AOT/native distribution is unaffected — those settings only apply without these overrides).
+      - name: Pack (managed)
+        run: |
+          for proj in UvfLib.Core UvfLib.Vault UvfLib.Master; do
+            dotnet pack "Uvf.Net/$proj/$proj.csproj" -c Release \
+              -p:PublishAot=false -p:NativeLib= -p:SelfContained=false -p:RuntimeIdentifier= -p:EnableDynamicLoading=false \
+              -o artifacts
+          done
+
+      # Exchange the OIDC token for a temporary nuget.org API key (matches the trusted-publishing
+      # policy: owner 'smartinventure', repo 'unified-vault-format', this workflow file).
+      - name: NuGet login (OIDC -> temporary API key)
+        uses: NuGet/login@v1
+        id: login
+        with:
+          user: smartinventure
+
+      - name: Push
+        run: >
+          dotnet nuget push "artifacts/*.nupkg"
+          --api-key ${{ steps.login.outputs.NUGET_API_KEY }}
+          --source https://api.nuget.org/v3/index.json
+          --skip-duplicate
