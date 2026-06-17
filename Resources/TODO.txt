@@ -1,2 +1,0 @@
-Implement CanSeek in decryption
-Implement File.Exists and Directory.Exists
