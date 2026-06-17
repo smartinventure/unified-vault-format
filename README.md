@@ -19,8 +19,7 @@ The library delivers two things:
 
 It is a port of the official Java [`cryptolib`](https://github.com/cryptomator/cryptolib),
 and its cryptographic behavior is validated against that reference implementation
-and the published UVF specification (a copy of both is included under `Resources/`
-and `Uvf.Net/cryptolib-java/`).
+and the published UVF specification.
 
 > ### ⚠️ Disclaimer / Warning
 >
@@ -50,55 +49,47 @@ closed-source or proprietary product), please contact
 
 ## Getting Started
 
-### Installation
+UvfLib can be consumed two ways:
 
-Add the UvfLib project to your solution or reference the compiled DLL:
+### 1. .NET — managed NuGet package (no native dependency)
 
-```csharp
-<PackageReference Include="UvfLib" Version="1.0.0" />
+```xml
+<PackageReference Include="UvfLib.Master" Version="1.0.0" />
 ```
 
-### Basic Usage
-
-Here's a simple example of how to use the library:
+`UvfLib.Master` provides the high-level vault API and pulls in `UvfLib.Core` + `UvfLib.Vault`. A minimal
+example (UVF; Cryptomator has the equivalent `*CryptomatorVaultAsync` factories):
 
 ```csharp
-using UvfLib.Api;
-using UvfLib.Common;
-using System;
-using System.IO;
-using System.Security.Cryptography;
+using UvfLib.Master;
+using StorageLib.Abstractions;
 
-// Create or load a masterkey
-byte[] rawMasterkey = new byte[32]; // For demo - use secure random generation
-using (var rng = RandomNumberGenerator.Create())
-{
-    rng.GetBytes(rawMasterkey);
-}
+// Create (or VaultManager.LoadUvfVaultAsync to open) a vault.
+using var vault = await VaultManager.CreateUvfVaultAsync(vaultDir, password.ToCharArray());
+IStorage fs = vault.EncryptingStorage;          // transparently encrypts content + file names
 
-// Create a UVF masterkey from raw key
-UVFMasterkey masterkey = UVFMasterkey.CreateFromRaw(rawMasterkey);
-
-// Get a cryptor for file operations
-CryptoFactory factory = CryptoFactory.GetFactory();
-Cryptor cryptor = factory.Create(masterkey);
-
-// Encrypt and decrypt file names
-string directoryId = Guid.NewGuid().ToString(); // Each directory has a unique ID
-string originalFileName = "document.txt";
-string encryptedFileName = cryptor.FileNameCryptor().EncryptFilename(originalFileName, directoryId);
-string decryptedFileName = cryptor.FileNameCryptor().DecryptFilename(encryptedFileName, directoryId);
-
-// Encrypt file content
-byte[] fileContent = File.ReadAllBytes("document.txt");
-byte[] encryptedContent = cryptor.FileContentCryptor().Encrypt(fileContent);
-
-// Decrypt file content
-byte[] decryptedContent = cryptor.FileContentCryptor().Decrypt(encryptedContent);
-
-// Clean up sensitive data
-((DestroyableMasterkey)masterkey).Destroy();
+await fs.CreateDirectoryAsync("/notes");
+// write/read through fs.OpenAsync / WriteAsync / ReadAsync; list with fs.ReadDirAsync("/")
+await fs.DeleteAsync("/hello.txt");
 ```
+
+### 2. Other languages — native AOT library
+
+The library also builds to a self-contained native **AOT** shared library (`TitanVault`) that exposes a
+flat **C ABI**, so it can be used from any language with FFI (Python, Node.js, Java, Go, Rust, …). See
+[Native AOT Build](#native-aot-build) and [Language Bindings](#language-bindings) below.
+
+### Runnable examples — [`Demo/`](Demo/)
+
+Each demo creates a vault, encrypts a file, reads it back as cleartext, and deletes it — for both UVF
+and Cryptomator:
+
+| Demo | Uses |
+|------|------|
+| [`Demo/DotNet`](Demo/DotNet)  | C# with the managed `UvfLib` package (no AOT) |
+| [`Demo/Python`](Demo/Python)  | native `TitanVault` via `ctypes` (stdlib) |
+| [`Demo/NodeJs`](Demo/NodeJs)  | native `TitanVault` via [`koffi`](https://koffi.dev) |
+| [`Demo/Java`](Demo/Java)      | native `TitanVault` via [JNA](https://github.com/java-native-access/jna) |
 
 ## Architecture
 
@@ -256,7 +247,7 @@ external dependencies** and can be built and audited on its own:
 | `UvfLib.Core` | Cryptographic core (UVF v3 + Cryptomator v8) | **None** (BouncyCastle/System.* NuGet only) |
 | `UvfLib.Vault` | Vault streams & file-header orchestration | **None** (depends only on `UvfLib.Core`) |
 | `UvfLib.Master` | Optional high-level + Native-AOT facade (`TitanVault`) | **`FolderMagic.StorageLib`** (separate MIT library) |
-| `ExampleVaultApp` / `DemoApp` | Sample apps | via `UvfLib.Master` |
+| [`Demo/`](Demo) (DotNet, Python, NodeJs, Java) | Runnable usage examples | `.NET` via the NuGet package; others via the native `TitanVault` C ABI |
 | `UvfLib.Tests` | Test suite | references all of the above |
 
 **The AGPL deliverable is `UvfLib.Core` + `UvfLib.Vault`.** They build cleanly with

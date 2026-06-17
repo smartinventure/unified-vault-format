@@ -1,0 +1,13 @@
+{
+  "name": "uvf-nodejs-demo",
+  "version": "1.0.0",
+  "private": true,
+  "description": "UVF/Cryptomator demo calling the native TitanVault library via koffi (C ABI).",
+  "type": "commonjs",
+  "scripts": {
+    "demo": "node vault-demo.js"
+  },
+  "dependencies": {
+    "koffi": "^2.9.0"
+  }
+}

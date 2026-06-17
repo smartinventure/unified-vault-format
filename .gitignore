@@ -885,3 +885,7 @@ Temporary Items
 
 # Vendored Cryptomator Java reference library — kept locally for reference, not published.
 /Uvf.Net/cryptolib-java/
+
+# Retired sample apps — replaced by /Demo (kept locally for reference, not published).
+/Uvf.Net/DemoApp/
+/Uvf.Net/ExampleVaultApp/

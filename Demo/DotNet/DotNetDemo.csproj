@@ -1,0 +1,19 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <RootNamespace>UvfLib.Demo.DotNet</RootNamespace>
+    <AssemblyName>uvf-dotnet-demo</AssemblyName>
+  </PropertyGroup>
+
+  <!-- Uses the managed UvfLib NuGet package (no native AOT DLL needed). Once UvfLib is published to
+       nuget.org this restores from there; until then, add the local feed as a restore source
+       (see this folder's README.md for the exact command). -->
+  <ItemGroup>
+    <PackageReference Include="UvfLib.Master" Version="1.0.0" />
+  </ItemGroup>
+
+</Project>
