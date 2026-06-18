@@ -16,7 +16,9 @@ const path = require('path');
 const TITAN_VAULT_SUCCESS = 0;
 
 function parseArgs() {
-  const a = { lib: process.env.TITANVAULT_LIB || './TitanVault.dll', format: 'uvf',
+  // format is left undefined by default so the demo runs BOTH formats (uvf then cryptomator);
+  // pass --format uvf|cryptomator to run just one.
+  const a = { lib: process.env.TITANVAULT_LIB || './TitanVault.dll', format: undefined,
               vault: path.join(os.tmpdir(), 'uvf-node-demo'), password: 'correct horse battery staple' };
   const argv = process.argv.slice(2);
   for (let i = 0; i < argv.length; i++) {
@@ -62,27 +64,26 @@ function check(lib, rc, what) {
   if (rc !== TITAN_VAULT_SUCCESS) throw new Error(`${what} failed (rc=${rc}): ${lib.getLastError()}`);
 }
 
-function main() {
-  const args = parseArgs();
-  const lib = load(args.lib);
+// Run the full demo flow for a single vault format in its own (freshly reset) directory.
+function runDemo(lib, format, vaultDir, password) {
+  console.log(`\n========== ${format.toUpperCase()} ==========`);
+  fs.rmSync(vaultDir, { recursive: true, force: true });
+  fs.mkdirSync(vaultDir, { recursive: true });
 
-  console.log(`TitanVault version: ${lib.getVersion()}`);
-  fs.mkdirSync(args.vault, { recursive: true });
-
-  const vlen = u8len(args.vault);
-  const plen = u8len(args.password);
+  const vlen = u8len(vaultDir);
+  const plen = u8len(password);
 
   // 1. Create + open the vault.
   let handle;
-  if (args.format === 'uvf') {
-    check(lib, lib.createUvf(args.vault, vlen, args.password, plen, 1, 0, 0), 'create_uvf_vault');
-    handle = lib.loadUvf(args.vault, vlen, args.password, plen, null, 0);
+  if (format === 'uvf') {
+    check(lib, lib.createUvf(vaultDir, vlen, password, plen, 1, 0, 0), 'create_uvf_vault');
+    handle = lib.loadUvf(vaultDir, vlen, password, plen, null, 0);
   } else {
-    check(lib, lib.createCryptomator(args.vault, vlen, args.password, plen), 'create_cryptomator_vault');
-    handle = lib.loadCryptomator(args.vault, vlen, args.password, plen);
+    check(lib, lib.createCryptomator(vaultDir, vlen, password, plen), 'create_cryptomator_vault');
+    handle = lib.loadCryptomator(vaultDir, vlen, password, plen);
   }
-  if (!handle) throw new Error(`load vault failed: ${lib.getLastError()}`);
-  console.log(`Created + opened ${args.format} vault at ${args.vault}`);
+  if (!handle) throw new Error(`load ${format} vault failed: ${lib.getLastError()}`);
+  console.log(`Created + opened ${format} vault at ${vaultDir}`);
 
   try {
     const filePath = '/hello.txt';
@@ -102,7 +103,7 @@ function main() {
     if (!data.equals(plaintext)) throw new Error('round-trip mismatch!');
 
     // 4. Cleartext name is not on disk.
-    const leaked = walk(args.vault).some((f) => path.basename(f) === 'hello.txt');
+    const leaked = walk(vaultDir).some((f) => path.basename(f) === 'hello.txt');
     console.log(`Backend stores plaintext name 'hello.txt'? ${leaked} (expected: false)`);
 
     // 5. Exists + delete.
@@ -112,7 +113,20 @@ function main() {
   } finally {
     lib.closeVault(handle);
   }
-  console.log('✅ Node.js demo completed.');
+  console.log(`✅ ${format} demo completed.`);
+}
+
+function main() {
+  const args = parseArgs();
+  const lib = load(args.lib);
+  console.log(`TitanVault version: ${lib.getVersion()}`);
+
+  // Loop over both formats by default; --format restricts to one.
+  const formats = args.format ? [args.format] : ['uvf', 'cryptomator'];
+  for (const format of formats) {
+    runDemo(lib, format, path.join(args.vault, format), args.password);
+  }
+  console.log('\n✅ All Node.js demos completed.');
 }
 
 function walk(dir) {
