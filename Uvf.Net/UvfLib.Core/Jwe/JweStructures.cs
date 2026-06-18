@@ -91,6 +91,39 @@ namespace UvfLib.Core.Jwe
     }
 
     /// <summary>
+    /// Represents a JWE recipient header for an ECDH-ES public-key recipient (ECDH-ES+A256KW).
+    /// </summary>
+    public class JweEcdhRecipientHeader
+    {
+        [JsonPropertyName("alg")]
+        public string Algorithm { get; set; } = string.Empty;
+
+        [JsonPropertyName("kid")]
+        public string KeyId { get; set; } = string.Empty;
+
+        /// <summary>Ephemeral public key (SubjectPublicKeyInfo, base64url) used for this wrap.</summary>
+        [JsonPropertyName("epk")]
+        public string EphemeralPublicKey { get; set; } = string.Empty;
+
+        /// <summary>The user's static public key (SubjectPublicKeyInfo, base64url), retained so an admin
+        /// can re-wrap the CEK on key rotation without the user being present.</summary>
+        [JsonPropertyName("uvf_user_pubkey")]
+        public string UserPublicKey { get; set; } = string.Empty;
+    }
+
+    /// <summary>
+    /// Represents a JWE recipient whose key is wrapped to a user's public key (ECDH-ES+A256KW).
+    /// </summary>
+    public class JweEcdhRecipient
+    {
+        [JsonPropertyName("header")]
+        public JweEcdhRecipientHeader Header { get; set; } = new();
+
+        [JsonPropertyName("encrypted_key")]
+        public string EncryptedKey { get; set; } = string.Empty;
+    }
+
+    /// <summary>
     /// Represents a JWE protected header.
     /// </summary>
     public class JweProtectedHeader

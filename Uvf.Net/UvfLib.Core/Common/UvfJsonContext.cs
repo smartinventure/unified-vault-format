@@ -29,6 +29,9 @@ namespace UvfLib.Core.Common
     [JsonSerializable(typeof(JweRecipientHeader))] // JWE recipient header (PBKDF2)
     [JsonSerializable(typeof(JweScryptRecipient))] // JWE recipient (Scrypt)
     [JsonSerializable(typeof(JweScryptRecipientHeader))] // JWE recipient header (Scrypt)
+    [JsonSerializable(typeof(JweEcdhRecipient))] // JWE recipient (ECDH-ES public key)
+    [JsonSerializable(typeof(JweEcdhRecipientHeader))] // JWE recipient header (ECDH-ES public key)
+    [JsonSerializable(typeof(List<JweEcdhRecipient>))] // List of ECDH-ES recipients
     [JsonSerializable(typeof(JweProtectedHeader))] // JWE protected header
     [JsonSerializable(typeof(List<JweRecipient>))] // List of recipients
     [JsonSerializable(typeof(List<JweScryptRecipient>))] // List of Scrypt recipients

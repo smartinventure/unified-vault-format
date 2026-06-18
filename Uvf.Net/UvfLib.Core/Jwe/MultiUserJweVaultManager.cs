@@ -23,6 +23,8 @@ namespace UvfLib.Core.Jwe
         private const int DefaultPbkdf2Iterations = 64000;
         private const string AdminKeyId = "uvflib.net.admin";
         private const string UserKeyIdPrefix = "uvflib.net.user.";
+        private const string PublicKeyKeyIdPrefix = "uvflib.net.pubkey.";
+        private const string EcdhAlgorithm = "ECDH-ES+A256KW";
 
         /// <summary>
         /// Creates a single-user JWE vault (UVF-compliant with admin recipient).
@@ -343,9 +345,10 @@ namespace UvfLib.Core.Jwe
                     {
                         string kid = kidElement.GetString()!;
                         string userKid = UserKeyIdPrefix + userIdToRemove;
-                        
-                        // Skip the user to be removed
-                        if (kid == userKid)
+                        string pubKeyKid = PublicKeyKeyIdPrefix + userIdToRemove;
+
+                        // Skip the user to be removed (password or public-key recipient)
+                        if (kid == userKid || kid == pubKeyKid)
                         {
                             continue;
                         }
@@ -399,14 +402,152 @@ namespace UvfLib.Core.Jwe
                         }
                         else if (kid.StartsWith(UserKeyIdPrefix))
                         {
-                            string userId = kid.Substring(UserKeyIdPrefix.Length);
-                            users.Add(userId);
+                            users.Add(kid.Substring(UserKeyIdPrefix.Length));
+                        }
+                        else if (kid.StartsWith(PublicKeyKeyIdPrefix))
+                        {
+                            users.Add(kid.Substring(PublicKeyKeyIdPrefix.Length));
                         }
                     }
                 }
             }
 
             return users;
+        }
+
+        /// <summary>
+        /// Adds a public-key recipient (ECDH-ES+A256KW) to an existing vault. The admin password unwraps
+        /// the current CEK, which is re-wrapped to the user's public key. The user's password is not
+        /// required (or known) — only their public key. The static public key is stored in the recipient
+        /// so the CEK can be re-wrapped to it on rotation without the user being present.
+        /// </summary>
+        /// <param name="jweJsonString">Current JWE JSON string</param>
+        /// <param name="adminPassword">Admin password (char[])</param>
+        /// <param name="userId">New user id</param>
+        /// <param name="userPublicKeySpki">User's public key as SubjectPublicKeyInfo (DER)</param>
+        /// <returns>Updated JWE JSON string</returns>
+        public static string AddPublicKeyUserToVault(string jweJsonString, char[] adminPassword, string userId, byte[] userPublicKeySpki)
+        {
+            if (string.IsNullOrEmpty(jweJsonString)) throw new ArgumentNullException(nameof(jweJsonString));
+            if (adminPassword == null) throw new ArgumentNullException(nameof(adminPassword));
+            if (string.IsNullOrEmpty(userId)) throw new ArgumentNullException(nameof(userId));
+            if (userPublicKeySpki == null || userPublicKeySpki.Length == 0) throw new ArgumentNullException(nameof(userPublicKeySpki));
+
+            using var doc = JsonDocument.Parse(jweJsonString);
+            var root = doc.RootElement;
+
+            byte[]? cek = null;
+            foreach (var recipient in root.GetProperty("recipients").EnumerateArray())
+            {
+                cek = TryDecryptCek(recipient, adminPassword);
+                if (cek != null) break;
+            }
+            if (cek == null) throw new UnauthorizedAccessException("Unable to decrypt vault with admin password");
+
+            try
+            {
+                var newRecipient = CreateEcdhRecipient(PublicKeyKeyIdPrefix + userId, userPublicKeySpki, cek);
+
+                var existingRecipients = new List<object>();
+                foreach (var recipient in root.GetProperty("recipients").EnumerateArray())
+                {
+                    existingRecipients.Add(JsonSerializer.Deserialize<object>(recipient.GetRawText(), UvfJsonContext.Default.Object)!);
+                }
+                existingRecipients.Add(newRecipient);
+
+                var updatedJwe = new JweJson
+                {
+                    Protected = root.GetProperty("protected").GetString()!,
+                    Recipients = existingRecipients,
+                    Iv = root.GetProperty("iv").GetString()!,
+                    Ciphertext = root.GetProperty("ciphertext").GetString()!,
+                    Tag = root.GetProperty("tag").GetString()!
+                };
+                return JsonSerializer.Serialize(updatedJwe, UvfJsonContext.Default.JweJson);
+            }
+            finally
+            {
+                Array.Clear(cek, 0, cek.Length);
+            }
+        }
+
+        /// <summary>
+        /// Loads a vault using a user's EC private key (public-key recipient, ECDH-ES+A256KW).
+        /// </summary>
+        /// <param name="jweJsonString">JWE JSON string</param>
+        /// <param name="privateKey">The user's EC private key (P-384)</param>
+        /// <param name="userId">Optional user id hint (matches the uvflib.net.pubkey.&lt;id&gt; recipient)</param>
+        /// <returns>Decrypted UVF masterkey payload</returns>
+        public static UvfMasterkeyPayload LoadMultiUserVaultWithKey(string jweJsonString, ECDiffieHellman privateKey, string? userId = null)
+        {
+            if (string.IsNullOrEmpty(jweJsonString)) throw new ArgumentNullException(nameof(jweJsonString));
+            if (privateKey == null) throw new ArgumentNullException(nameof(privateKey));
+
+            using var doc = JsonDocument.Parse(jweJsonString);
+            var root = doc.RootElement;
+            byte[] iv = Jose.Base64Url.Decode(root.GetProperty("iv").GetString()!);
+            byte[] ciphertext = Jose.Base64Url.Decode(root.GetProperty("ciphertext").GetString()!);
+            byte[] tag = Jose.Base64Url.Decode(root.GetProperty("tag").GetString()!);
+
+            foreach (var recipient in root.GetProperty("recipients").EnumerateArray())
+            {
+                try
+                {
+                    if (userId != null && recipient.TryGetProperty("header", out var headerEl) &&
+                        headerEl.TryGetProperty("kid", out var kidEl) &&
+                        kidEl.GetString() != PublicKeyKeyIdPrefix + userId)
+                    {
+                        continue;
+                    }
+
+                    byte[]? cek = TryDecryptCekWithKey(recipient, privateKey);
+                    if (cek == null) continue;
+                    try
+                    {
+                        byte[] decrypted = new byte[ciphertext.Length];
+                        using (var aesGcm = new System.Security.Cryptography.AesGcm(cek))
+                        {
+                            aesGcm.Decrypt(iv, ciphertext, tag, decrypted);
+                        }
+                        return JsonSerializer.Deserialize<UvfMasterkeyPayload>(Encoding.UTF8.GetString(decrypted), UvfJsonContext.Default.UvfMasterkeyPayload)!;
+                    }
+                    finally
+                    {
+                        Array.Clear(cek, 0, cek.Length);
+                    }
+                }
+                catch
+                {
+                    continue;
+                }
+            }
+            throw new UnauthorizedAccessException("Unable to decrypt vault with the provided private key");
+        }
+
+        /// <summary>
+        /// Returns the public-key members of a vault as (userId, public-key SubjectPublicKeyInfo) pairs,
+        /// so the CEK can be re-wrapped to each on key rotation (no member passwords required).
+        /// </summary>
+        public static List<(string UserId, byte[] PublicKey)> GetPublicKeyMembers(string jweJsonString)
+        {
+            if (string.IsNullOrEmpty(jweJsonString)) throw new ArgumentNullException(nameof(jweJsonString));
+
+            using var doc = JsonDocument.Parse(jweJsonString);
+            var members = new List<(string, byte[])>();
+            foreach (var recipient in doc.RootElement.GetProperty("recipients").EnumerateArray())
+            {
+                if (recipient.TryGetProperty("header", out var header) &&
+                    header.TryGetProperty("kid", out var kidEl))
+                {
+                    string kid = kidEl.GetString()!;
+                    if (kid.StartsWith(PublicKeyKeyIdPrefix) &&
+                        header.TryGetProperty("uvf_user_pubkey", out var pubEl))
+                    {
+                        members.Add((kid.Substring(PublicKeyKeyIdPrefix.Length), Jose.Base64Url.Decode(pubEl.GetString()!)));
+                    }
+                }
+            }
+            return members;
         }
 
         #region Private Helper Methods
@@ -545,6 +686,67 @@ namespace UvfLib.Core.Jwe
                 {
                     // Unsupported algorithm
                     return null;
+                }
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
+        /// <summary>
+        /// Creates an ECDH-ES+A256KW recipient that wraps the CEK to the user's public key. A fresh
+        /// ephemeral key is used per wrap; the user's static public key is retained for rotation.
+        /// </summary>
+        private static JweEcdhRecipient CreateEcdhRecipient(string keyId, byte[] userPublicKeySpki, byte[] cek)
+        {
+            using var userPublic = EcdhKeyMaterial.ImportPublicKey(userPublicKeySpki);
+            using var ephemeral = EcdhKeyMaterial.GenerateKeyPair();
+            byte[] kek = EcdhKeyMaterial.DeriveKek(ephemeral, userPublic.PublicKey);
+            try
+            {
+                byte[] encryptedKey = AesKeyWrap.WrapKey(kek, cek);
+                return new JweEcdhRecipient
+                {
+                    Header = new JweEcdhRecipientHeader
+                    {
+                        Algorithm = EcdhAlgorithm,
+                        KeyId = keyId,
+                        EphemeralPublicKey = Jose.Base64Url.Encode(EcdhKeyMaterial.ExportPublicKey(ephemeral)),
+                        UserPublicKey = Jose.Base64Url.Encode(userPublicKeySpki)
+                    },
+                    EncryptedKey = Jose.Base64Url.Encode(encryptedKey)
+                };
+            }
+            finally
+            {
+                Array.Clear(kek, 0, kek.Length);
+            }
+        }
+
+        private static byte[]? TryDecryptCekWithKey(JsonElement recipient, ECDiffieHellman privateKey)
+        {
+            try
+            {
+                if (!recipient.TryGetProperty("header", out var headerElement) ||
+                    !recipient.TryGetProperty("encrypted_key", out var encKeyElement))
+                {
+                    return null;
+                }
+                if (headerElement.GetProperty("alg").GetString() != EcdhAlgorithm) return null;
+
+                byte[] epk = Jose.Base64Url.Decode(headerElement.GetProperty("epk").GetString()!);
+                byte[] encryptedKey = Jose.Base64Url.Decode(encKeyElement.GetString()!);
+
+                using var ephemeralPublic = EcdhKeyMaterial.ImportPublicKey(epk);
+                byte[] kek = EcdhKeyMaterial.DeriveKek(privateKey, ephemeralPublic.PublicKey);
+                try
+                {
+                    return AesKeyWrap.UnwrapKey(kek, encryptedKey);
+                }
+                finally
+                {
+                    Array.Clear(kek, 0, kek.Length);
                 }
             }
             catch
