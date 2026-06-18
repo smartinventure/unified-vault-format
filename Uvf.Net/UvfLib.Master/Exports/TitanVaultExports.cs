@@ -638,6 +638,245 @@ namespace UvfLib.Master.Exports
             }
         }
 
+        /// <summary>
+        /// Generates a user key pair (P-384) for public-key vault membership. Writes the public key
+        /// (SubjectPublicKeyInfo) and the password-encrypted PKCS#8 private key into the caller's buffers;
+        /// the *BufferSize args are in/out (set to the required length). Pass null buffers to query sizes.
+        /// </summary>
+        [UnmanagedCallersOnly(EntryPoint = "titan_vault_generate_user_keypair")]
+        public static unsafe int GenerateUserKeyPair(
+            byte* passwordBytes,
+            int passwordLength,
+            IntPtr publicKeyBuffer,
+            IntPtr publicKeyBufferSize,
+            IntPtr privateKeyBuffer,
+            IntPtr privateKeyBufferSize)
+        {
+            try
+            {
+                if (passwordBytes == null || passwordLength <= 0 ||
+                    publicKeyBufferSize == IntPtr.Zero || privateKeyBufferSize == IntPtr.Zero)
+                {
+                    SetLastError("Invalid parameters");
+                    return TITAN_VAULT_ERROR_INVALID_PARAMETER;
+                }
+
+                var password = GetPasswordChars((IntPtr)passwordBytes, passwordLength);
+                if (password == null)
+                {
+                    SetLastError("Failed to decode password");
+                    return TITAN_VAULT_ERROR_INVALID_PARAMETER;
+                }
+
+                try
+                {
+                    var (publicKey, encryptedPrivateKey) = VaultManager.GenerateUserKeyPair(password);
+
+                    int publicCapacity = Marshal.ReadInt32(publicKeyBufferSize);
+                    int privateCapacity = Marshal.ReadInt32(privateKeyBufferSize);
+                    Marshal.WriteInt32(publicKeyBufferSize, publicKey.Length);
+                    Marshal.WriteInt32(privateKeyBufferSize, encryptedPrivateKey.Length);
+
+                    if (publicKeyBuffer == IntPtr.Zero || privateKeyBuffer == IntPtr.Zero ||
+                        publicCapacity < publicKey.Length || privateCapacity < encryptedPrivateKey.Length)
+                    {
+                        SetLastError($"Buffer too small (public={publicKey.Length}, private={encryptedPrivateKey.Length})");
+                        return TITAN_VAULT_ERROR_INSUFFICIENT_BUFFER;
+                    }
+
+                    Marshal.Copy(publicKey, 0, publicKeyBuffer, publicKey.Length);
+                    Marshal.Copy(encryptedPrivateKey, 0, privateKeyBuffer, encryptedPrivateKey.Length);
+                    return TITAN_VAULT_SUCCESS;
+                }
+                finally
+                {
+                    Array.Clear(password, 0, password.Length);
+                }
+            }
+            catch (Exception ex)
+            {
+                SetLastError($"Failed to generate user key pair: {ex.Message}");
+                return TITAN_VAULT_ERROR_INTERNAL;
+            }
+        }
+
+        /// <summary>
+        /// Grants a user access to a UVF vault by their public key (SubjectPublicKeyInfo). The admin
+        /// password unwraps and re-wraps the vault key — the user's password is not required.
+        /// </summary>
+        [UnmanagedCallersOnly(EntryPoint = "titan_vault_add_user_by_public_key")]
+        public static unsafe int AddUserByPublicKey(
+            byte* vaultPathBytes,
+            int vaultPathLength,
+            byte* adminPasswordBytes,
+            int adminPasswordLength,
+            byte* userIdBytes,
+            int userIdLength,
+            byte* publicKeyBytes,
+            int publicKeyLength)
+        {
+            try
+            {
+                if (vaultPathBytes == null || vaultPathLength <= 0 ||
+                    adminPasswordBytes == null || adminPasswordLength <= 0 ||
+                    userIdBytes == null || userIdLength <= 0 ||
+                    publicKeyBytes == null || publicKeyLength <= 0)
+                {
+                    SetLastError("Invalid parameters");
+                    return TITAN_VAULT_ERROR_INVALID_PARAMETER;
+                }
+
+                var vaultPath = GetUtf8String((IntPtr)vaultPathBytes, vaultPathLength);
+                var adminPassword = GetPasswordChars((IntPtr)adminPasswordBytes, adminPasswordLength);
+                var userId = GetUtf8String((IntPtr)userIdBytes, userIdLength);
+                var publicKey = new byte[publicKeyLength];
+                Marshal.Copy((IntPtr)publicKeyBytes, publicKey, 0, publicKeyLength);
+
+                if (string.IsNullOrEmpty(vaultPath) || adminPassword == null || string.IsNullOrEmpty(userId))
+                {
+                    SetLastError("Failed to decode parameters");
+                    return TITAN_VAULT_ERROR_INVALID_PARAMETER;
+                }
+
+                try
+                {
+                    VaultManager.AddPublicKeyUserAsync(vaultPath, adminPassword, userId, publicKey).Wait();
+                    return TITAN_VAULT_SUCCESS;
+                }
+                finally
+                {
+                    Array.Clear(adminPassword, 0, adminPassword.Length);
+                }
+            }
+            catch (AggregateException ex) when (ex.InnerException is UnauthorizedAccessException)
+            {
+                SetLastError("Invalid admin password");
+                return TITAN_VAULT_ERROR_INVALID_PASSWORD;
+            }
+            catch (Exception ex)
+            {
+                SetLastError($"Failed to add user by public key: {ex.Message}");
+                return TITAN_VAULT_ERROR_INTERNAL;
+            }
+        }
+
+        /// <summary>
+        /// Loads a UVF vault using a user's password-encrypted (PKCS#8) private key. Returns a vault
+        /// handle or zero on error.
+        /// </summary>
+        [UnmanagedCallersOnly(EntryPoint = "titan_vault_load_uvf_vault_with_key")]
+        public static unsafe IntPtr LoadUvfVaultWithKey(
+            byte* vaultPathBytes,
+            int vaultPathLength,
+            byte* encryptedPrivateKeyBytes,
+            int encryptedPrivateKeyLength,
+            byte* keyPasswordBytes,
+            int keyPasswordLength,
+            byte* userIdBytes,
+            int userIdLength)
+        {
+            try
+            {
+                if (vaultPathBytes == null || vaultPathLength <= 0 ||
+                    encryptedPrivateKeyBytes == null || encryptedPrivateKeyLength <= 0 ||
+                    keyPasswordBytes == null || keyPasswordLength <= 0)
+                {
+                    SetLastError("Invalid parameters");
+                    return IntPtr.Zero;
+                }
+
+                var vaultPath = GetUtf8String((IntPtr)vaultPathBytes, vaultPathLength);
+                var encryptedPrivateKey = new byte[encryptedPrivateKeyLength];
+                Marshal.Copy((IntPtr)encryptedPrivateKeyBytes, encryptedPrivateKey, 0, encryptedPrivateKeyLength);
+                var keyPassword = GetPasswordChars((IntPtr)keyPasswordBytes, keyPasswordLength);
+                var userId = userIdBytes != null && userIdLength > 0
+                    ? GetUtf8String((IntPtr)userIdBytes, userIdLength)
+                    : null;
+
+                if (string.IsNullOrEmpty(vaultPath) || keyPassword == null)
+                {
+                    SetLastError("Failed to decode parameters");
+                    return IntPtr.Zero;
+                }
+
+                try
+                {
+                    var vault = VaultManager.LoadUvfVaultWithEncryptedKeyAsync(vaultPath, encryptedPrivateKey, keyPassword, userId).Result;
+                    return CreateHandle(vault);
+                }
+                finally
+                {
+                    Array.Clear(keyPassword, 0, keyPassword.Length);
+                }
+            }
+            catch (AggregateException ex) when (ex.InnerException is UnauthorizedAccessException)
+            {
+                SetLastError("Invalid key or password");
+                return IntPtr.Zero;
+            }
+            catch (Exception ex)
+            {
+                SetLastError($"Failed to load vault with key: {ex.Message}");
+                return IntPtr.Zero;
+            }
+        }
+
+        /// <summary>
+        /// Rotates the vault key for a public-key membership: adds a new seed and re-wraps the fresh key
+        /// to admin and every public-key member, without any member's password. Fails if non-admin
+        /// password recipients exist.
+        /// </summary>
+        [UnmanagedCallersOnly(EntryPoint = "titan_vault_rotate_keys_pubkey")]
+        public static unsafe int RotateKeysForPublicKeyMembers(
+            byte* vaultPathBytes,
+            int vaultPathLength,
+            byte* adminPasswordBytes,
+            int adminPasswordLength)
+        {
+            try
+            {
+                if (vaultPathBytes == null || vaultPathLength <= 0 ||
+                    adminPasswordBytes == null || adminPasswordLength <= 0)
+                {
+                    SetLastError("Invalid parameters");
+                    return TITAN_VAULT_ERROR_INVALID_PARAMETER;
+                }
+
+                var vaultPath = GetUtf8String((IntPtr)vaultPathBytes, vaultPathLength);
+                var adminPassword = GetPasswordChars((IntPtr)adminPasswordBytes, adminPasswordLength);
+                if (string.IsNullOrEmpty(vaultPath) || adminPassword == null)
+                {
+                    SetLastError("Failed to decode parameters");
+                    return TITAN_VAULT_ERROR_INVALID_PARAMETER;
+                }
+
+                try
+                {
+                    VaultManager.RotateForPublicKeyMembersAsync(vaultPath, adminPassword).Wait();
+                    return TITAN_VAULT_SUCCESS;
+                }
+                finally
+                {
+                    Array.Clear(adminPassword, 0, adminPassword.Length);
+                }
+            }
+            catch (AggregateException ex) when (ex.InnerException is UnauthorizedAccessException)
+            {
+                SetLastError("Invalid admin password");
+                return TITAN_VAULT_ERROR_INVALID_PASSWORD;
+            }
+            catch (AggregateException ex) when (ex.InnerException != null)
+            {
+                SetLastError($"Failed to rotate keys: {ex.InnerException.Message}");
+                return TITAN_VAULT_ERROR_INTERNAL;
+            }
+            catch (Exception ex)
+            {
+                SetLastError($"Failed to rotate keys: {ex.Message}");
+                return TITAN_VAULT_ERROR_INTERNAL;
+            }
+        }
+
         #endregion
 
         #region File Operations

@@ -85,6 +85,16 @@ function load(libPath) {
     getVaultUsers: lib.func('titan_vault_get_vault_users', 'int',
       ['char *', 'int', 'char *', 'int', 'void *', 'void *']),
     rotateKeys: lib.func('titan_vault_rotate_keys', 'int', ['char *', 'int', 'char *', 'int', 'int']),
+
+    // UVF public-key (asymmetric) membership.
+    // pub/priv buffers + in/out int* sizes (set to required length).
+    generateUserKeyPair: lib.func('titan_vault_generate_user_keypair', 'int',
+      ['void *', 'int', 'void *', '_Inout_ int *', 'void *', '_Inout_ int *']),
+    addUserByPublicKey: lib.func('titan_vault_add_user_by_public_key', 'int',
+      ['char *', 'int', 'char *', 'int', 'char *', 'int', 'void *', 'int']),
+    loadUvfWithKey: lib.func('titan_vault_load_uvf_vault_with_key', 'void *',
+      ['char *', 'int', 'void *', 'int', 'char *', 'int', 'char *', 'int']),
+    rotateKeysPubKey: lib.func('titan_vault_rotate_keys_pubkey', 'int', ['char *', 'int', 'char *', 'int']),
   };
 }
 
@@ -247,6 +257,43 @@ function runDemo(lib, format, vaultDir, password, state) {
     if (rc === TITAN_VAULT_SUCCESS) console.log('  Key rotation tests for UVF: PASSED');
     else if (/not implemented/i.test(lib.getLastError())) console.log('  Key rotation tests for UVF: SKIPPED (not implemented)');
     else { state.failed++; console.log(`  Key rotation tests for UVF: FAILED — ${lib.getLastError()}`); }
+
+    // Public-key (asymmetric) membership: admin grants access to a public key, the user opens with
+    // their private key, and the admin can rotate the key without the member's password. Runs before
+    // the password Multi-user section so only admin + the public-key user exist at rotation time.
+    section('Public-key multi-user', () => {
+      const bob = 'bob', keyPw = 'bob-key-pass-123';
+
+      // 1. Generate bob's key pair (public key + password-encrypted private key) via the C ABI.
+      const pubBuf = Buffer.alloc(4096), privBuf = Buffer.alloc(8192);
+      const pubSize = [pubBuf.length], privSize = [privBuf.length];
+      const keyPwBuf = Buffer.from(keyPw, 'utf8');
+      check(lib, lib.generateUserKeyPair(keyPwBuf, keyPwBuf.length, pubBuf, pubSize, privBuf, privSize), 'generate_user_keypair');
+      const publicKey = pubBuf.subarray(0, pubSize[0]);
+      const encryptedPrivateKey = privBuf.subarray(0, privSize[0]);
+      console.log(`    generated bob key pair (public ${pubSize[0]}B, encrypted private ${privSize[0]}B)`);
+
+      // 2. Grant bob access by PUBLIC key (admin needs no password from bob).
+      check(lib, lib.addUserByPublicKey(vaultDir, vlen, password, plen, bob, u8(bob), publicKey, publicKey.length), 'add_user_by_public_key');
+
+      // 3. Open the vault as bob with his PRIVATE key and read the admin-written file.
+      const readAsBob = () => {
+        const h = lib.loadUvfWithKey(vaultDir, vlen, encryptedPrivateKey, encryptedPrivateKey.length, keyPw, u8(keyPw), bob, u8(bob));
+        if (!h) throw new Error(`load as bob failed: ${lib.getLastError()}`);
+        try {
+          const buf = Buffer.alloc(4096), size = [buf.length];
+          check(lib, lib.readFile(h, '/persist.txt', u8('/persist.txt'), buf, size), 'read as bob');
+          if (!buf.subarray(0, size[0]).equals(persistPayload)) throw new Error('bob read mismatch');
+        } finally { lib.closeVault(h); }
+      };
+      readAsBob();
+      console.log('    opened as bob (public-key user) and read the admin file OK');
+
+      // 4. Rotate the key for public-key members — admin alone, no bob password — then bob still reads.
+      check(lib, lib.rotateKeysPubKey(vaultDir, vlen, password, plen), 'rotate_keys_pubkey');
+      readAsBob();
+      console.log('    rotated keys (no member password) and bob still reads OK');
+    });
 
     section('Multi-user', () => {
       const alice = 'alice', alicePw = 'alice-passphrase-123';

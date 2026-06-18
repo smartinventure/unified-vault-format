@@ -4,8 +4,9 @@ Uses [`koffi`](https://koffi.dev) (a modern, maintained FFI for Node) to call th
 C ABI. It **runs the full flow for both formats** (UVF then Cryptomator) and prints a
 `… tests for <FORMAT>: PASSED/FAILED` line per area: **File**, **Directory** (create / `list_directory`
 / `get_file_info` / `move`), **Streaming** (multi-chunk write + `stream_seek` random-access read),
-**Persistence** (close + reopen with the passphrase), and **UVF-only** key rotation + multi-user
-(`add_user` / `get_vault_users`).
+**Persistence** (close + reopen with the passphrase), and **UVF-only** key rotation, password
+multi-user (`add_user` / `get_vault_users`), and **public-key multi-user** (generate a key pair, grant
+by public key, open with the private key, rotate with no member password).
 
 ## 1. Build the native library (once)
 

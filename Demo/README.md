@@ -55,7 +55,9 @@ PASSED/FAILED` line per area:
 - **Streaming**: write a multi-chunk file via `open_write_stream`/`stream_write`, then random-access
   read with `stream_seek`/`stream_read`.
 - **Persistence**: close the vault and reopen it with the passphrase, then re-read.
-- **UVF only**: key rotation, and multi-user (`add_user` / `get_vault_users`).
+- **UVF only**: key rotation; password multi-user (`add_user` / `get_vault_users`); and **public-key
+  multi-user** — generate a key pair, grant access by public key, open with the private key, and rotate
+  the key without any member's password (Cryptomator Hub-style).
 
 > The C ABI exposes the full surface — including `titan_vault_list_directory` (the native demos *do*
 > list directories). Two current library limitations the Node demo surfaces: `rotate_keys` reports
