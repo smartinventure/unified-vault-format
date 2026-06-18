@@ -83,6 +83,51 @@ function Get-HostRid {
 
 if (-not $Platforms -or $Platforms.Count -eq 0) { $Platforms = @(Get-HostRid) }
 
+# Native AOT linker setup for Windows-on-ARM64 hosts. The ILCompiler's findvcvarsall.bat requires the
+# generic 'VC.Tools.ARM64' component and only handles AMD64 hosts, so it reports "Platform linker not
+# found" on ARM64 even when the C++ tools are installed. We work around it by importing the VC build
+# environment ourselves (vcvarsall) and telling ILC to use the tools from the environment.
+function Get-WindowsHostArch {
+    if ($env:PROCESSOR_ARCHITEW6432) { return $env:PROCESSOR_ARCHITEW6432 }
+    return $env:PROCESSOR_ARCHITECTURE
+}
+
+function Get-VcArchArg($rid) {
+    # vcvarsall arch: native (arm64/amd64/x86) when host==target, else "<host>_<target>".
+    $h = switch ((Get-WindowsHostArch)) { 'ARM64' { 'arm64' } 'AMD64' { 'amd64' } default { 'x86' } }
+    $t = switch (($rid -split '-')[-1]) { 'arm64' { 'arm64' } 'x64' { 'amd64' } 'x86' { 'x86' } default { 'amd64' } }
+    if ($h -eq $t) { return $t } else { return "${h}_${t}" }
+}
+
+function Find-Vcvarsall {
+    $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vswhere.exe'
+    if (-not (Test-Path $vswhere)) { return $null }
+    # Prefer an install that actually has the C++ tools (-latest alone can return e.g. SSMS, which has
+    # no vcvarsall). Fall back to any install that ships vcvarsall.bat.
+    $candidates = @()
+    $candidates += & $vswhere -latest -prerelease -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath 2>$null
+    $candidates += & $vswhere -all -prerelease -products * -property installationPath 2>$null
+    foreach ($base in $candidates) {
+        if (-not $base) { continue }
+        $vc = Join-Path $base 'VC\Auxiliary\Build\vcvarsall.bat'
+        if (Test-Path $vc) { return $vc }
+    }
+    return $null
+}
+
+function Initialize-VcEnvironment($archArg) {
+    $vcvars = Find-Vcvarsall
+    if (-not $vcvars) { return $false }
+    Write-Host "   setting up VC build env: vcvarsall $archArg" -ForegroundColor DarkGray
+    $lines = cmd /c "`"$vcvars`" $archArg >NUL 2>&1 && set" 2>$null
+    if ($LASTEXITCODE -ne 0) { return $false }
+    foreach ($line in $lines) {
+        $i = $line.IndexOf('=')
+        if ($i -gt 0) { Set-Item -Path ("env:" + $line.Substring(0, $i)) -Value $line.Substring($i + 1) }
+    }
+    return $true
+}
+
 function Invoke-Clean {
     Write-Step "Clean"
     if (Test-Path $DistRoot) { Remove-Item $DistRoot -Recurse -Force; Write-Host "removed $DistRoot" }
@@ -103,7 +148,13 @@ function Invoke-Aot {
     foreach ($rid in $Platforms) {
         $outDir = Join-Path $DistRoot "Native/$rid"
         Write-Host "-- $rid -> $outDir" -ForegroundColor Yellow
-        Invoke-Dotnet @(
+        # On ARM64 Windows hosts the default linker detection is broken; set up the VC env ourselves.
+        $extra = @()
+        if ((Get-WindowsHostArch) -eq 'ARM64') {
+            if (Initialize-VcEnvironment (Get-VcArchArg $rid)) { $extra = @('-p:IlcUseEnvironmentalTools=true') }
+            else { Write-Host "   (no VC env found; relying on default linker detection)" -ForegroundColor Yellow }
+        }
+        Invoke-Dotnet (@(
             'publish', $MasterProj,
             '-c', $Configuration,
             '-r', $rid,
@@ -115,7 +166,7 @@ function Invoke-Aot {
             '-p:DebugType=embedded',
             '-o', $outDir,
             '--verbosity', 'minimal'
-        )
+        ) + $extra)
         # The assembly is named TitanVault (UvfLib.Master.csproj AssemblyName); the native lib uses the
         # platform extension.
         $lib = Get-ChildItem $outDir -Filter '*TitanVault*' -File -ErrorAction SilentlyContinue |

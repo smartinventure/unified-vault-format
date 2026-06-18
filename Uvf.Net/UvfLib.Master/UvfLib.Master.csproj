@@ -52,11 +52,9 @@
     <ProjectReference Include="..\UvfLib.Vault\UvfLib.Vault.csproj" />
   </ItemGroup>
   
-  <!-- Native AOT Analyzer for export validation - Release only. PrivateAssets=all so it is a build-only
-       tool and never becomes a dependency of the published managed package. -->
-  <ItemGroup Condition="'$(Configuration)' == 'Release'">
-    <PackageReference Include="Microsoft.DotNet.ILCompiler" Version="8.0.0" PrivateAssets="all" />
-  </ItemGroup>
+  <!-- Native AOT: the .NET SDK supplies the matching ILCompiler automatically when PublishAot=true.
+       We intentionally do NOT pin Microsoft.DotNet.ILCompiler — an explicit (old) pin breaks linker
+       detection on newer hosts (e.g. Windows on ARM64) and triggers SDK versioning warnings. -->
 
   <!-- Auto-copy AOT DLL to distribution directory after publish -->
   <Target Name="CopyToDistribution" AfterTargets="Publish" Condition="'$(PublishAot)' == 'true'">

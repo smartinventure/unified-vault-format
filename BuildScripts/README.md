@@ -54,8 +54,12 @@ The scripts resolve all paths from their own location, so they work from any wor
 
 - **.NET 8 SDK** (all tasks).
 - **`aot` only — a native C/C++ toolchain** (Native AOT links a real binary):
-  - **Windows:** Visual Studio 2022 **Build Tools** with the *Desktop development with C++* workload
+  - **Windows:** Visual Studio **Build Tools** with the *Desktop development with C++* workload
     (the MSVC linker `link.exe`). Without it the link step fails with `vswhere.exe` / `link.exe` not found.
+    - **Windows on ARM64:** also add the *C++ ARM64/ARM64EC build tools* individual component. The
+      ILCompiler's own linker detection is broken on ARM64 hosts, so `build.ps1` sets up the VC build
+      environment itself (`vcvarsall` + `-p:IlcUseEnvironmentalTools=true`) — no extra steps needed,
+      and it cross-builds `win-x64` from an ARM64 host too.
   - **Linux:** `clang` + build/dev packages, e.g. `sudo apt-get install clang build-essential zlib1g-dev libicu-dev`.
   - **macOS:** Xcode command-line tools (`xcode-select --install`).
 - **`bindings` only:** PowerShell 7+ (`pwsh`).
