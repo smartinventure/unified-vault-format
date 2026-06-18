@@ -313,8 +313,20 @@ namespace UvfLib.Master.PathTranslators
                     actualDirectoryName = encryptedSubDirName;
                 }
                 
-                // 4. Create reference directory
-                string subDirReferenceDir = Path.Combine(currentReferenceDir, actualDirectoryName);
+                // 4. Create reference directory IN THE PARENT'S CONTENT directory (where its children
+                //    live), not under the previous reference directory — otherwise nested dirs (a/b/c)
+                //    are placed wrongly.
+                string subDirReferenceDir = Path.Combine(ContentDirOf(currentDirMetadata), actualDirectoryName);
+
+                // If it already exists (mkdir -p over an existing parent), navigate into it instead of
+                // recreating it with a new id (which would orphan the parent's existing contents).
+                if (await _underlyingStorage.FileExistsAsync(Path.Combine(subDirReferenceDir, "dir.c9r"), cancellationToken))
+                {
+                    currentDirMetadata = await LoadDirectoryMetadataFromDirC9rAsync(subDirReferenceDir, cancellationToken);
+                    currentReferenceDir = subDirReferenceDir;
+                    continue;
+                }
+
                 await _underlyingStorage.CreateDirectoryAsync(subDirReferenceDir, cancellationToken);
                 
                 // 5. If name shortening was used, create the name.c9s file
@@ -593,4 +605,4 @@ namespace UvfLib.Master.PathTranslators
 
         #endregion
     }
-} 
+} 
