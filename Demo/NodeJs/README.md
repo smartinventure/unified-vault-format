@@ -1,12 +1,17 @@
 # Node.js demo (native `TitanVault` via `koffi`)
 
 Uses [`koffi`](https://koffi.dev) (a modern, maintained FFI for Node) to call the native `TitanVault`
-C ABI. It **runs the full flow for both formats** (UVF then Cryptomator) and prints a
-`… tests for <FORMAT>: PASSED/FAILED` line per area: **File**, **Directory** (create / `list_directory`
-/ `get_file_info` / `move`), **Streaming** (multi-chunk write + `stream_seek` random-access read),
-**Persistence** (close + reopen with the passphrase), and **UVF-only** key rotation, password
-multi-user (`add_user` / `get_vault_users`), and **public-key multi-user** (generate a key pair, grant
-by public key, open with the private key, rotate with no member password).
+C ABI. This is the **reference demo** — it exercises the **entire 46-function ABI** (see the table in
+[`../README.md`](../README.md)). It **runs the full flow for both formats** (UVF then Cryptomator) and
+prints a `… tests for <FORMAT>: PASSED/FAILED` line per area: **Detect format**, **File** (+ filename-leak
+check), **Text helpers** (`write`/`append`/`read_all_text`), **Directory** (create / `list_directory` /
+`get_file_info` / `move`), **Streaming** (multi-chunk write, `stream_seek`/`stream_get_position`
+random access, `open_stream_with_flags`, `stream_flush`/`stream_set_length`), **Persistence** (close +
+reopen), **Maintenance** (`backup_files`, `secure_zero_memory`, password change + reopen —
+`change_uvf_admin_password` / `change_cryptomator_password`), and **UVF-only** key rotation, password
+multi-user (`add_user` / `get_vault_users` / `change_uvf_user_password` / `remove_user`), and
+**public-key multi-user** (generate a key pair, grant by public key, open with the private key, rotate
+with no member password).
 
 ## 1. Build the native library (once)
 

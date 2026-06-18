@@ -110,8 +110,37 @@ function load(libPath) {
     loadUvfWithKey: lib.func('titan_vault_load_uvf_vault_with_key', 'void *',
       ['char *', 'int', 'void *', 'int', 'char *', 'int', 'char *', 'int']),
     rotateKeysPubKey: lib.func('titan_vault_rotate_keys_pubkey', 'int', ['char *', 'int', 'char *', 'int']),
+
+    // Library / maintenance utilities.
+    detectVaultFormat: lib.func('titan_vault_detect_vault_format', 'int', ['char *', 'int']),
+    secureZeroMemory: lib.func('titan_vault_secure_zero_memory', 'void', ['void *', 'int']),
+    backupFiles: lib.func('titan_vault_backup_files', 'int', ['char *', 'int', 'char *', 'int', 'int']),
+    changeCryptomatorPassword: lib.func('titan_vault_change_cryptomator_password', 'int',
+      ['char *', 'int', 'char *', 'int', 'char *', 'int']),
+    changeUvfAdminPassword: lib.func('titan_vault_change_uvf_admin_password', 'int',
+      ['char *', 'int', 'char *', 'int', 'char *', 'int']),
+    changeUvfUserPassword: lib.func('titan_vault_change_uvf_user_password', 'int',
+      ['char *', 'int', 'char *', 'int', 'char *', 'int', 'char *', 'int']),
+    removeUser: lib.func('titan_vault_remove_user', 'int', ['char *', 'int', 'char *', 'int', 'char *', 'int']),
+
+    // Text convenience (UTF-8). read_all_text returns a heap char* that must be freed.
+    writeAllText: lib.func('titan_vault_write_all_text', 'int', ['void *', 'char *', 'int', 'char *', 'int']),
+    appendAllText: lib.func('titan_vault_append_all_text', 'int', ['void *', 'char *', 'int', 'char *', 'int']),
+    readAllText: lib.func('titan_vault_read_all_text', 'void *', ['void *', 'char *', 'int']),
+
+    // Fuller stream API (the core read/write/seek are above).
+    openStreamWithFlags: lib.func('titan_vault_open_stream_with_flags', 'void *', ['void *', 'char *', 'int', 'int']),
+    streamGetPosition: lib.func('titan_vault_stream_get_position', 'int64', ['void *']),
+    streamSetLength: lib.func('titan_vault_stream_set_length', 'int', ['void *', 'int64']),
+    streamFlush: lib.func('titan_vault_stream_flush', 'int', ['void *']),
   };
 }
+
+// StorageLib.Abstractions.OpenFlags values (for open_stream_with_flags).
+const OPEN_READONLY = 0x0000;
+const OPEN_WRITEONLY = 0x0001;
+const OPEN_CREATE = 0x0040;
+const OPEN_TRUNCATE = 0x0200;
 
 const u8 = (s) => Buffer.byteLength(s, 'utf8');
 
@@ -165,6 +194,13 @@ function runDemo(lib, format, vaultDir, password, state) {
     catch (e) { state.failed++; console.log(`  ${label} tests for ${format.toUpperCase()}: FAILED — ${e.message}`); }
   };
 
+  // 0. Detect the on-disk format (path-based — the vault need not be open).
+  section('Detect format', () => {
+    const detected = lib.detectVaultFormat(vaultDir, vlen);
+    const expected = format === 'uvf' ? TITAN_VAULT_FORMAT_UVF : TITAN_VAULT_FORMAT_CRYPTOMATOR;
+    if (detected !== expected) throw new Error(`detect_vault_format=${detected}, expected ${expected}`);
+  });
+
   // A file we deliberately keep around to prove persistence + multi-user access later.
   const persistPayload = Buffer.from('persisted across reopen', 'utf8');
   check(lib, lib.writeFile(handle, '/persist.txt', u8('/persist.txt'), persistPayload, persistPayload.length), 'write persist.txt');
@@ -182,6 +218,17 @@ function runDemo(lib, format, vaultDir, password, state) {
       if (lib.fileExists(handle, fp, u8(fp)) !== 1) throw new Error('exists should be 1');
       check(lib, lib.deleteFile(handle, fp, u8(fp)), 'delete_file');
       if (lib.fileExists(handle, fp, u8(fp)) !== 0) throw new Error('exists should be 0 after delete');
+    });
+
+    // 1b. UTF-8 text convenience: write, append, read-back.
+    section('Text helpers', () => {
+      const tf = '/notes.txt', first = 'first line\n', second = 'second line\n';
+      check(lib, lib.writeAllText(handle, tf, u8(tf), first, u8(first)), 'write_all_text');
+      check(lib, lib.appendAllText(handle, tf, u8(tf), second, u8(second)), 'append_all_text');
+      const ptr = lib.readAllText(handle, tf, u8(tf));
+      if (!ptr) throw new Error(`read_all_text: ${lib.getLastError()}`);
+      const text = koffi.decode(ptr, 'char', -1); lib.freeString(ptr);
+      if (text !== first + second) throw new Error(`text round-trip mismatch: ${JSON.stringify(text)}`);
     });
 
     // 2. Directories: create, write into, list, file-info, move/rename.
@@ -219,8 +266,10 @@ function runDemo(lib, format, vaultDir, password, state) {
 
       const ws = lib.openWriteStream(handle, fp, u8(fp));
       if (!ws) throw new Error(`open_write_stream: ${lib.getLastError()}`);
-      try { for (let i = 0; i < CHUNKS; i++) if (lib.streamWrite(ws, chunk, CHUNK) !== CHUNK) throw new Error('short write'); }
-      finally { lib.closeStream(ws); }
+      try {
+        for (let i = 0; i < CHUNKS; i++) if (lib.streamWrite(ws, chunk, CHUNK) !== CHUNK) throw new Error('short write');
+        check(lib, lib.streamFlush(ws), 'stream_flush');
+      } finally { lib.closeStream(ws); }
 
       const rs = lib.openReadStream(handle, fp, u8(fp));
       if (!rs) throw new Error(`open_read_stream: ${lib.getLastError()}`);
@@ -235,6 +284,8 @@ function runDemo(lib, format, vaultDir, password, state) {
           off += got;
         }
         if (off !== total) throw new Error(`read ${off} of ${total}`);
+        const posAfterRead = Number(lib.streamGetPosition(rs));
+        if (posAfterRead !== total) throw new Error(`stream_get_position ${posAfterRead} != ${total}`);
         // random access: seek to a mid-file offset and verify (best-effort — not all backends seek)
         const seekTo = 70000;
         const pos = Number(lib.streamSeek(rs, seekTo, 0)); // 0 = SEEK_SET
@@ -246,7 +297,18 @@ function runDemo(lib, format, vaultDir, password, state) {
         } else {
           console.log(`    wrote+verified ${total} bytes; seek not supported by this backend (skipped)`);
         }
+        // open_stream_with_flags: reopen read-only and confirm the length matches.
+        const rs2 = lib.openStreamWithFlags(handle, fp, u8(fp), OPEN_READONLY);
+        if (!rs2) throw new Error(`open_stream_with_flags: ${lib.getLastError()}`);
+        try { if (Number(lib.streamGetLength(rs2)) !== total) throw new Error('flags-open length mismatch'); }
+        finally { lib.closeStream(rs2); }
       } finally { lib.closeStream(rs); }
+
+      // stream_set_length: truncation of encrypted streams is backend-dependent; best-effort.
+      try {
+        const ts = lib.openStreamWithFlags(handle, '/trunc.bin', u8('/trunc.bin'), OPEN_WRITEONLY | OPEN_CREATE | OPEN_TRUNCATE);
+        if (ts) { try { lib.streamWrite(ts, chunk, CHUNK); lib.streamSetLength(ts, 4096); } finally { lib.closeStream(ts); } }
+      } catch { /* optional capability */ }
     });
   } finally {
     lib.closeVault(handle);
@@ -336,8 +398,45 @@ function runDemo(lib, format, vaultDir, password, state) {
       } catch (e) {
         console.log(`    ⚠ opening as a secondary user is not yet supported by the library: ${e.message}`);
       }
+
+      // Change a member's password (admin-driven), then remove the member and confirm they're gone.
+      const aliceNewPw = 'alice-passphrase-456';
+      check(lib, lib.changeUvfUserPassword(vaultDir, vlen, password, plen, alice, u8(alice), aliceNewPw, u8(aliceNewPw)), 'change_uvf_user_password');
+      check(lib, lib.removeUser(vaultDir, vlen, password, plen, alice, u8(alice)), 'remove_user');
+      const usersBuf2 = koffi.alloc('void *', MAX_LIST);
+      const maxBuf2 = koffi.alloc('int', 1); koffi.encode(maxBuf2, 'int', MAX_LIST);
+      const n2 = lib.getVaultUsers(vaultDir, vlen, password, plen, usersBuf2, maxBuf2);
+      const users2 = readStringArray(lib, usersBuf2, Math.max(n2, 0));
+      if (users2.includes(alice)) throw new Error(`removed user still listed (got ${JSON.stringify(users2)})`);
+      console.log(`    changed alice's password, then removed alice; users now: ${JSON.stringify(users2)}`);
     });
   }
+
+  // 7. Maintenance (both formats): backup the key files, secure-wipe a buffer, change the
+  //    password, and reopen with the new password.
+  section('Maintenance', () => {
+    const backupDir = path.join(os.tmpdir(), `uvf-backup-${format}-${process.pid}`);
+    fs.rmSync(backupDir, { recursive: true, force: true });
+    check(lib, lib.backupFiles(vaultDir, vlen, backupDir, u8(backupDir), 1), 'backup_files');
+    if (!fs.existsSync(backupDir) || walk(backupDir).length === 0) throw new Error('backup produced no files');
+
+    const secret = Buffer.from('super-secret-key-material', 'utf8');
+    lib.secureZeroMemory(secret, secret.length);
+    if (secret.some((b) => b !== 0)) throw new Error('secure_zero_memory did not zero the buffer');
+
+    const newPw = password + '-rotated';
+    if (format === 'uvf') check(lib, lib.changeUvfAdminPassword(vaultDir, vlen, password, plen, newPw, u8(newPw)), 'change_uvf_admin_password');
+    else check(lib, lib.changeCryptomatorPassword(vaultDir, vlen, password, plen, newPw, u8(newPw)), 'change_cryptomator_password');
+    const h3 = openVault(lib, format, vaultDir, newPw);
+    if (!h3) throw new Error(`reopen after password change failed: ${lib.getLastError()}`);
+    try {
+      const buf = Buffer.alloc(4096), size = [buf.length];
+      check(lib, lib.readFile(h3, '/persist.txt', u8('/persist.txt'), buf, size), 'read after password change');
+      if (!buf.subarray(0, size[0]).equals(persistPayload)) throw new Error('content mismatch after password change');
+    } finally { lib.closeVault(h3); }
+    fs.rmSync(backupDir, { recursive: true, force: true });
+    console.log(`    backed up key files, secure-zeroed a buffer, changed the ${format} password and re-read OK`);
+  });
 
   console.log(`✅ ${format} demo finished.`);
 }
