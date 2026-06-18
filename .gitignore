@@ -889,3 +889,6 @@ Temporary Items
 # Retired sample apps — replaced by /Demo (kept locally for reference, not published).
 /Uvf.Net/DemoApp/
 /Uvf.Net/ExampleVaultApp/
+
+# Local reference checkout / worktree of StorageLib (not part of this repo)
+/External/
