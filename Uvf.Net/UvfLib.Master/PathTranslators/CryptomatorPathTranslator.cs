@@ -97,9 +97,11 @@ namespace UvfLib.Master.PathTranslators
                     actualDirectoryName = encryptedDirName;
                 }
                 
-                // Move to the reference directory (this contains dir.c9r)
-                currentReferenceDir = Path.Combine(currentReferenceDir, actualDirectoryName);
-                
+                // The subdirectory's <name>.c9r reference entry lives in the CURRENT directory's CONTENT
+                // directory (not in the previous reference directory). Resolving it from the content
+                // directory each step is what lets nested paths (a/b/c) hop between content directories.
+                currentReferenceDir = Path.Combine(ContentDirOf(currentDirMetadata), actualDirectoryName);
+
                 // Load the subdirectory metadata from dir.c9r in the REFERENCE directory
                 currentDirMetadata = await LoadDirectoryMetadataFromDirC9rAsync(currentReferenceDir, CancellationToken.None);
             }
@@ -121,11 +123,12 @@ namespace UvfLib.Master.PathTranslators
                     actualFinalDirectoryName = encryptedFinalName;
                 }
                 
-                // It's a directory - return the reference directory path
+                // It's a directory - its <name>.c9r reference entry lives in the parent's CONTENT dir.
+                string finalDirReferencePath = Path.Combine(ContentDirOf(currentDirMetadata), actualFinalDirectoryName);
                 return new VaultPathResult
                 {
-                    StoragePath = Path.Combine(currentReferenceDir, actualFinalDirectoryName),
-                    ContentDirectoryPath = Path.Combine(currentReferenceDir, actualFinalDirectoryName),
+                    StoragePath = finalDirReferencePath,
+                    ContentDirectoryPath = finalDirReferencePath,
                     EncryptedFilename = actualFinalDirectoryName,
                     ParentMetadata = currentDirMetadata,
                     IsEncrypted = true,
@@ -194,6 +197,16 @@ namespace UvfLib.Master.PathTranslators
         #endregion
 
         #region Helper Methods
+
+        /// <summary>
+        /// Returns the on-disk CONTENT directory (d/XX/YYYY…) for a directory's metadata, where that
+        /// directory's child entries (&lt;name&gt;.c9r files and subdir references) are stored.
+        /// </summary>
+        private string ContentDirOf(DirectoryMetadata metadata)
+        {
+            string vaultDirPath = PathNormalizer.NormalizeVaultDirectoryPath(_vault.GetDirectoryPath(metadata));
+            return PathNormalizer.CombineWithMountPoint(_vaultBasePath, vaultDirPath);
+        }
 
         private bool IsDirectory(string virtualPath)
         {

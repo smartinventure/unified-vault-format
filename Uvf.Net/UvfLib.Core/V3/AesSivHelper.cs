@@ -49,10 +49,12 @@ namespace UvfLib.Core.V3
 
 
             // Step 1: Generate the SIV (Synthetic Initialization Vector) using S2V operation.
-            // No associated data must map to ZERO S2V components (matching the Java reference's
-            // variadic byte[][] with no arguments). A non-null but empty 'ad' is therefore treated
-            // as "no AD" rather than as a single empty component, which would change the SIV.
-            byte[] siv = S2V(k1, plaintext, ad != null && ad.Length > 0 ? new[] { ad } : Array.Empty<byte[]>());
+            // 'ad' is THE single associated-data field: null => no field (zero S2V components, as used by
+            // directory-id hashing), non-null => exactly ONE component — even when empty. An empty but
+            // present field (e.g. the Cryptomator root directory id "") is a single empty component,
+            // matching the reference siv-mode; collapsing it to "no AD" changes the SIV and makes our
+            // vaults incompatible with real Cryptomator vaults.
+            byte[] siv = S2V(k1, plaintext, ad != null ? new[] { ad } : Array.Empty<byte[]>());
 
             // Step 2: Encrypt the plaintext using AES-CTR with modified SIV as counter
             byte[] modifiedSiv = new byte[BLOCK_SIZE];
@@ -324,8 +326,8 @@ namespace UvfLib.Core.V3
             byte[] plaintext = EncryptWithCtr(k2, modifiedSiv, actualCiphertext); // CTR encryption is its own inverse
 
             // Step 2: Recalculate SIV using S2V on the decrypted plaintext and associated data.
-            // Mirror the encrypt side: empty/no AD maps to ZERO S2V components (see Encrypt).
-            byte[] calculatedSiv = S2V(k1, plaintext, ad != null && ad.Length > 0 ? new[] { ad } : Array.Empty<byte[]>());
+            // Mirror the encrypt side: null => zero components, non-null (even empty) => one component.
+            byte[] calculatedSiv = S2V(k1, plaintext, ad != null ? new[] { ad } : Array.Empty<byte[]>());
 
             // Step 3: Compare the original SIV with the recalculated SIV
             if (!CryptographicOperations.FixedTimeEquals(siv, calculatedSiv))
