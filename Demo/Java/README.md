@@ -4,18 +4,23 @@ Uses [JNA](https://github.com/java-native-access/jna) to call the native `TitanV
 write): create a vault, encrypt/decrypt a file, check existence, and delete it. Requires JDK 17+ and
 Maven.
 
-## 1. Build the native library (once, from the repo root)
+## 1. Build the native library (once)
+
+```powershell
+../../BuildScripts/build.ps1 -Task aot      # Windows  -> Dist/Native/win-x64/TitanVault.dll
+```
 
 ```bash
-dotnet publish Uvf.Net/UvfLib.Master/UvfLib.Master.csproj -c Release -r win-x64 -p:PublishAot=true
-# -> TitanVault.dll  (or libTitanVault.so / .dylib)
+../../BuildScripts/build.sh --task aot       # Linux/macOS -> Dist/Native/<rid>/libTitanVault.{so,dylib}
 ```
+
+Native AOT needs a C/C++ toolchain — see [`../../BuildScripts/README.md`](../../BuildScripts/README.md).
 
 ## 2. Run
 
 ```bash
-mvn -q compile exec:java -Dexec.args="--lib /path/to/TitanVault.dll --format uvf"
-mvn -q compile exec:java -Dexec.args="--lib /path/to/TitanVault.dll --format cryptomator"
+mvn -q compile exec:java -Dexec.args="--lib ../../Dist/Native/win-x64/TitanVault.dll --format uvf"
+mvn -q compile exec:java -Dexec.args="--lib ../../Dist/Native/win-x64/TitanVault.dll --format cryptomator"
 ```
 
 (`--lib` defaults to `./TitanVault.dll` or the `TITANVAULT_LIB` env var. Alternatively put the native

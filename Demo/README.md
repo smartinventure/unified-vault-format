@@ -14,13 +14,28 @@ UvfLib can be consumed two ways, and there is a demo for each:
 
 ## Building the native library (for the Python / Node.js / Java demos)
 
-The non-.NET demos call the native `TitanVault` shared library through its C ABI. Build it once from
-the repository root for your platform:
+The non-.NET demos call the native `TitanVault` shared library through its C ABI. Build it once with
+the build script (full reference: [`../BuildScripts/README.md`](../BuildScripts/README.md)):
+
+```powershell
+# Windows (PowerShell) — needs VS 2022 Build Tools + the "Desktop development with C++" workload
+../BuildScripts/build.ps1 -Task aot
+```
 
 ```bash
-dotnet publish Uvf.Net/UvfLib.Master/UvfLib.Master.csproj -c Release -r win-x64 -p:PublishAot=true
-# -> TitanVault.dll (Windows). Use -r linux-x64 / osx-arm64 etc. for libTitanVault.so / .dylib
+# Linux / macOS — needs clang + build tools (e.g. build-essential, zlib1g-dev, libicu-dev)
+../BuildScripts/build.sh --task aot
 ```
+
+This Native-AOT-publishes `UvfLib.Master` and writes the library to **`Dist/Native/<rid>/`**:
+`TitanVault.dll` (Windows) · `libTitanVault.so` (Linux) · `libTitanVault.dylib` (macOS), plus a
+`build-manifest.json` with SHA-256 hashes. Add `-Platforms`/`--platforms` for other RIDs (e.g.
+`linux-x64,osx-arm64`). Under the hood it runs
+`dotnet publish Uvf.Net/UvfLib.Master/UvfLib.Master.csproj -c Release -r <rid> -p:PublishAot=true`.
+
+> **Native AOT needs a C/C++ toolchain** (the platform linker). Without it the link step fails with
+> e.g. `link.exe`/`vswhere.exe` not found on Windows. A plain managed build won't work for FFI — the
+> demos need the *native* library.
 
 Then point each demo at the produced file with `--lib <path>` (or the `TITANVAULT_LIB` env var). The
 `.NET` demo needs none of this — it uses the managed package.
