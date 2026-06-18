@@ -907,10 +907,13 @@ namespace UvfLib.Master
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"[VaultManager DEBUG] ERROR in InitializeNewMultiUserUvfVaultAsync: {ex.GetType().Name}: {ex.Message}");
-                if (ex.InnerException != null)
+                if (UvfLib.Core.Common.DebugLog.IsEnabled)
                 {
-                    Console.WriteLine($"[VaultManager DEBUG] Inner exception: {ex.InnerException.GetType().Name}: {ex.InnerException.Message}");
+                    Console.WriteLine($"[VaultManager DEBUG] ERROR in InitializeNewMultiUserUvfVaultAsync: {ex.GetType().Name}: {ex.Message}");
+                    if (ex.InnerException != null)
+                    {
+                        Console.WriteLine($"[VaultManager DEBUG] Inner exception: {ex.InnerException.GetType().Name}: {ex.InnerException.Message}");
+                    }
                 }
                 
                 // Clean up on failure
@@ -941,7 +944,8 @@ namespace UvfLib.Master
                 bool encryptFilenames;
                 try
                 {
-                    encryptFilenames = VaultHandler.DetectFilenameEncryption(vaultFileContent, userPasswordBytes);
+                    // Pass userId so a non-admin user's password is matched against their own recipient.
+                    encryptFilenames = VaultHandler.DetectFilenameEncryption(vaultFileContent, userPasswordBytes, userId);
                 }
                 finally
                 {
@@ -1016,12 +1020,15 @@ namespace UvfLib.Master
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"[VaultManager DEBUG] ERROR in LoadMultiUserUvfVaultInternalAsync: {ex.GetType().Name}: {ex.Message}");
-                if (ex.InnerException != null)
+                if (UvfLib.Core.Common.DebugLog.IsEnabled)
                 {
-                    Console.WriteLine($"[VaultManager DEBUG] Inner exception: {ex.InnerException.GetType().Name}: {ex.InnerException.Message}");
+                    Console.WriteLine($"[VaultManager DEBUG] ERROR in LoadMultiUserUvfVaultInternalAsync: {ex.GetType().Name}: {ex.Message}");
+                    if (ex.InnerException != null)
+                    {
+                        Console.WriteLine($"[VaultManager DEBUG] Inner exception: {ex.InnerException.GetType().Name}: {ex.InnerException.Message}");
+                    }
+                    Console.WriteLine($"[VaultManager DEBUG] Stack trace: {ex.StackTrace}");
                 }
-                Console.WriteLine($"[VaultManager DEBUG] Stack trace: {ex.StackTrace}");
                 
                 // Clean up on failure
                 _vault?.Dispose();
@@ -1101,14 +1108,19 @@ namespace UvfLib.Master
                     "Consider removing all users except admin before key rotation, or implement a more sophisticated key management system.");
             }
 
-            // If only admin user exists, we can proceed with rotation
-            // Load the vault to get current payload
-            var payload = UvfLib.Core.Jwe.MultiUserJweVaultManager.LoadMultiUserVault(jweString, adminPassword, "admin");
-
-            // For now, key rotation for multi-user vaults is not fully implemented
-            // This would require generating new seeds and re-encrypting the vault
-            throw new NotImplementedException("Multi-user vault key rotation is not yet fully implemented. " +
-                "As a workaround, you can create a new vault and migrate data, or remove all users except admin before rotation.");
+            // Only the admin user exists -> rotate by adding a new seed and re-encrypting the vault file.
+            // Existing files stay readable via the retained older seeds; new files use the latest seed
+            // (forward secrecy). Reuses the implementation in VaultHandler.RotateUvfVaultKey.
+            byte[] adminPasswordBytes = System.Text.Encoding.UTF8.GetBytes(adminPassword);
+            try
+            {
+                byte[] rotatedVaultContent = VaultHandler.RotateUvfVaultKey(vaultFileContent, adminPasswordBytes);
+                await System.IO.File.WriteAllBytesAsync(vaultFilePath, rotatedVaultContent);
+            }
+            finally
+            {
+                System.Security.Cryptography.CryptographicOperations.ZeroMemory(adminPasswordBytes);
+            }
         }
 
         /// <summary>
@@ -1474,10 +1486,11 @@ namespace UvfLib.Master
         /// </summary>
         /// <param name="vaultFileContent">Content of the vault.uvf file</param>
         /// <param name="passwordBytes">Password as UTF-8 encoded bytes</param>
+        /// <param name="userId">Optional user id; required for non-admin users (null tries all recipients).</param>
         /// <returns>True if filename encryption is enabled, false otherwise</returns>
-        public static bool DetectFilenameEncryption(byte[] vaultFileContent, byte[] passwordBytes)
+        public static bool DetectFilenameEncryption(byte[] vaultFileContent, byte[] passwordBytes, string? userId = null)
         {
-            return VaultHandler.DetectFilenameEncryption(vaultFileContent, passwordBytes);
+            return VaultHandler.DetectFilenameEncryption(vaultFileContent, passwordBytes, userId);
         }
 
         #endregion

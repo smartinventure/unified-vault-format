@@ -82,7 +82,7 @@ namespace UvfLib.Master.PathTranslators
                     string simpleFilePath = PathNormalizer.CombineWithMountPoint(_vaultBasePath, physicalPath + GetEncryptedFileExtension());
                     
                     // Debug output to track path translation
-                    Console.WriteLine($"🔍 UvfPathTranslator: '{virtualPath}' → '{simpleFilePath}'");
+                    if (UvfLib.Core.Common.DebugLog.IsEnabled) Console.WriteLine($"🔍 UvfPathTranslator: '{virtualPath}' → '{simpleFilePath}'");
                     
                     return new VaultPathResult
                     {
@@ -221,7 +221,7 @@ namespace UvfLib.Master.PathTranslators
                 string encryptedFilePath = Path.Combine(currentContentPath, encryptedFileName);
                 
                 // Debug output to track path translation
-                Console.WriteLine($"🔍 UvfPathTranslator: '{virtualPath}' → '{encryptedFilePath}'");
+                if (UvfLib.Core.Common.DebugLog.IsEnabled) Console.WriteLine($"🔍 UvfPathTranslator: '{virtualPath}' → '{encryptedFilePath}'");
                 
                 return new VaultPathResult
                 {

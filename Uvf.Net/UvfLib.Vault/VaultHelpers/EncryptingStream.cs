@@ -18,6 +18,7 @@ using UvfLib.Core.CryptomatorV8;
 using System;
 using System.IO;
 using System.Text;
+using UvfLib.Core.Common;
 
 
 
@@ -202,7 +203,7 @@ namespace UvfLib.Vault.VaultHelpers
 
         private void DecryptChunkForUpdate(byte[] encryptedData, int encryptedLength, long chunkNumber)
         {
-            if (Environment.GetEnvironmentVariable("UVF_DEBUG_VERBOSE") != "false")
+            if (DebugLog.IsEnabled)
             {
                 Console.WriteLine($"🔍 DecryptChunkForUpdate: chunkNumber={chunkNumber}, encryptedLength={encryptedLength}");
             }
@@ -217,7 +218,7 @@ namespace UvfLib.Vault.VaultHelpers
                         encryptedLength - UvfLib.Core.V3.Constants.GCM_NONCE_SIZE - UvfLib.Core.V3.Constants.GCM_TAG_SIZE);
                     var tag = encryptedData.AsSpan(encryptedLength - UvfLib.Core.V3.Constants.GCM_TAG_SIZE);
 
-                    if (Environment.GetEnvironmentVariable("UVF_DEBUG_VERBOSE") != "false")
+                    if (DebugLog.IsEnabled)
                     {
                         Console.WriteLine($"🔍 Original nonce from chunk: {Convert.ToHexString(nonce)}");
                         Console.WriteLine($"🔍 Ciphertext length: {ciphertext.Length}");
@@ -226,21 +227,21 @@ namespace UvfLib.Vault.VaultHelpers
 
                     // CRITICAL: Preserve the original nonce for re-encryption
                     nonce.CopyTo(_perChunkNonce);
-                    if (Environment.GetEnvironmentVariable("UVF_DEBUG_VERBOSE") != "false")
+                    if (DebugLog.IsEnabled)
                     {
                         Console.WriteLine($"🔍 Preserved nonce in _perChunkNonce: {Convert.ToHexString(_perChunkNonce)}");
                     }
 
                     // Prepare AAD
                     BinaryPrimitives.WriteInt64BigEndian(_aadBuffer.AsSpan(0, 8), chunkNumber);
-                    if (Environment.GetEnvironmentVariable("UVF_DEBUG_VERBOSE") != "false")
+                    if (DebugLog.IsEnabled)
                     {
                         Console.WriteLine($"🔍 AAD for decryption: {Convert.ToHexString(_aadBuffer)}");
                     }
 
                     // Decrypt
                     _fileContentAesGcm.Decrypt(nonce, ciphertext, tag, _cleartextChunkBuffer.AsSpan(0, ciphertext.Length), _aadBuffer);
-                    if (Environment.GetEnvironmentVariable("UVF_DEBUG_VERBOSE") != "false")
+                    if (DebugLog.IsEnabled)
                     {
                         Console.WriteLine($"🔍 Successfully decrypted chunk {chunkNumber}");
                         
@@ -285,7 +286,7 @@ namespace UvfLib.Vault.VaultHelpers
             }
             catch (Exception ex)
             {
-                if (Environment.GetEnvironmentVariable("UVF_DEBUG_VERBOSE") != "false")
+                if (DebugLog.IsEnabled)
                 {
                     Console.WriteLine($"🔍 DecryptChunkForUpdate FAILED: {ex.Message}");
                 }
@@ -311,7 +312,7 @@ namespace UvfLib.Vault.VaultHelpers
         private void EncryptAndWriteChunk(ReadOnlyMemory<byte> cleartextChunk)
         {
             // Check environment variable directly - works across AOT compilation boundary
-            bool isVerbose = Environment.GetEnvironmentVariable("UVF_DEBUG_VERBOSE") != "false";
+            bool isVerbose = DebugLog.IsEnabled;
             
             if (isVerbose)
             {

@@ -238,11 +238,13 @@ namespace UvfLib.Vault
         /// </summary>
         /// <param name="uvfFileContent">The byte content of the UVF vault file (JWE string).</param>
         /// <param name="passwordBytes">Password as UTF-8 encoded bytes</param>
+        /// <param name="userId">Optional user id whose recipient/password should be matched. Null tries all
+        /// recipients (admin-compatible). Required for a non-admin user, whose password only unwraps their own recipient.</param>
         /// <returns>True if filename encryption is enabled, false if disabled. Defaults to true if not specified.</returns>
         /// <exception cref="ArgumentNullException">If file content or password is null.</exception>
         /// <exception cref="InvalidPassphraseException">If the password is incorrect.</exception>
         /// <exception cref="MasterkeyLoadingFailedException">If the vault file cannot be decrypted or parsed.</exception>
-        public static bool DetectFilenameEncryption(byte[] uvfFileContent, byte[] passwordBytes)
+        public static bool DetectFilenameEncryption(byte[] uvfFileContent, byte[] passwordBytes, string? userId = null)
         {
             if (uvfFileContent == null || uvfFileContent.Length == 0) throw new ArgumentNullException(nameof(uvfFileContent));
             if (passwordBytes == null) throw new ArgumentNullException(nameof(passwordBytes));
@@ -250,15 +252,25 @@ namespace UvfLib.Vault
             try
             {
                 string jweString = Encoding.UTF8.GetString(uvfFileContent);
-                // Use KDF-aware loading that auto-detects PBKDF2 vs Scrypt
-                UvfMasterkeyPayload payload = MultiUserJweVaultManager.LoadSingleUserVault(jweString, passwordBytes);
-                
+                // KDF-aware + user-aware loading: pass userId so a non-admin user's password is matched
+                // against the correct recipient (LoadSingleUserVault hardcodes "admin", which fails for others).
+                char[] passwordChars = Encoding.UTF8.GetChars(passwordBytes);
+                UvfMasterkeyPayload payload;
+                try
+                {
+                    payload = MultiUserJweVaultManager.LoadMultiUserVault(jweString, passwordChars, userId);
+                }
+                finally
+                {
+                    Array.Clear(passwordChars, 0, passwordChars.Length);
+                }
+
                 // Check for the custom config field
                 if (payload.Config?.EncryptFilenames.HasValue == true)
                 {
                     return payload.Config.EncryptFilenames.Value;
                 }
-                
+
                 // Default to true (encrypted filenames) for compatibility with vaults created before this feature
                 return true;
             }
