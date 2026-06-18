@@ -1,7 +1,11 @@
 # Node.js demo (native `TitanVault` via `koffi`)
 
 Uses [`koffi`](https://koffi.dev) (a modern, maintained FFI for Node) to call the native `TitanVault`
-C ABI: create a vault, encrypt/decrypt a file, check existence, and delete it.
+C ABI. It **runs the full flow for both formats** (UVF then Cryptomator) and prints a
+`… tests for <FORMAT>: PASSED/FAILED` line per area: **File**, **Directory** (create / `list_directory`
+/ `get_file_info` / `move`), **Streaming** (multi-chunk write + `stream_seek` random-access read),
+**Persistence** (close + reopen with the passphrase), and **UVF-only** key rotation + multi-user
+(`add_user` / `get_vault_users`).
 
 ## 1. Build the native library (once)
 
@@ -19,11 +23,13 @@ Native AOT needs a C/C++ toolchain — see [`../../BuildScripts/README.md`](../.
 
 ```bash
 npm install
-node vault-demo.js --lib ../../Dist/Native/win-x64/TitanVault.dll --format uvf
-node vault-demo.js --lib ../../Dist/Native/win-x64/TitanVault.dll --format cryptomator
+node vault-demo.js --lib ../../Dist/Native/win-x64/TitanVault.dll   # both formats
+node vault-demo.js --lib ../../Dist/Native/win-x64/TitanVault.dll --format uvf          # just one
 ```
 
-(`--lib` defaults to `./TitanVault.dll` or the `TITANVAULT_LIB` env var.)
+(`--lib` defaults to `./TitanVault.dll` or the `TITANVAULT_LIB` env var. With no `--format`, both run.
+The library's native binary must match your Node architecture — e.g. x64 Node needs the `win-x64`
+build, not `win-arm64`.)
 
 Strings cross the ABI as a UTF-8 pointer **plus an explicit byte length** (`Buffer.byteLength`), and
 `read_file`'s buffer-size argument is `_Inout_` (koffi writes the actual size back into the

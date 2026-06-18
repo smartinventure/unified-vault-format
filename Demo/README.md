@@ -40,18 +40,25 @@ This Native-AOT-publishes `UvfLib.Master` and writes the library to **`Dist/Nati
 Then point each demo at the produced file with `--lib <path>` (or the `TITANVAULT_LIB` env var). The
 `.NET` demo needs none of this — it uses the managed package.
 
-## What each demo does (same flow everywhere)
+## What each demo does
 
-1. Report the library version.
-2. Create a vault (UVF or Cryptomator) in a temp folder and open it.
-3. **Encrypt:** write `/hello.txt` into the vault.
-4. **Decrypt:** read it back and verify it matches the original cleartext.
-5. Show that the **backing folder contains only ciphertext** (the plaintext name `hello.txt` never
-   appears on disk).
-6. Check existence, then delete the file.
+Every demo reports the library version, then **runs the full flow for both formats** (UVF and
+Cryptomator). The core flow: create + open a vault, write a file, read it back as cleartext, verify the
+backing folder holds only ciphertext (the plaintext name never appears on disk), then check existence
+and delete.
 
-> The C ABI used by the native demos exposes file/dir operations (create/open vault, read/write/delete,
-> exists, streams) but **not** directory listing; the managed `.NET` demo additionally lists a
-> directory via `ReadDirAsync` to show decrypted names.
+The **Node.js** demo goes further and exercises most of the C ABI, printing a `… tests for <FORMAT>:
+PASSED/FAILED` line per area:
+
+- **File** round-trip + filename-leak check.
+- **Directory**: create, write into, `list_directory`, `get_file_info`, `move`/rename.
+- **Streaming**: write a multi-chunk file via `open_write_stream`/`stream_write`, then random-access
+  read with `stream_seek`/`stream_read`.
+- **Persistence**: close the vault and reopen it with the passphrase, then re-read.
+- **UVF only**: key rotation, and multi-user (`add_user` / `get_vault_users`).
+
+> The C ABI exposes the full surface — including `titan_vault_list_directory` (the native demos *do*
+> list directories). Two current library limitations the Node demo surfaces: `rotate_keys` reports
+> "not implemented", and opening a vault as a *secondary* (non-admin) UVF user fails.
 
 See each folder's `README.md` for exact run commands.
