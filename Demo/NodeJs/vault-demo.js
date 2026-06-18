@@ -12,6 +12,7 @@ const koffi = require('koffi');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
+const crypto = require('crypto');
 
 const TITAN_VAULT_SUCCESS = 0;
 const TITAN_VAULT_FORMAT_CRYPTOMATOR = 0;
@@ -32,7 +33,8 @@ function parseArgs() {
   // format is left undefined by default so the demo runs BOTH formats (uvf then cryptomator);
   // pass --format uvf|cryptomator to run just one.
   const a = { lib: process.env.TITANVAULT_LIB || defaultLibPath(), format: undefined,
-              vault: path.join(os.tmpdir(), 'uvf-node-demo'), password: 'correct horse battery staple' };
+              vault: path.join(os.tmpdir(), 'uvf-node-demo'), password: 'correct horse battery staple',
+              benchmark: false, interop: false, sizeGb: 1 };
   const argv = process.argv.slice(2);
   for (let i = 0; i < argv.length; i++) {
     const v = argv[i + 1];
@@ -40,6 +42,9 @@ function parseArgs() {
     else if (argv[i] === '--format') { a.format = v; i++; }
     else if (argv[i] === '--vault') { a.vault = v; i++; }
     else if (argv[i] === '--password') { a.password = v; i++; }
+    else if (argv[i] === '--benchmark' || argv[i] === '--bench') { a.benchmark = true; }
+    else if (argv[i] === '--size') { a.sizeGb = parseFloat(v); i++; }
+    else if (argv[i] === '--cryptomator-interop' || argv[i] === '--interop') { a.interop = true; }
   }
   return a;
 }
@@ -337,6 +342,144 @@ function runDemo(lib, format, vaultDir, password, state) {
   console.log(`✅ ${format} demo finished.`);
 }
 
+const elapsedMs = (start) => Number(process.hrtime.bigint() - start) / 1e6;
+const mbps = (bytes, ms) => (bytes / 1e6) / (ms / 1000); // decimal MB/s
+
+// Reads a whole vault file into a Buffer, growing the buffer to the required size if needed.
+function readFileFull(lib, handle, vaultPath) {
+  let cap = 1 << 20; // 1 MiB
+  for (let attempt = 0; attempt < 4; attempt++) {
+    const buf = Buffer.alloc(cap);
+    const size = [cap];
+    const rc = lib.readFile(handle, vaultPath, u8(vaultPath), buf, size);
+    if (rc === TITAN_VAULT_SUCCESS) return buf.subarray(0, size[0]);
+    if (size[0] > cap) { cap = size[0]; continue; } // grow to required size and retry
+    throw new Error(`read_file ${vaultPath} rc=${rc}: ${lib.getLastError()}`);
+  }
+  throw new Error(`read_file ${vaultPath}: buffer growth failed`);
+}
+
+function listDir(lib, handle, dirPath) {
+  const entriesBuf = koffi.alloc('void *', MAX_LIST);
+  const maxBuf = koffi.alloc('int', 1); koffi.encode(maxBuf, 'int', MAX_LIST);
+  const n = lib.listDirectory(handle, dirPath, u8(dirPath), entriesBuf, maxBuf);
+  if (n < 0) throw new Error(`list_directory ${dirPath} rc=${n}: ${lib.getLastError()}`);
+  return readStringArray(lib, entriesBuf, n);
+}
+
+// 2. Interop: unlock a REAL Cryptomator vault (created by the Cryptomator app), list the files, and
+// md5-compare the decrypted content against the original plaintext files.
+function runCryptomatorInterop(lib) {
+  console.log('\n========== Cryptomator interop (real vault) ==========');
+  const base = path.resolve(__dirname, '..', '_test-cryptomator-vault');
+  const vaultDir = path.join(base, 'smartinventure');
+  const origDir = path.join(base, 'original-files');
+  const password = 'smartinventure'; // demo vault — hardcoded on purpose
+
+  if (!fs.existsSync(path.join(vaultDir, 'masterkey.cryptomator'))) {
+    console.error(`No Cryptomator vault found at ${vaultDir}`);
+    return false;
+  }
+  const handle = lib.loadCryptomator(vaultDir, u8(vaultDir), password, u8(password));
+  if (!handle) { console.error(`Unlock failed: ${lib.getLastError()}`); return false; }
+  try {
+    console.log(`Unlocked real Cryptomator vault at ${vaultDir}`);
+    for (const d of ['/', '/mysubfolder1', '/mysubfolder1/mysubfolder2']) {
+      console.log(`  ${d}  ->  ${JSON.stringify(listDir(lib, handle, d))}`);
+    }
+    const cases = [
+      ['/Perfect-albums.txt', 'Perfect-albums.txt'],
+      ['/mysubfolder1/banana.jpg', 'banana.jpg'],
+      ['/mysubfolder1/mysubfolder2/Rubicon - Rivers - lyrics.txt', 'Rubicon - Rivers - lyrics.txt'],
+    ];
+    let allOk = true;
+    for (const [vaultPath, origName] of cases) {
+      const decrypted = readFileFull(lib, handle, vaultPath);
+      const got = crypto.createHash('md5').update(decrypted).digest('hex');
+      const want = crypto.createHash('md5').update(fs.readFileSync(path.join(origDir, origName))).digest('hex');
+      const ok = got === want;
+      if (!ok) allOk = false;
+      console.log(`  ${ok ? '✓' : '✗'} ${vaultPath}  (${decrypted.length} B)  md5 ${ok ? 'match' : `MISMATCH got=${got} want=${want}`}`);
+    }
+    console.log(allOk
+      ? '✅ Reading a real Cryptomator vault worked — all files decrypted and md5-matched the originals.'
+      : '❌ Cryptomator interop FAILED — md5 mismatch.');
+    return allOk;
+  } catch (e) {
+    console.log(`❌ Cryptomator interop FAILED: ${e.message}`);
+    return false;
+  } finally { lib.closeVault(handle); }
+}
+
+// 1. Benchmark: create a large plaintext file, then encrypt/decrypt it through the vault, reporting MB/s
+// for raw disk write, encrypt, decrypt, and raw disk read — for both formats.
+function runBenchmark(lib, sizeGb) {
+  const sizeBytes = Math.round(sizeGb * 1024 * 1024 * 1024);
+  const CHUNK = 4 * 1024 * 1024; // 4 MiB
+  console.log(`\n========== Benchmark (${sizeGb} GB per format, ${CHUNK >> 20} MiB chunks) ==========`);
+  for (const format of ['uvf', 'cryptomator']) benchOne(lib, format, sizeBytes, CHUNK);
+}
+
+function benchOne(lib, format, sizeBytes, CHUNK) {
+  console.log(`\n----- ${format.toUpperCase()} -----`);
+  const dir = path.join(os.tmpdir(), `uvf-bench-${format}-${process.pid}`);
+  fs.rmSync(dir, { recursive: true, force: true });
+  const vaultDir = path.join(dir, 'vault');
+  fs.mkdirSync(vaultDir, { recursive: true });
+  const plain = path.join(dir, 'plain.bin');
+  const password = 'bench-pass-123';
+  const report = (label, ms) =>
+    console.log(`  ${label.padEnd(32)} ${ms.toFixed(0).padStart(7)} ms   ${mbps(sizeBytes, ms).toFixed(1).padStart(8)} MB/s`);
+
+  const chunk = Buffer.alloc(CHUNK);
+  for (let i = 0; i < CHUNK; i++) chunk[i] = i & 0xff; // non-trivial data (avoid sparse-file effects)
+
+  try {
+    // (a) create the plaintext file on disk — gauges raw medium write speed
+    let t = process.hrtime.bigint();
+    { const fd = fs.openSync(plain, 'w'); let w = 0;
+      while (w < sizeBytes) { const n = Math.min(CHUNK, sizeBytes - w); fs.writeSync(fd, chunk, 0, n); w += n; }
+      fs.fsyncSync(fd); fs.closeSync(fd); }
+    report('create file (disk write)', elapsedMs(t));
+
+    const vlen = u8(vaultDir), plen = u8(password);
+    if (format === 'uvf') check(lib, lib.createUvf(vaultDir, vlen, password, plen, 1, 0, 0), 'create_uvf_vault');
+    else check(lib, lib.createCryptomator(vaultDir, vlen, password, plen), 'create_cryptomator_vault');
+    const handle = format === 'uvf'
+      ? lib.loadUvf(vaultDir, vlen, password, plen, null, 0)
+      : lib.loadCryptomator(vaultDir, vlen, password, plen);
+    if (!handle) throw new Error(`load failed: ${lib.getLastError()}`);
+
+    try {
+      // (b) encrypt — stream the plaintext into the vault
+      t = process.hrtime.bigint();
+      { const ws = lib.openWriteStream(handle, '/big.bin', u8('/big.bin'));
+        if (!ws) throw new Error(`open_write_stream: ${lib.getLastError()}`);
+        const fd = fs.openSync(plain, 'r'); const rbuf = Buffer.alloc(CHUNK); let rd;
+        try { while ((rd = fs.readSync(fd, rbuf, 0, CHUNK, null)) > 0) { if (lib.streamWrite(ws, rbuf, rd) !== rd) throw new Error('short write'); } }
+        finally { fs.closeSync(fd); lib.closeStream(ws); } }
+      report(`encrypt (${format})`, elapsedMs(t));
+
+      // (c) decrypt — stream it back out of the vault (discarding the plaintext)
+      t = process.hrtime.bigint();
+      { const rs = lib.openReadStream(handle, '/big.bin', u8('/big.bin'));
+        if (!rs) throw new Error(`open_read_stream: ${lib.getLastError()}`);
+        const dbuf = Buffer.alloc(CHUNK); let got, total = 0;
+        try { while ((got = lib.streamRead(rs, dbuf, CHUNK)) > 0) total += got; } finally { lib.closeStream(rs); }
+        if (total !== sizeBytes) throw new Error(`decrypt size ${total} != ${sizeBytes}`); }
+      report(`decrypt (${format})`, elapsedMs(t));
+
+      // (d) read the plaintext file back from disk — gauges raw medium read speed
+      t = process.hrtime.bigint();
+      { const fd = fs.openSync(plain, 'r'); const rbuf = Buffer.alloc(CHUNK);
+        while (fs.readSync(fd, rbuf, 0, CHUNK, null) > 0) { /* discard */ } fs.closeSync(fd); }
+      report('read file (disk read)', elapsedMs(t));
+    } finally { lib.closeVault(handle); }
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+}
+
 function main() {
   const args = parseArgs();
   if (!fs.existsSync(args.lib)) {
@@ -348,6 +491,9 @@ function main() {
   }
   const lib = load(args.lib);
   console.log(`TitanVault version: ${version(lib)}`);
+
+  if (args.interop) { process.exit(runCryptomatorInterop(lib) ? 0 : 1); }
+  if (args.benchmark) { runBenchmark(lib, args.sizeGb); process.exit(0); }
 
   const formats = args.format ? [args.format] : ['uvf', 'cryptomator'];
   const state = { failed: 0 };
