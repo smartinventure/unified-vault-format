@@ -492,14 +492,31 @@ function main() {
   const lib = load(args.lib);
   console.log(`TitanVault version: ${version(lib)}`);
 
+  // Focused modes (run only the requested thing).
   if (args.interop) { process.exit(runCryptomatorInterop(lib) ? 0 : 1); }
   if (args.benchmark) { runBenchmark(lib, args.sizeGb); process.exit(0); }
 
-  const formats = args.format ? [args.format] : ['uvf', 'cryptomator'];
   const state = { failed: 0 };
+
+  // Functional sections, for one format (--format) or both (default).
+  const formats = args.format ? [args.format] : ['uvf', 'cryptomator'];
   for (const format of formats) {
     try { runDemo(lib, format, path.join(args.vault, format), args.password, state); }
     catch (e) { state.failed++; console.log(`\n❌ ${format} demo aborted: ${e.message}`); }
+  }
+
+  // A full run (no --format) also exercises the real-Cryptomator-vault interop and a quick throughput
+  // benchmark. (Use --cryptomator-interop or --benchmark [--size <GB>] to run either on its own; the
+  // standalone benchmark defaults to 1 GB.)
+  if (!args.format) {
+    const interopVault = path.resolve(__dirname, '..', '_test-cryptomator-vault', 'smartinventure', 'masterkey.cryptomator');
+    if (fs.existsSync(interopVault)) {
+      if (!runCryptomatorInterop(lib)) state.failed++;
+    } else {
+      console.log('\n(Cryptomator interop skipped — Demo/_test-cryptomator-vault not present)');
+    }
+    try { runBenchmark(lib, 0.25); }
+    catch (e) { state.failed++; console.log(`\n❌ benchmark aborted: ${e.message}`); }
   }
 
   console.log(state.failed === 0

@@ -24,10 +24,10 @@ Native AOT needs a C/C++ toolchain — see [`../../BuildScripts/README.md`](../.
 
 ```bash
 npm install
-node vault-demo.js                 # both formats; auto-finds the lib for your platform
-node vault-demo.js --format uvf    # just one
-node vault-demo.js --benchmark              # 1 GB encrypt/decrypt throughput (MB/s); --size <GB> to change
-node vault-demo.js --cryptomator-interop    # unlock a real Cryptomator-app vault + md5-verify the files
+node vault-demo.js                 # FULL run: both formats + real-Cryptomator-vault interop + a quick benchmark
+node vault-demo.js --format uvf    # just one format's functional sections (no interop/benchmark)
+node vault-demo.js --benchmark              # throughput only (default 1 GB; --size <GB> to change)
+node vault-demo.js --cryptomator-interop    # real-Cryptomator-app vault read + md5 verify only
 ```
 
 (With no `--lib`, the demo auto-resolves `../../Dist/Native/<rid>/TitanVault.dll` for your OS/arch — so
