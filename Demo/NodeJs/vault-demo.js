@@ -18,10 +18,20 @@ const TITAN_VAULT_FORMAT_CRYPTOMATOR = 0;
 const TITAN_VAULT_FORMAT_UVF = 1;
 const MAX_LIST = 256;
 
+// Resolve the native library for the current OS/arch under ../../Dist/Native/<rid>/, so a bare
+// `node vault-demo.js` works after a build. Override with --lib or the TITANVAULT_LIB env var.
+function defaultLibPath() {
+  const arch = ({ x64: 'x64', arm64: 'arm64' })[process.arch] || process.arch;
+  const rid = (process.platform === 'win32' ? 'win-' : process.platform === 'darwin' ? 'osx-' : 'linux-') + arch;
+  const file = process.platform === 'win32' ? 'TitanVault.dll'
+             : process.platform === 'darwin' ? 'libTitanVault.dylib' : 'libTitanVault.so';
+  return path.resolve(__dirname, '..', '..', 'Dist', 'Native', rid, file);
+}
+
 function parseArgs() {
   // format is left undefined by default so the demo runs BOTH formats (uvf then cryptomator);
   // pass --format uvf|cryptomator to run just one.
-  const a = { lib: process.env.TITANVAULT_LIB || './TitanVault.dll', format: undefined,
+  const a = { lib: process.env.TITANVAULT_LIB || defaultLibPath(), format: undefined,
               vault: path.join(os.tmpdir(), 'uvf-node-demo'), password: 'correct horse battery staple' };
   const argv = process.argv.slice(2);
   for (let i = 0; i < argv.length; i++) {
@@ -329,6 +339,13 @@ function runDemo(lib, format, vaultDir, password, state) {
 
 function main() {
   const args = parseArgs();
+  if (!fs.existsSync(args.lib)) {
+    console.error(`Native library not found: ${args.lib}\n` +
+      `Build it first:  ../../BuildScripts/build.ps1 -Task aot   (or build.sh --task aot)\n` +
+      `Then it loads automatically, or pass --lib <path> / set TITANVAULT_LIB.\n` +
+      `Note: the library must match your Node architecture (${process.arch}).`);
+    process.exit(1);
+  }
   const lib = load(args.lib);
   console.log(`TitanVault version: ${version(lib)}`);
 

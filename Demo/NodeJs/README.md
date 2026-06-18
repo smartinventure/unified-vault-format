@@ -24,13 +24,14 @@ Native AOT needs a C/C++ toolchain — see [`../../BuildScripts/README.md`](../.
 
 ```bash
 npm install
-node vault-demo.js --lib ../../Dist/Native/win-x64/TitanVault.dll   # both formats
-node vault-demo.js --lib ../../Dist/Native/win-x64/TitanVault.dll --format uvf          # just one
+node vault-demo.js                 # both formats; auto-finds the lib for your platform
+node vault-demo.js --format uvf    # just one
 ```
 
-(`--lib` defaults to `./TitanVault.dll` or the `TITANVAULT_LIB` env var. With no `--format`, both run.
-The library's native binary must match your Node architecture — e.g. x64 Node needs the `win-x64`
-build, not `win-arm64`.)
+(With no `--lib`, the demo auto-resolves `../../Dist/Native/<rid>/TitanVault.dll` for your OS/arch — so
+run the `aot` build first. Override with `--lib <path>` or the `TITANVAULT_LIB` env var. With no
+`--format`, both run. The native binary must match your **Node architecture** — x64 Node needs the
+`win-x64` build, not `win-arm64`.)
 
 Strings cross the ABI as a UTF-8 pointer **plus an explicit byte length** (`Buffer.byteLength`), and
 `read_file`'s buffer-size argument is `_Inout_` (koffi writes the actual size back into the
