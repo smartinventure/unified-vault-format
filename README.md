@@ -279,9 +279,9 @@ a native library (`TitanVault.dll` / `.so` / `.dylib`).
 dotnet publish Uvf.Net/UvfLib.Master/UvfLib.Master.csproj -c Release -r win-x64 -p:PublishAot=true
 ```
 
-Build automation for AOT and packaging lives under [`BuildScripts/Scripts/`](BuildScripts/Scripts)
-(for example `build-aot.ps1` and `build-all.ps1`), with output collected under `Dist/`.
-A prebuilt `win-x64` native library is included in [`Dist/Native/win-x64/`](Dist/Native/win-x64).
+Build automation lives in [`BuildScripts/`](BuildScripts): run `BuildScripts/build.ps1 -Task aot`
+(PowerShell) or `BuildScripts/build.sh --task aot` (Bash) — see
+[`BuildScripts/README.md`](BuildScripts/README.md). Output is collected under `Dist/Native/<rid>/`.
 
 > **Note:** Native AOT imposes restrictions (no runtime reflection, trimming
 > enabled). The cryptographic core and vault layers are AOT-compatible; JSON
