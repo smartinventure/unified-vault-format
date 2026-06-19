@@ -13,7 +13,7 @@ interop and a benchmark.
 The packages aren't published yet, so produce a **local feed** once:
 
 ```powershell
-../../BuildScripts/build.ps1 -Task pack        # -> Dist/Packages/nuget/UvfLib.*.1.0.1.nupkg
+../../BuildScripts/build.ps1 -Task pack        # -> Dist/Packages/nuget/UvfLib.*.1.0.2.nupkg
 ```
 
 The committed [`nuget.config`](nuget.config) already points at that folder (and clears any inherited
