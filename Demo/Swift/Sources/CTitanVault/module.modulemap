@@ -1,0 +1,9 @@
+// Exposes the TitanVault C ABI to Swift as `import CTitanVault`. The shim header
+// includes the canonical Bindings/include/titan_vault.h (found via the target's
+// headerSearchPath in Package.swift). We only need the type/constant declarations
+// here — the symbols themselves are resolved at runtime with dlopen/dlsym — so
+// this is a plain header module rather than a linked system library.
+module CTitanVault {
+    header "shim.h"
+    export *
+}

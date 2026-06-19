@@ -1,0 +1,12 @@
+name: vault_demo
+description: >-
+  UVF / Cryptomator demo calling the native TitanVault C ABI via dart:ffi.
+  A full-parity port of ../NodeJs/vault-demo.js.
+version: 1.0.0
+publish_to: none
+
+environment:
+  sdk: '>=3.0.0 <4.0.0'
+
+dependencies:
+  ffi: ^2.1.0
