@@ -20,7 +20,7 @@ namespace UvfLib.Core.Jwe
     {
         private const JweAlgorithm KeyManagementAlgorithm = JweAlgorithm.PBES2_HS512_A256KW;
         private const JweEncryption ContentEncryptionAlgorithm = JweEncryption.A256GCM;
-        private const int DefaultPbkdf2Iterations = 64000;
+        private const int DefaultPbkdf2Iterations = 210000; // OWASP 2023 guidance for PBKDF2-HMAC-SHA512
         private const string AdminKeyId = "uvflib.net.admin";
         private const string UserKeyIdPrefix = "uvflib.net.user.";
         private const string PublicKeyKeyIdPrefix = "uvflib.net.pubkey.";

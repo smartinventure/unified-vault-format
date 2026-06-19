@@ -93,7 +93,7 @@ namespace UvfLib.Master
                 return new KeyDerivationParameters
                 {
                     Method = KeyDerivationMethod.PBKDF2_HMAC_SHA512,
-                    Pbkdf2Iterations = 64000
+                    Pbkdf2Iterations = 210000 // OWASP 2023 guidance for PBKDF2-HMAC-SHA512
                 };
             }
 

@@ -2590,8 +2590,8 @@ namespace UvfLib.Master.Exports
             return kdfMethod switch
             {
                 TITAN_VAULT_KDF_SCRYPT => VaultManager.KeyDerivationParameters.Scrypt(16384, 8, 1), // Standard scrypt parameters
-                TITAN_VAULT_KDF_PBKDF2 => VaultManager.KeyDerivationParameters.Pbkdf2(kdfIterations > 0 ? kdfIterations : 64000),
-                _ => VaultManager.KeyDerivationParameters.Pbkdf2(kdfIterations > 0 ? kdfIterations : 64000) // Default to PBKDF2
+                TITAN_VAULT_KDF_PBKDF2 => VaultManager.KeyDerivationParameters.Pbkdf2(kdfIterations > 0 ? kdfIterations : 210000),
+                _ => VaultManager.KeyDerivationParameters.Pbkdf2(kdfIterations > 0 ? kdfIterations : 210000) // Default to PBKDF2 (OWASP 2023)
             };
         }
 

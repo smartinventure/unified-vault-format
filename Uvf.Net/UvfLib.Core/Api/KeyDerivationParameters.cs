@@ -15,10 +15,11 @@ namespace UvfLib.Core.Api
 
         // PBKDF2 Parameters (CURRENT DEFAULTS)
         /// <summary>
-        /// PBKDF2 iteration count (DEFAULT: 64,000).
-        /// Higher values increase security but slow down key derivation.
+        /// PBKDF2 iteration count (DEFAULT: 210,000 — OWASP 2023 guidance for PBKDF2-HMAC-SHA512).
+        /// Higher values increase security but slow down key derivation. Existing vaults keep opening at
+        /// their stored iteration count (read from the JWE 'p2c' header); this default only affects new vaults.
         /// </summary>
-        public int Pbkdf2Iterations { get; set; } = 64000;
+        public int Pbkdf2Iterations { get; set; } = 210000;
 
         // Scrypt Parameters (Only used when Method = Scrypt)
         /// <summary>
@@ -102,8 +103,8 @@ namespace UvfLib.Core.Api
             switch (Method)
             {
                 case KeyDerivationMethod.PBKDF2_HMAC_SHA512:
-                    if (Pbkdf2Iterations < 1000)
-                        throw new ArgumentException("PBKDF2 iterations must be at least 1000 for security");
+                    if (Pbkdf2Iterations < 100000)
+                        throw new ArgumentException("PBKDF2 iterations must be at least 100,000 for security");
                     break;
 
                 case KeyDerivationMethod.Scrypt:

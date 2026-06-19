@@ -39,6 +39,7 @@ report-only).
 - **Description:** New UVF vaults default to **PBKDF2-HMAC-SHA512 with 64,000 iterations** (`Method = PBKDF2_HMAC_SHA512`, `Pbkdf2Iterations = 64000`). OWASP's 2023 Password Storage guidance for PBKDF2-HMAC-SHA512 is **≥ 210,000** iterations (~3.3× higher). The `Validate()` floor is only **1,000** iterations. Scrypt (memory-hard, N=2^15) is available but **opt-in** (`KeyDerivationParameters.Scrypt()`); the Cryptomator format path already uses scrypt N=2^15 (`MasterkeyFileAccess.cs:16-18,339`) and is unaffected.
 - **Impact:** A weaker default lowers the cost of offline brute-force/dictionary attacks against a stolen UVF vault if the user's passphrase is weak. Not a break; it weakens the safety margin for the default configuration.
 - **Recommendation:** Raise the PBKDF2-HMAC-SHA512 default to ≥ 210,000, **or** make scrypt the default for new UVF vaults; raise the `Validate()` minimum (e.g. ≥ 100,000 for PBKDF2). Keep reading older vaults at their stored parameters for compatibility.
+- **✅ Remediated 2026-06-19:** default raised to **210,000** (OWASP-2023 for PBKDF2-HMAC-SHA512) across `KeyDerivationParameters` (Core + Master), the JWE fallback, and the native export; `Validate()` floor raised to **100,000**. The standard interoperable alg `PBES2-HS512+A256KW` is kept (scrypt remains opt-in). Existing vaults still open at their stored `p2c`. Full suite green (281 pass).
 
 ### F-02 · Whole-chunk truncation is not detected on decryption · **Medium** · Confidence: High
 - **Area:** AEAD / AAD binding · **File:** `Uvf.Net/UvfLib.Vault/VaultHelpers/DecryptingStream.cs:236-251`; AAD at `:256` and `Uvf.Net/UvfLib.Core/V3/FileContentCryptorImpl.cs:233-236`
@@ -109,7 +110,7 @@ report-only).
 
 ## Prioritized remediation (separate follow-up — not done in this pass)
 
-1. **F-01 (Medium)** — raise the UVF PBKDF2 default to ≥ 210,000 (or default to scrypt) + raise the `Validate()` floor.
+1. ~~**F-01 (Medium)** — raise the UVF PBKDF2 default to ≥ 210,000 (or default to scrypt) + raise the `Validate()` floor.~~ ✅ **Done 2026-06-19** (default 210,000, floor 100,000; standard PBES2 alg kept).
 2. **F-02 (Medium)** — document truncation behavior; optionally add an authenticated final-chunk/length marker for UVF.
 3. **F-03 (Low)** — remove/redirect the dead `AesWrapTransform` placeholder.
 4. **F-04 (Low)** — add RFC 5297 / RFC 3394 / NIST-GCM known-answer vectors.
