@@ -19,6 +19,15 @@ The C# core was **ported from the official Java reference implementation** ([`cr
 >
 > **Use it entirely at your own discretion and risk.** Do not rely on it to protect sensitive or high-value data without first performing your own thorough review and, ideally, a professional audit. **We accept no liability whatsoever:** under no circumstances shall the authors or contributors be held liable for any damages or losses (financial, data, privacy, health, or otherwise) arising from the use of this software, which is provided "as is", without warranty of any kind.
 
+## Security model & known limitations
+
+UvfLib has had a structured source-level self-review (see [`Audit/`](Audit/)) but **no independent professional audit**. Two properties are worth calling out explicitly:
+
+- **Truncation of trailing data is not detected.** Each file chunk is individually authenticated (AES-GCM) and bound to its position (chunk index + header nonce as additional authenticated data), so chunks cannot be reordered, swapped, duplicated, or forged. However, the *total* file length is not authenticated — an attacker with write access to the ciphertext can drop whole trailing chunks and the decrypted output will simply be shorter, undetected. (This matches the Cryptomator format's design.) Any content that *is* returned is always authentic.
+- **Key material in memory cannot be guaranteed erased.** The library zeroizes keys, passwords, and derived buffers (`CryptographicOperations.ZeroMemory` / `Destroy()`), but on a managed runtime the garbage collector may relocate/copy `byte[]`/`char[]` before they are wiped, and OS swap/hibernation can persist secrets. Treat process memory as a residual risk on a compromised host.
+
+See [`Audit/`](Audit/) for the full findings and the remediation log.
+
 ## License
 
 This project is licensed under the **GNU Affero General Public License v3.0 (AGPL-3.0)** — see the [LICENSE](LICENSE) file for the full text.

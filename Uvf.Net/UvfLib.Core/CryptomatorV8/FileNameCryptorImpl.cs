@@ -1,3 +1,7 @@
+// Unified Vault Format (UVF) for C# and other languages.
+// Copyright (c) Smart In Venture 2025- https://www.speedbits.io
+// Licensed under AGPL-3.0 (commercial licenses available); see LICENSE.
+
 /*******************************************************************************
  * Copyright (c) 2015, 2016 Sebastian Stenzel and others.
  * This file is licensed under the terms of the MIT license.

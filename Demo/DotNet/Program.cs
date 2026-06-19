@@ -1,3 +1,7 @@
+// Unified Vault Format (UVF) for C# and other languages.
+// Copyright (c) Smart In Venture 2025- https://www.speedbits.io
+// Licensed under AGPL-3.0 (commercial licenses available); see LICENSE.
+
 // UVF / Cryptomator demo for the MANAGED UvfLib package (the VaultManager API — no native AOT DLL,
 // no P/Invoke). It mirrors the reference Node.js demo (Demo/NodeJs/vault-demo.js) section-for-section:
 // the same per-format functional sections (each reporting PASSED/FAILED), a real-Cryptomator-vault

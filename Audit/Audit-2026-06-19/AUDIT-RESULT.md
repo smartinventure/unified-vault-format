@@ -5,7 +5,7 @@
 > ⚠️ **This is a structured self-review, not an independent professional cryptographic audit.** It reads
 > the source against a checklist and the relevant RFCs to surface obvious flaws. It is **not** a formal
 > proof, pentest, or fuzzing campaign, and does not replace the professional audit recommended in the
-> [README](../README.md) disclaimer. Findings below are best-effort and may be incomplete.
+> [README](../../README.md) disclaimer. Findings below are best-effort and may be incomplete.
 
 ## Scope audited
 
@@ -93,7 +93,7 @@ report-only).
 - **Recommendation:** Keep using portable primitives; the Linux demo CI job now guards this.
 
 ### F-10 · Provenance: AI-assisted port, no independent audit · **Info** · Confidence: High
-- **Area:** Process · **File:** project-wide (see [README](../README.md) disclaimer)
+- **Area:** Process · **File:** project-wide (see [README](../../README.md) disclaimer)
 - **Description:** The C# code was ported from the Java reference with extensive AI assistance and has had
   no independent professional security audit. This self-review is not a substitute.
 - **Recommendation:** Obtain an independent professional audit before using to protect high-value data.

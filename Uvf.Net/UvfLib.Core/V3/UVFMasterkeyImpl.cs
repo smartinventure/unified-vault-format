@@ -1,3 +1,7 @@
+// Unified Vault Format (UVF) for C# and other languages.
+// Copyright (c) Smart In Venture 2025- https://www.speedbits.io
+// Licensed under AGPL-3.0 (commercial licenses available); see LICENSE.
+
 using System;
 using System.Buffers.Binary;
 using System.Collections.Generic;

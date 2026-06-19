@@ -1,3 +1,7 @@
+// Unified Vault Format (UVF) for C# and other languages.
+// Copyright (c) Smart In Venture 2025- https://www.speedbits.io
+// Licensed under AGPL-3.0 (commercial licenses available); see LICENSE.
+
 // UVF / Cryptomator demo in Rust via the native TitanVault library (C ABI, runtime-loaded with
 // `libloading`).
 //

@@ -1,3 +1,7 @@
+// Unified Vault Format (UVF) for C# and other languages.
+// Copyright (c) Smart In Venture 2025- https://www.speedbits.io
+// Licensed under AGPL-3.0 (commercial licenses available); see LICENSE.
+
 using System;
 using System.Security.Cryptography;
 using System.Collections.Generic; // Added for HashSet
@@ -10,7 +14,7 @@ namespace UvfLib.Core.Common
     public sealed class CipherSupplier : IDisposable
     {
         // Initialize the set *before* static fields that use the constructor
-        private static readonly HashSet<string> SupportedAlgorithms = new HashSet<string> { "AES-CBC", "AES-CTR", "AES-GCM", "AES-WRAP" };
+        private static readonly HashSet<string> SupportedAlgorithms = new HashSet<string> { "AES-CBC", "AES-CTR", "AES-GCM" };
 
         /// <summary>
         /// AES in CBC mode
@@ -26,11 +30,6 @@ namespace UvfLib.Core.Common
         /// AES in GCM mode
         /// </summary>
         public static readonly CipherSupplier AES_GCM = new CipherSupplier("AES-GCM");
-
-        /// <summary>
-        /// AES Key Wrap (RFC 3394)
-        /// </summary>
-        public static readonly CipherSupplier RFC3394_KEYWRAP = new CipherSupplier("AES-WRAP");
 
         private readonly string _algorithm;
 
@@ -124,7 +123,7 @@ namespace UvfLib.Core.Common
             // Basic validation (specific transforms might do more)
             if (key == null)
                 throw new ArgumentNullException(nameof(key));
-            if (iv == null && _algorithm != "AES-WRAP") // AES-WRAP doesn't use IV
+            if (iv == null)
                 throw new ArgumentNullException(nameof(iv));
 
             try
@@ -140,11 +139,6 @@ namespace UvfLib.Core.Common
                     case "AES-GCM":
                         if (iv == null) throw new ArgumentNullException(nameof(iv), "Nonce (IV) is required for AES-GCM.");
                         return new AesGcmTransform(key, iv, forEncryption);
-                    case "AES-WRAP":
-                        // AES-WRAP uses key only
-                        if (iv != null)
-                            throw new ArgumentException("IV must be null for AES-WRAP", nameof(iv));
-                        return new AesWrapTransform(key, forEncryption);
                     default:
                         // This case should technically be unreachable due to constructor validation
                         throw new NotSupportedException($"Unsupported algorithm: {_algorithm}");
@@ -356,123 +350,6 @@ namespace UvfLib.Core.Common
             {
                 _aesGcm?.Dispose(); // Dispose the AesGcm instance
                                     // No other disposable fields here in this version
-                GC.SuppressFinalize(this);
-            }
-        }
-
-        /// <summary>
-        /// Transform for AES Key Wrapping (RFC 3394)
-        /// </summary>
-        private class AesWrapTransform : ICryptoTransform
-        {
-            // RFC 3394 Key Wrap
-            private readonly byte[] _key;
-            private readonly bool _forEncryption;
-            private readonly Aes _aesEcbInstance; // Ensure this field exists
-
-            public AesWrapTransform(byte[] key, bool forEncryption)
-            {
-                if (key == null) throw new ArgumentNullException(nameof(key));
-                // Key size validation (128, 192, 256 bits) could be added here or rely on Aes.Create()
-
-                _key = key;
-                _forEncryption = forEncryption;
-
-                // Initialize the _aesEcbInstance field
-                _aesEcbInstance = Aes.Create();
-                _aesEcbInstance.Key = _key;
-                _aesEcbInstance.Mode = CipherMode.ECB;
-                _aesEcbInstance.Padding = PaddingMode.None; // No padding for wrapping algorithm steps
-            }
-
-            public bool CanReuseTransform => false;
-            public bool CanTransformMultipleBlocks => false;
-            public int InputBlockSize => 8; // Process 64-bit blocks
-            public int OutputBlockSize => 8;
-
-            public int TransformBlock(byte[] inputBuffer, int inputOffset, int inputCount, byte[] outputBuffer, int outputOffset)
-            {
-                // RFC 3394 works on the whole block at once in TransformFinalBlock
-                throw new NotSupportedException("AES Key Wrap does not support TransformBlock. Use TransformFinalBlock.");
-            }
-
-            public byte[] TransformFinalBlock(byte[] inputBuffer, int inputOffset, int inputCount)
-            {
-                // Ensure data length is a multiple of 8 bytes and at least 16 bytes for unwrapping
-                if (inputCount % 8 != 0 || (!_forEncryption && inputCount < 16))
-                {
-                    throw new CryptographicException("Invalid input data length for AES Key Wrap.");
-                }
-
-                byte[] data = new byte[inputCount];
-                Buffer.BlockCopy(inputBuffer, inputOffset, data, 0, inputCount);
-
-                if (_forEncryption)
-                {
-                    return Rfc3394Wrap(_aesEcbInstance, data);
-                }
-                else
-                {
-                    return Rfc3394Unwrap(_aesEcbInstance, data);
-                }
-            }
-
-            // --- RFC 3394 Helper Methods --- 
-            // (These need access to _aesEcbInstance)
-
-            private static byte[] Rfc3394Wrap(Aes aesAlg, byte[] plaintext)
-            {
-                // Implementation omitted for brevity - assumes it uses aesAlg.CreateEncryptor()
-                // Placeholder implementation:
-                if (plaintext == null || plaintext.Length % 8 != 0)
-                    throw new ArgumentException("Plaintext must be a multiple of 8 bytes.");
-                if (aesAlg.Mode != CipherMode.ECB || aesAlg.Padding != PaddingMode.None)
-                    throw new InvalidOperationException("AES algorithm must be in ECB mode with NoPadding for wrap.");
-
-                // Actual wrapping logic is complex, involving multiple ECB steps.
-                // This is a simplified placeholder.
-                using (var encryptor = aesAlg.CreateEncryptor())
-                {
-                    // Example: Simple ECB encryption (NOT real RFC3394)
-                    byte[] wrapped = encryptor.TransformFinalBlock(plaintext, 0, plaintext.Length);
-                    byte[] result = new byte[wrapped.Length + 8]; // Add space for AIV
-                    Buffer.BlockCopy(wrapped, 0, result, 8, wrapped.Length);
-                    // Prepend default AIV (0xA6A6A6A6A6A6A6A6)
-                    byte[] aiv = { 0xA6, 0xA6, 0xA6, 0xA6, 0xA6, 0xA6, 0xA6, 0xA6 };
-                    Buffer.BlockCopy(aiv, 0, result, 0, 8);
-                    return result;
-                }
-            }
-
-            private static byte[] Rfc3394Unwrap(Aes aesAlg, byte[] ciphertext)
-            {
-                // Implementation omitted for brevity - assumes it uses aesAlg.CreateDecryptor()
-                // Placeholder implementation:
-                if (ciphertext == null || ciphertext.Length % 8 != 0 || ciphertext.Length < 16)
-                    throw new ArgumentException("Ciphertext must be a multiple of 8 bytes and at least 16 bytes.");
-                if (aesAlg.Mode != CipherMode.ECB || aesAlg.Padding != PaddingMode.None)
-                    throw new InvalidOperationException("AES algorithm must be in ECB mode with NoPadding for unwrap.");
-
-                // Check AIV (first 8 bytes)
-                byte[] aiv = { 0xA6, 0xA6, 0xA6, 0xA6, 0xA6, 0xA6, 0xA6, 0xA6 };
-                for (int i = 0; i < 8; ++i)
-                {
-                    if (ciphertext[i] != aiv[i]) throw new CryptographicException("Integrity check failed during unwrap.");
-                }
-
-                // Actual unwrapping logic is complex.
-                // This is a simplified placeholder.
-                using (var decryptor = aesAlg.CreateDecryptor())
-                {
-                    // Example: Simple ECB decryption (NOT real RFC3394)
-                    byte[] unwrapped = decryptor.TransformFinalBlock(ciphertext, 8, ciphertext.Length - 8);
-                    return unwrapped;
-                }
-            }
-
-            public void Dispose()
-            {
-                _aesEcbInstance?.Dispose(); // Dispose the correct instance
                 GC.SuppressFinalize(this);
             }
         }

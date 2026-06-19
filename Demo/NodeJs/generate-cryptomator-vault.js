@@ -1,3 +1,7 @@
+// Unified Vault Format (UVF) for C# and other languages.
+// Copyright (c) Smart In Venture 2025- https://www.speedbits.io
+// Licensed under AGPL-3.0 (commercial licenses available); see LICENSE.
+
 // Creates a Cryptomator vault (via the native TitanVault library) with the SAME layout and files as
 // Demo/_test-cryptomator-vault, so it can be opened in the REAL Cryptomator app to verify that vaults
 // WE write are compatible (the reverse of the read-interop test).

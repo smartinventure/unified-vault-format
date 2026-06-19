@@ -6,7 +6,7 @@ record the outcome in a timestamped `AUDIT-RESULT.md` (see [Output](#output)).
 
 > **This is a structured self-review to surface obvious flaws. It is _not_ an independent professional
 > cryptographic audit, a formal proof, a pentest, or a fuzzing campaign.** It complements — and does not
-> replace — the "no professional security audit" caveat in the project [README](../README.md).
+> replace — the "no professional security audit" caveat in the project [README](../../README.md).
 
 ## Goal
 
