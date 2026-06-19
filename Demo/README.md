@@ -55,6 +55,38 @@ This Native-AOT-publishes `UvfLib.Master` and writes the library to **`Dist/Nati
 - The native binary must match the **calling process's architecture** (an x64 runtime needs the
   `win-x64` build, not `win-arm64` — relevant under Windows-on-ARM emulation).
 
+## Command-line options (all native demos)
+
+The Python, Node.js, Java, C/C++, Rust and Go demos take the **same switches** — only the launcher
+differs (`python vault_demo.py …`, `node vault-demo.js …`, `mvn … -Dexec.args="…"`, the compiled
+`vault_demo` exe, `cargo run -- …`, `go run . …`):
+
+| Switch | Meaning |
+|--------|---------|
+| `--lib <path>` | Use this native library explicitly. Needed when it isn't in one of the auto-searched locations below. (Same as the `TITANVAULT_LIB` env var.) |
+| `--format uvf` \| `cryptomator` | Run just one format's functional sections (default: **both**). |
+| `--benchmark` (`--bench`) | Throughput benchmark only (default **1 GB**). |
+| `--size <GB>` | Benchmark dataset size, e.g. `--size 10`. A size **larger than your RAM** gives disk-bound numbers (otherwise the disk rows mostly reflect the OS cache). |
+| `--cryptomator-interop` (`--interop`) | Only unlock the bundled real Cryptomator vault and verify its files. |
+| `--vault <path>` | Where to create the scratch demo vault (default: a temp dir). |
+| `--password <pw>` | Passphrase for the scratch vault. |
+
+With no arguments the demo runs **everything**: both formats' sections, the real-Cryptomator interop,
+and a quick benchmark.
+
+### How the library is found (when you don't pass `--lib`)
+
+In order, first hit wins:
+
+1. **`--lib <path>`** (explicit)
+2. **`TITANVAULT_LIB`** environment variable
+3. **the demo's own folder** — drop `TitanVault.dll` / `libTitanVault.so` / `libTitanVault.dylib` next to the demo for the simplest setup
+4. **the current working directory**
+5. **`../../Dist/Native/<rid>/`** — where `build.ps1`/`build.sh -Task aot` writes it
+
+`<rid>` is your OS + the **process** architecture (e.g. `win-x64`); the binary must match it (an x64
+runtime needs the `win-x64` build, not `win-arm64` — relevant under Windows-on-ARM emulation).
+
 ## The full native C ABI — all 46 functions
 
 "Demoed" = exercised by [`NodeJs/vault-demo.js`](NodeJs/vault-demo.js) (the reference); the

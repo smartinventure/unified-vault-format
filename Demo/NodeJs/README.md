@@ -35,10 +35,13 @@ node vault-demo.js --benchmark              # throughput only (default 1 GB; --s
 node vault-demo.js --cryptomator-interop    # real-Cryptomator-app vault read + md5 verify only
 ```
 
-(With no `--lib`, the demo auto-resolves `../../Dist/Native/<rid>/TitanVault.dll` for your OS/arch — so
-run the `aot` build first. Override with `--lib <path>` or the `TITANVAULT_LIB` env var. With no
-`--format`, both run. The native binary must match your **Node architecture** — x64 Node needs the
-`win-x64` build, not `win-arm64`.)
+**Switches** (`--lib`, `--format`, `--benchmark`, `--size <GB>`, `--cryptomator-interop`, `--vault`,
+`--password`) are the same across all demos — see the shared table in [`../README.md`](../README.md#command-line-options-all-native-demos).
+
+With no `--lib`, the library is auto-discovered in this order: `--lib` → `TITANVAULT_LIB` env →
+**this folder** (drop `TitanVault.dll` next to `vault-demo.js`) → the current dir →
+`../../Dist/Native/<rid>/`. So either run the `aot` build first, or copy the DLL here. The binary must
+match your **Node architecture** — x64 Node needs the `win-x64` build, not `win-arm64`.
 
 Strings cross the ABI as a UTF-8 pointer **plus an explicit byte length** (`Buffer.byteLength`), and
 `read_file`'s buffer-size argument is `_Inout_` (koffi writes the actual size back into the

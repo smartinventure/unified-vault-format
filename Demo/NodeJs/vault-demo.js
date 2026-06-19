@@ -19,14 +19,18 @@ const TITAN_VAULT_FORMAT_CRYPTOMATOR = 0;
 const TITAN_VAULT_FORMAT_UVF = 1;
 const MAX_LIST = 256;
 
-// Resolve the native library for the current OS/arch under ../../Dist/Native/<rid>/, so a bare
-// `node vault-demo.js` works after a build. Override with --lib or the TITANVAULT_LIB env var.
+// Resolve the native library when neither --lib nor TITANVAULT_LIB is given. Search order:
+//   1. next to this demo (same folder)   2. the current working directory
+//   3. the built output ../../Dist/Native/<rid>/   (the usual location after a build)
+// Returns the first that exists, else the Dist path (so the "not found" message points at the build).
 function defaultLibPath() {
-  const arch = ({ x64: 'x64', arm64: 'arm64' })[process.arch] || process.arch;
-  const rid = (process.platform === 'win32' ? 'win-' : process.platform === 'darwin' ? 'osx-' : 'linux-') + arch;
   const file = process.platform === 'win32' ? 'TitanVault.dll'
              : process.platform === 'darwin' ? 'libTitanVault.dylib' : 'libTitanVault.so';
-  return path.resolve(__dirname, '..', '..', 'Dist', 'Native', rid, file);
+  const arch = ({ x64: 'x64', arm64: 'arm64' })[process.arch] || process.arch;
+  const rid = (process.platform === 'win32' ? 'win-' : process.platform === 'darwin' ? 'osx-' : 'linux-') + arch;
+  const distPath = path.resolve(__dirname, '..', '..', 'Dist', 'Native', rid, file);
+  const candidates = [path.join(__dirname, file), path.resolve(process.cwd(), file), distPath];
+  return candidates.find((p) => fs.existsSync(p)) || distPath;
 }
 
 function parseArgs() {
@@ -516,6 +520,7 @@ function runBenchmark(lib, sizeGb) {
   const sizeBytes = Math.round(sizeGb * 1024 * 1024 * 1024);
   const CHUNK = 4 * 1024 * 1024; // 4 MiB
   console.log(`\n========== Benchmark (${sizeGb} GB per format, ${CHUNK >> 20} MiB chunks) ==========`);
+  console.log('  (disk read/write rows may just reflect the OS cache — pass --size larger than your RAM for disk-bound numbers)');
   for (const format of ['uvf', 'cryptomator']) benchOne(lib, format, sizeBytes, CHUNK);
 }
 
@@ -539,7 +544,7 @@ function benchOne(lib, format, sizeBytes, CHUNK) {
     { const fd = fs.openSync(plain, 'w'); let w = 0;
       while (w < sizeBytes) { const n = Math.min(CHUNK, sizeBytes - w); fs.writeSync(fd, chunk, 0, n); w += n; }
       fs.fsyncSync(fd); fs.closeSync(fd); }
-    report('create file (disk write)', elapsedMs(t));
+    report('create file (disk write, may be cached)', elapsedMs(t));
 
     const vlen = u8(vaultDir), plen = u8(password);
     if (format === 'uvf') check(lib, lib.createUvf(vaultDir, vlen, password, plen, 1, 0, 0), 'create_uvf_vault');
@@ -572,7 +577,7 @@ function benchOne(lib, format, sizeBytes, CHUNK) {
       t = process.hrtime.bigint();
       { const fd = fs.openSync(plain, 'r'); const rbuf = Buffer.alloc(CHUNK);
         while (fs.readSync(fd, rbuf, 0, CHUNK, null) > 0) { /* discard */ } fs.closeSync(fd); }
-      report('read file (disk read)', elapsedMs(t));
+      report('read file (disk read, may be cached)', elapsedMs(t));
     } finally { lib.closeVault(handle); }
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
