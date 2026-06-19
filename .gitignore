@@ -730,6 +730,8 @@ composer.lock
 # Fortran module files
 *.mod
 *.smod
+# ...but Go's module manifest must be tracked (the *.mod rule above is for Fortran).
+!go.mod
 
 # Compiled Static libraries
 *.lai
