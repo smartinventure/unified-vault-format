@@ -28,6 +28,10 @@ public static class Program
 
     public static async Task<int> Main(string[] args)
     {
+        // Format numbers with '.' regardless of the machine's locale (so the benchmark prints
+        // "0.25 GB" / "790.9 MB/s" like the other demos, not the German "0,25").
+        System.Globalization.CultureInfo.CurrentCulture = System.Globalization.CultureInfo.InvariantCulture;
+
         Arguments parsed = Arguments.Parse(args);
 
         // Focused modes (run only the requested thing).

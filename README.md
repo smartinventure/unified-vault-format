@@ -1,37 +1,47 @@
-# Uvf.Net Library Documentation
+# Unified Vault Format (UVF) Library
 
 ## Overview
 
-Uvf.Net is a C# / .NET implementation of the **Universal Vault Format (UVF)** — the
-next-generation, open vault format designed by the team behind
-[Cryptomator](https://cryptomator.org/). It provides secure client-side
-encryption for files and folders stored locally or in the cloud, with everything
-(file contents, file names, and the directory structure itself) encrypted before
-it touches the storage backend.
+A **universal implementation of the [Unified Vault Format (UVF)](https://github.com/encryption-alliance/unified-vault-format)** —
+the next-generation, open vault format developed by the [Encryption Alliance](https://github.com/encryption-alliance)
+(the group behind [Cryptomator](https://cryptomator.org/)), whose specification lives in that repository.
+It provides secure client-side encryption for files and folders stored locally or in the cloud, with
+everything (file contents, file names, and the directory structure itself) encrypted before it touches
+the storage backend.
+
+The **core is written in C# / .NET** and compiles to a self-contained **native library** (`TitanVault`)
+that exposes a flat C ABI — so the *same* engine is callable from many languages. This repository ships
+runnable demos and bindings for **.NET, Python, Node.js, Java, C/C++, Rust, Go, Swift, Dart and PHP**
+(see [`Demo/`](Demo/)).
 
 The library delivers two things:
 
-1. **A native UVF implementation** — full support for the Universal Vault Format
-   (version 3): file-name encryption, file-content encryption, file headers,
-   directory metadata, and master-key management.
-2. **Cryptomator compatibility** — it can also read and write classic Cryptomator
-   (vault format v8) vaults, so existing Cryptomator vaults can be used from .NET.
+1. **A native UVF implementation** — full support for the Unified Vault Format (version 3): file-name
+   encryption, file-content encryption, file headers, directory metadata, master-key management, and
+   multi-user access (password and public-key recipients).
+2. **Cryptomator compatibility** — it also reads and writes classic Cryptomator (vault format v8) vaults.
+   This has been **tested for full round-trip compatibility with Cryptomator**: it unlocks and decrypts
+   vaults created by the Cryptomator app, and vaults *it* creates open and verify correctly **in** the
+   Cryptomator app.
 
-It is a port of the official Java [`cryptolib`](https://github.com/cryptomator/cryptolib),
-and its cryptographic behavior is validated against that reference implementation
-and the published UVF specification.
+The C# core was **ported from the official Java reference implementation**
+([`cryptolib`](https://github.com/cryptomator/cryptolib) / `cryptofs`); its cryptographic behavior is
+validated against that reference and the published UVF specification — but please read the disclaimer
+below on **how** that port was produced.
 
-> ### ⚠️ Disclaimer / Warning
+> ### ⚠️ Disclaimer / Warning — please read
 >
-> The C# code was semi-automatically translated from the original Java
-> implementation. While it passes an extensive test suite and has been reviewed
-> against the Java reference, it has **not** undergone an independent professional
-> security audit. Use in production or for securing sensitive information is at
-> your own risk and should be preceded by your own thorough review.
+> **The port from the original Java code to C# was produced with extensive use of AI
+> (large-language-model) assistance.** The result passes an extensive automated test suite and has been
+> reviewed against the Java reference, but it has **not** undergone an independent, professional, human
+> security audit. AI-assisted translation can introduce subtle cryptographic or memory-handling defects
+> that automated tests do not catch.
 >
-> Under no circumstances shall the authors or contributors be held liable for any
-> damages or losses (financial, data, health, or otherwise) resulting from the use
-> of this software.
+> **Use it entirely at your own discretion and risk.** Do not rely on it to protect sensitive or
+> high-value data without first performing your own thorough review and, ideally, a professional audit.
+> **We accept no liability whatsoever:** under no circumstances shall the authors or contributors be
+> held liable for any damages or losses (financial, data, privacy, health, or otherwise) arising from
+> the use of this software, which is provided "as is", without warranty of any kind.
 
 ## License
 
@@ -44,8 +54,9 @@ must release your corresponding source code under the same license.
 
 **Alternative / commercial licenses are available upon request.** If the AGPL-3.0
 terms do not fit your use case (for example, embedding the library in a
-closed-source or proprietary product), please contact
-**info@smartinventure.com** to arrange a commercial license.
+closed-source or proprietary product), please reach out to arrange a commercial
+license: **info `[at]` smartinventure `[dot]` com** (write the address normally —
+it is shown this way to deter spam bots: replace `[at]` → `@` and `[dot]` → `.`).
 
 ## Getting Started
 
@@ -54,7 +65,7 @@ UvfLib can be consumed two ways:
 ### 1. .NET — managed NuGet package (no native dependency)
 
 ```xml
-<PackageReference Include="UvfLib.Master" Version="1.0.0" />
+<PackageReference Include="UvfLib.Master" Version="1.0.1" />
 ```
 
 `UvfLib.Master` provides the high-level vault API and pulls in `UvfLib.Core` + `UvfLib.Vault`. A minimal
@@ -81,15 +92,23 @@ flat **C ABI**, so it can be used from any language with FFI (Python, Node.js, J
 
 ### Runnable examples — [`Demo/`](Demo/)
 
-Each demo creates a vault, encrypts a file, reads it back as cleartext, and deletes it — for both UVF
-and Cryptomator:
+Each demo exercises the **full API for both UVF and Cryptomator** — files, directories, streaming,
+persistence, key rotation, password + public-key multi-user, and maintenance — then unlocks a real
+Cryptomator vault (proving interop) and runs a throughput benchmark. See [`Demo/README.md`](Demo/README.md)
+for the shared command-line switches.
 
 | Demo | Uses |
 |------|------|
-| [`Demo/DotNet`](Demo/DotNet)  | C# with the managed `UvfLib` package (no AOT) |
+| [`Demo/DotNet`](Demo/DotNet)  | C# with the managed `UvfLib` package (no native DLL) |
+| [`Demo/NodeJs`](Demo/NodeJs)  | native `TitanVault` via [`koffi`](https://koffi.dev) — the reference demo |
 | [`Demo/Python`](Demo/Python)  | native `TitanVault` via `ctypes` (stdlib) |
-| [`Demo/NodeJs`](Demo/NodeJs)  | native `TitanVault` via [`koffi`](https://koffi.dev) |
 | [`Demo/Java`](Demo/Java)      | native `TitanVault` via [JNA](https://github.com/java-native-access/jna) |
+| [`Demo/Cpp`](Demo/Cpp)        | native `TitanVault` via `LoadLibrary`/`dlopen` (runtime) |
+| [`Demo/Rust`](Demo/Rust)      | native `TitanVault` via [`libloading`](https://crates.io/crates/libloading) |
+| [`Demo/Go`](Demo/Go)          | native `TitanVault` via [`purego`](https://github.com/ebitengine/purego) (no cgo) |
+| [`Demo/Swift`](Demo/Swift)    | native `TitanVault` via a C module map + `dlopen` |
+| [`Demo/Dart`](Demo/Dart)      | native `TitanVault` via `dart:ffi` |
+| [`Demo/Php`](Demo/Php)        | native `TitanVault` via PHP `FFI` |
 
 ## Architecture
 
@@ -247,7 +266,7 @@ external dependencies** and can be built and audited on its own:
 | `UvfLib.Core` | Cryptographic core (UVF v3 + Cryptomator v8) | **None** (BouncyCastle/System.* NuGet only) |
 | `UvfLib.Vault` | Vault streams & file-header orchestration | **None** (depends only on `UvfLib.Core`) |
 | `UvfLib.Master` | Optional high-level + Native-AOT facade (`TitanVault`) | **`FolderMagic.StorageLib`** (separate MIT library) |
-| [`Demo/`](Demo) (DotNet, Python, NodeJs, Java) | Runnable usage examples | `.NET` via the NuGet package; others via the native `TitanVault` C ABI |
+| [`Demo/`](Demo) (.NET, Python, Node.js, Java, C/C++, Rust, Go, Swift, Dart, PHP) | Runnable usage examples | `.NET` via the NuGet package; others via the native `TitanVault` C ABI |
 | `UvfLib.Tests` | Test suite | references all of the above |
 
 **The AGPL deliverable is `UvfLib.Core` + `UvfLib.Vault`.** They build cleanly with
