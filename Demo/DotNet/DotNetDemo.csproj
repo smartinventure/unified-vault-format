@@ -13,7 +13,7 @@
        nuget.org this restores from there; until then, add the local feed as a restore source
        (see this folder's README.md for the exact command). -->
   <ItemGroup>
-    <PackageReference Include="UvfLib.Master" Version="1.0.0" />
+    <PackageReference Include="UvfLib.Master" Version="1.0.1" />
   </ItemGroup>
 
 </Project>
