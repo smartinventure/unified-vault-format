@@ -1,0 +1,52 @@
+name: Demos (Linux smoke test)
+
+# Builds the native AOT library on Linux and RUNS the demos against it — for both UVF and Cryptomator,
+# including the public-key multi-user path and the real-Cryptomator-vault interop. This exists because
+# the demos were originally only ever run on Windows, which hid a Linux-only bug (the platform
+# encrypted-PKCS#8 private-key round-trip). Running them on ubuntu-latest catches that class of
+# regression automatically.
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: demos-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  linux-demos:
+    name: Build + run demos (linux-x64)
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Install native toolchain
+        run: sudo apt-get update && sudo apt-get install -y clang zlib1g-dev
+
+      # Produces Dist/Native/linux-x64/libTitanVault.so, which the demos auto-discover.
+      - name: Build native AOT (linux-x64)
+        timeout-minutes: 20
+        run: ./BuildScripts/build.sh --task aot --platforms linux-x64
+
+      # Python uses only the stdlib (ctypes) — the most dependency-free guard. Runs both formats, the
+      # full method surface (incl. public-key multi-user), the real-vault interop, and a small benchmark.
+      - name: Python demo
+        run: python3 Demo/Python/vault_demo.py
+
+      # Node validates the koffi FFI path on Linux too.
+      - name: Node.js demo
+        working-directory: Demo/NodeJs
+        run: |
+          npm install --no-audit --no-fund
+          node vault-demo.js
