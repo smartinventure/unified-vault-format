@@ -276,3 +276,10 @@ Because the ABI is a stable flat C interface, the library is consumable from **a
 ## Conclusion
 
 The UVF library provides powerful, standards-based, client-side encryption for files — fully interoperable with the UVF and Cryptomator ecosystems. Use it as a managed .NET library, or as a single native component callable from a dozen languages; the runnable [`Demo/`](Demo/) shows every one end to end.
+
+## Credits & acknowledgements
+
+The **Unified Vault Format** and the classic **Cryptomator** vault format are designed by the [Cryptomator](https://cryptomator.org/) team and the [Encryption Alliance](https://github.com/encryption-alliance) (the teams behind Cryptomator and Cyberduck). All credit for the underlying cryptographic design belongs to them.
+
+This project is an **independent C# reimplementation** of those schemes. It is **not affiliated with, endorsed by, or a product of Cryptomator** — "Cryptomator" is referenced only to describe format compatibility. The scheme was reimplemented from scratch, using the official Java [`cryptolib`](https://github.com/cryptomator/cryptolib) purely as a reference (no upstream source is bundled or redistributed in this repository), and with the kind permission of its author, **Sebastian Stenzel**, who confirmed that reimplementing the scheme — and using the Java code as a reference — is welcome. Our sincere thanks to him and the Cryptomator team for the open format and for that confirmation.
+
