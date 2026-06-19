@@ -3,7 +3,7 @@
 #
 # Tasks (--task):
 #   test     Build the solution and run the test suite.
-#   aot      Publish the native AOT library (UvfLib.Master -> TitanVault.{so,dylib}) per --platforms RID,
+#   aot      Publish the native AOT library (UvfLib.Master -> libTitanVault.{so,dylib}) per --platforms RID,
 #            into Dist/Native/<rid>/, with a SHA-256 manifest. Needs a native toolchain: clang + the
 #            usual build/dev packages (e.g. build-essential, zlib1g-dev, libicu-dev on Debian/Ubuntu;
 #            Xcode command line tools on macOS).
@@ -104,11 +104,21 @@ do_aot() {
       -p:PublishAot=true -p:OptimizationPreference=Speed -p:IlcOptimizationPreference=Speed \
       -p:IlcFoldIdenticalMethodBodies=true -p:DebugType=embedded \
       -o "$out" --verbosity minimal
-    # The assembly is named TitanVault; the native lib uses the platform extension (.so/.dylib),
-    # with or without a lib prefix depending on the runtime.
+    # .NET Native-AOT names the output after the assembly (TitanVault) with the platform
+    # extension and NO "lib" prefix on Linux/macOS (i.e. TitanVault.so / TitanVault.dylib).
+    # Normalize it to the conventional libTitanVault.{so,dylib} so FFI hosts and our demos
+    # find it by the usual Unix name (Windows keeps TitanVault.dll, built by build.ps1).
     local lib
     lib="$(find "$out" -maxdepth 1 -type f \( -iname 'TitanVault*.so' -o -iname 'TitanVault*.dylib' -o -iname 'libTitanVault*.so' -o -iname 'libTitanVault*.dylib' \) | head -n1)"
     if [[ -z "$lib" ]]; then echo "ERROR: AOT build for $rid produced no TitanVault native library in $out" >&2; exit 1; fi
+    local dir base ext
+    dir="$(dirname "$lib")"; base="$(basename "$lib")"
+    case "$base" in *.dylib) ext="dylib" ;; *) ext="so" ;; esac
+    if [[ "$base" != lib* ]]; then
+      mv -f "$lib" "$dir/libTitanVault.$ext"
+      [[ -f "$dir/$base.dbg" ]] && mv -f "$dir/$base.dbg" "$dir/libTitanVault.$ext.dbg"   # keep the debug sidecar paired
+      lib="$dir/libTitanVault.$ext"
+    fi
     local h; h="$(sha256 "$lib")"
     echo "   $(basename "$lib")  sha256=$h"
     entries+=("{\"rid\":\"$rid\",\"file\":\"$(basename "$lib")\",\"sha256\":\"$h\"}")
