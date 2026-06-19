@@ -100,7 +100,39 @@ public final class VaultDemo {
                                                     byte[] encryptedPrivKey, int encryptedPrivKeyLen,
                                                     byte[] keyPwd, int keyPwdLen, byte[] userId, int userIdLen);
         int titan_vault_rotate_keys_pubkey(byte[] path, int pathLen, byte[] adminPwd, int adminPwdLen);
+
+        // Library / maintenance utilities (operate on the vault PATH; the vault need not be open).
+        int titan_vault_detect_vault_format(byte[] path, int pathLen);
+        // JNA copies the byte[] back after the call, so the in-place zeroing is observable.
+        void titan_vault_secure_zero_memory(byte[] buffer, int size);
+        int titan_vault_backup_files(byte[] path, int pathLen, byte[] backupPath, int backupPathLen, int overwriteExisting);
+        int titan_vault_change_cryptomator_password(byte[] path, int pathLen,
+                                                    byte[] oldPwd, int oldPwdLen, byte[] newPwd, int newPwdLen);
+        int titan_vault_change_uvf_admin_password(byte[] path, int pathLen,
+                                                  byte[] oldPwd, int oldPwdLen, byte[] newPwd, int newPwdLen);
+        int titan_vault_change_uvf_user_password(byte[] path, int pathLen,
+                                                 byte[] adminPwd, int adminPwdLen, byte[] userId, int userIdLen,
+                                                 byte[] newUserPwd, int newUserPwdLen);
+        int titan_vault_remove_user(byte[] path, int pathLen, byte[] adminPwd, int adminPwdLen,
+                                    byte[] userId, int userIdLen);
+
+        // Text convenience (UTF-8). read_all_text returns a heap char* that must be freed.
+        int titan_vault_write_all_text(Pointer handle, byte[] path, int pathLen, byte[] text, int textLen);
+        int titan_vault_append_all_text(Pointer handle, byte[] path, int pathLen, byte[] text, int textLen);
+        Pointer titan_vault_read_all_text(Pointer handle, byte[] path, int pathLen);
+
+        // Fuller stream API (the core read/write/seek are above).
+        Pointer titan_vault_open_stream_with_flags(Pointer handle, byte[] path, int pathLen, int openFlags);
+        long titan_vault_stream_get_position(Pointer stream);
+        int titan_vault_stream_set_length(Pointer stream, long length);
+        int titan_vault_stream_flush(Pointer stream);
     }
+
+    // StorageLib.Abstractions.OpenFlags values (for open_stream_with_flags).
+    private static final int OPEN_READONLY = 0x0000;
+    private static final int OPEN_WRITEONLY = 0x0001;
+    private static final int OPEN_CREATE = 0x0040;
+    private static final int OPEN_TRUNCATE = 0x0200;
 
     // ----- parsed command-line arguments -----
 
@@ -208,6 +240,13 @@ public final class VaultDemo {
         if (isNull(handle)) throw new RuntimeException("load " + format + " vault failed: " + lastError(lib));
         System.out.println("Created + opened " + format + " vault at " + vaultDir);
 
+        // 0. Detect the on-disk format (path-based — the vault need not be open).
+        section(state, "Detect format", format, () -> {
+            int detected = lib.titan_vault_detect_vault_format(vpath, vlen);
+            int expected = format.equals("uvf") ? TITAN_VAULT_FORMAT_UVF : TITAN_VAULT_FORMAT_CRYPTOMATOR;
+            if (detected != expected) throw new SectionException("detect_vault_format=" + detected + ", expected " + expected);
+        });
+
         // A file we deliberately keep around to prove persistence + multi-user access later.
         final byte[] persistPayload = "persisted across reopen".getBytes(StandardCharsets.UTF_8);
         byte[] persistPath = utf8("/persist.txt");
@@ -228,6 +267,22 @@ public final class VaultDemo {
                 if (lib.titan_vault_file_exists(handle, fp, fp.length) != 1) throw new SectionException("exists should be 1");
                 check(lib, lib.titan_vault_delete_file(handle, fp, fp.length), "delete_file");
                 if (lib.titan_vault_file_exists(handle, fp, fp.length) != 0) throw new SectionException("exists should be 0 after delete");
+            });
+
+            // 1b. UTF-8 text convenience: write, append, read-back.
+            section(state, "Text helpers", format, () -> {
+                byte[] tf = utf8("/notes.txt");
+                byte[] first = utf8("first line\n");
+                byte[] second = utf8("second line\n");
+                check(lib, lib.titan_vault_write_all_text(handle, tf, tf.length, first, first.length), "write_all_text");
+                check(lib, lib.titan_vault_append_all_text(handle, tf, tf.length, second, second.length), "append_all_text");
+                Pointer ptr = lib.titan_vault_read_all_text(handle, tf, tf.length);
+                if (isNull(ptr)) throw new SectionException("read_all_text: " + lastError(lib));
+                String text;
+                try { text = ptr.getString(0, "UTF-8"); }
+                finally { lib.titan_vault_free_string(ptr); }
+                String expected = "first line\nsecond line\n";
+                if (!text.equals(expected)) throw new SectionException("text round-trip mismatch: " + json(List.of(text)));
             });
 
             // 2. Directories: create, write into, list, file-info, move/rename.
@@ -269,6 +324,7 @@ public final class VaultDemo {
                 if (isNull(ws)) throw new SectionException("open_write_stream: " + lastError(lib));
                 try {
                     for (int i = 0; i < CHUNKS; i++) if (lib.titan_vault_stream_write(ws, chunk, CHUNK) != CHUNK) throw new SectionException("short write");
+                    check(lib, lib.titan_vault_stream_flush(ws), "stream_flush");
                 } finally { lib.titan_vault_close_stream(ws); }
 
                 Pointer rs = lib.titan_vault_open_read_stream(handle, fp, fp.length);
@@ -284,6 +340,8 @@ public final class VaultDemo {
                         off += got;
                     }
                     if (off != total) throw new SectionException("read " + off + " of " + total);
+                    long posAfterRead = lib.titan_vault_stream_get_position(rs);
+                    if (posAfterRead != total) throw new SectionException("stream_get_position " + posAfterRead + " != " + total);
                     // random access: seek to a mid-file offset and verify (best-effort — not all backends seek)
                     final int seekTo = 70000;
                     long pos = lib.titan_vault_stream_seek(rs, seekTo, 0); // 0 = SEEK_SET
@@ -295,11 +353,25 @@ public final class VaultDemo {
                     } else {
                         System.out.println("    wrote+verified " + total + " bytes; seek not supported by this backend (skipped)");
                     }
+                    // open_stream_with_flags: reopen read-only and confirm the length matches.
+                    Pointer rs2 = lib.titan_vault_open_stream_with_flags(handle, fp, fp.length, OPEN_READONLY);
+                    if (isNull(rs2)) throw new SectionException("open_stream_with_flags: " + lastError(lib));
+                    try { if (lib.titan_vault_stream_get_length(rs2) != total) throw new SectionException("flags-open length mismatch"); }
+                    finally { lib.titan_vault_close_stream(rs2); }
                 } finally { lib.titan_vault_close_stream(rs); }
+
+                // stream_set_length: truncation of encrypted streams is backend-dependent; best-effort.
+                try {
+                    byte[] tp = utf8("/trunc.bin");
+                    Pointer ts = lib.titan_vault_open_stream_with_flags(handle, tp, tp.length, OPEN_WRITEONLY | OPEN_CREATE | OPEN_TRUNCATE);
+                    if (!isNull(ts)) {
+                        try { lib.titan_vault_stream_write(ts, chunk, CHUNK); lib.titan_vault_stream_set_length(ts, 4096); }
+                        finally { lib.titan_vault_close_stream(ts); }
+                    }
+                } catch (RuntimeException ignored) { /* optional capability */ }
             });
         } finally {
             lib.titan_vault_close_vault(handle);
-            handle = null;
         }
 
         // 4. Persistence: reopen the (closed) vault with the passphrase and re-read.
@@ -389,8 +461,48 @@ public final class VaultDemo {
                 } catch (Exception e) {
                     System.out.println("    ⚠ opening as a secondary user is not yet supported by the library: " + e.getMessage());
                 }
+
+                // Change a member's password (admin-driven), then remove the member and confirm they're gone.
+                String aliceNewPwStr = "alice-passphrase-456";
+                byte[] aliceNewPw = utf8(aliceNewPwStr);
+                check(lib, lib.titan_vault_change_uvf_user_password(vpath, vlen, pwd, plen, aliceId, aliceId.length, aliceNewPw, aliceNewPw.length), "change_uvf_user_password");
+                check(lib, lib.titan_vault_remove_user(vpath, vlen, pwd, plen, aliceId, aliceId.length), "remove_user");
+                int n2 = lib.titan_vault_get_vault_users(vpath, vlen, pwd, plen, listBuffer(), listMax());
+                List<String> users2 = readStringArray(lib, lastEntriesBuffer, Math.max(n2, 0));
+                if (users2.contains(alice)) throw new SectionException("removed user still listed (got " + json(users2) + ")");
+                System.out.println("    changed alice's password, then removed alice; users now: " + json(users2));
             });
         }
+
+        // 7. Maintenance (both formats): backup the key files, secure-wipe a buffer, change the
+        //    password, and reopen with the new password.
+        section(state, "Maintenance", format, () -> {
+            Path backupDir = Path.of(System.getProperty("java.io.tmpdir"), "uvf-backup-" + format + "-" + ProcessHandle.current().pid());
+            rmRf(backupDir);
+            byte[] backupBytes = utf8(backupDir.toString());
+            check(lib, lib.titan_vault_backup_files(vpath, vlen, backupBytes, backupBytes.length, 1), "backup_files");
+            if (!Files.exists(backupDir) || walk(backupDir).isEmpty()) throw new SectionException("backup produced no files");
+
+            // JNA copies the byte[] back after the call, so the in-place zeroing is observable here.
+            byte[] secret = "super-secret-key-material".getBytes(StandardCharsets.UTF_8);
+            lib.titan_vault_secure_zero_memory(secret, secret.length);
+            for (byte b : secret) if (b != 0) throw new SectionException("secure_zero_memory did not zero the buffer");
+
+            String newPwStr = password + "-rotated";
+            byte[] newPw = utf8(newPwStr);
+            if (format.equals("uvf")) check(lib, lib.titan_vault_change_uvf_admin_password(vpath, vlen, pwd, plen, newPw, newPw.length), "change_uvf_admin_password");
+            else check(lib, lib.titan_vault_change_cryptomator_password(vpath, vlen, pwd, plen, newPw, newPw.length), "change_cryptomator_password");
+            Pointer h3 = openVault(lib, format, vaultDir, newPwStr, null, null);
+            if (isNull(h3)) throw new SectionException("reopen after password change failed: " + lastError(lib));
+            try {
+                byte[] buf = new byte[4096];
+                IntByReference size = new IntByReference(buf.length);
+                check(lib, lib.titan_vault_read_file(h3, persistPath, persistPath.length, buf, size), "read after password change");
+                if (!Arrays.equals(Arrays.copyOf(buf, size.getValue()), persistPayload)) throw new SectionException("content mismatch after password change");
+            } finally { lib.titan_vault_close_vault(h3); }
+            rmRf(backupDir);
+            System.out.println("    backed up key files, secure-zeroed a buffer, changed the " + format + " password and re-read OK");
+        });
 
         System.out.println("✅ " + format + " demo finished.");
     }
@@ -461,6 +573,7 @@ public final class VaultDemo {
         long sizeBytes = Math.round(sizeGb * 1024 * 1024 * 1024);
         final int CHUNK = 4 * 1024 * 1024; // 4 MiB
         System.out.println("\n========== Benchmark (" + trimNum(sizeGb) + " GB per format, " + (CHUNK >> 20) + " MiB chunks) ==========");
+        System.out.println("  (disk read/write rows may just reflect the OS cache — pass --size larger than your RAM for disk-bound numbers)");
         for (String format : new String[] {"uvf", "cryptomator"}) benchOne(lib, format, sizeBytes, CHUNK);
     }
 
@@ -484,7 +597,7 @@ public final class VaultDemo {
                 long w = 0;
                 while (w < sizeBytes) { int n = (int) Math.min(CHUNK, sizeBytes - w); out.write(chunk, 0, n); w += n; }
             }
-            report("create file (disk write)", elapsedMs(t), sizeBytes);
+            report("create file (disk write, may be cached)", elapsedMs(t), sizeBytes);
 
             byte[] vpath = utf8(vaultDirPath.toString());
             int vlen = vpath.length;
@@ -535,7 +648,7 @@ public final class VaultDemo {
                     byte[] rbuf = new byte[CHUNK];
                     while (in.read(rbuf, 0, CHUNK) > 0) { /* discard */ }
                 }
-                report("read file (disk read)", elapsedMs(t), sizeBytes);
+                report("read file (disk read, may be cached)", elapsedMs(t), sizeBytes);
             } finally { lib.titan_vault_close_vault(handle); }
         } catch (Exception e) {
             throw new RuntimeException(e.getMessage(), e);
@@ -566,7 +679,12 @@ public final class VaultDemo {
         return a;
     }
 
-    /** Resolve the native library for the current OS/arch under ../../Dist/Native/<rid>/. */
+    /**
+     * Resolve the native library when neither --lib nor TITANVAULT_LIB is given. Search order:
+     *   1. the project dir (where the demo runs from)   2. the current working directory
+     *   3. the built output ../../Dist/Native/<rid>/   (the usual location after a build)
+     * Returns the first that exists, else the Dist path (so the "not found" message points at the build).
+     */
     private static String defaultLibPath() {
         String osArch = System.getProperty("os.arch").toLowerCase(Locale.ROOT);
         String arch = (osArch.contains("aarch64") || osArch.contains("arm64")) ? "arm64" : "x64";
@@ -575,7 +693,14 @@ public final class VaultDemo {
         boolean isMac = osName.contains("mac") || osName.contains("darwin");
         String rid = (isWin ? "win-" : isMac ? "osx-" : "linux-") + arch;
         String file = isWin ? "TitanVault.dll" : isMac ? "libTitanVault.dylib" : "libTitanVault.so";
-        return projectDir().resolve("..").resolve("..").resolve("Dist").resolve("Native").resolve(rid).resolve(file).normalize().toString();
+        Path distPath = projectDir().resolve("..").resolve("..").resolve("Dist").resolve("Native").resolve(rid).resolve(file).normalize();
+        Path[] candidates = {
+            projectDir().resolve(file),
+            Path.of(System.getProperty("user.dir")).resolve(file),
+            distPath,
+        };
+        for (Path p : candidates) if (Files.exists(p)) return p.toString();
+        return distPath.toString();
     }
 
     /** The Java demo project directory (where pom.xml lives); the exec plugin runs from there. */

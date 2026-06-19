@@ -29,10 +29,14 @@ mvn -q compile exec:java -Dexec.args="--benchmark"                  # throughput
 mvn -q compile exec:java -Dexec.args="--cryptomator-interop"        # real-vault read + md5 verify only
 ```
 
-(With no `--lib`, the demo auto-resolves `../../Dist/Native/<rid>/TitanVault.dll` from the project dir
-for your OS/arch — so run the `aot` build first. Override with `--lib <path>`, the `TITANVAULT_LIB` env
-var, or put the library on `-Djna.library.path=<dir>`. With no `--format`, both run.) The native binary
-must match your **JVM architecture** (`os.arch`): an x64 JVM needs the `win-x64` build, not `win-arm64`.
+**Switches** (`--lib`, `--format`, `--benchmark`, `--size <GB>`, `--cryptomator-interop`, `--vault`,
+`--password`) are the same across all demos — see the shared table in
+[`../README.md`](../README.md#command-line-options-all-native-demos). With no `--format`, both run.
+
+With no `--lib`, the library is auto-discovered in order: `--lib` → `TITANVAULT_LIB` env → **the project
+dir** (drop the library next to `pom.xml`) → the current dir → `../../Dist/Native/<rid>/` (or put it on
+`-Djna.library.path=<dir>`). The native binary must match your **JVM architecture** (`os.arch`): an x64
+JVM needs the `win-x64` build, not `win-arm64`.
 
 Strings cross the ABI as UTF-8 `byte[]` **plus an explicit length**; `read_file`'s in/out buffer size
 uses `com.sun.jna.ptr.IntByReference` (grow-and-retry); directory listings come back as a `char*[]`

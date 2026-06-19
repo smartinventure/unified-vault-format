@@ -36,14 +36,22 @@ TITAN_VAULT_FORMAT_CRYPTOMATOR = 0
 TITAN_VAULT_FORMAT_UVF = 1
 MAX_LIST = 256
 
+# StorageLib.Abstractions.OpenFlags values (for open_stream_with_flags).
+OPEN_READONLY = 0x0000
+OPEN_WRITEONLY = 0x0001
+OPEN_CREATE = 0x0040
+OPEN_TRUNCATE = 0x0200
+
 HERE = os.path.dirname(os.path.abspath(__file__))
 
 
 # ----- native library loading -----
 
 def default_lib_path():
-    """Resolve the native library for the current OS/arch under ../../Dist/Native/<rid>/, so a bare
-    `python vault_demo.py` works after a build. Override with --lib or the TITANVAULT_LIB env var."""
+    """Resolve the native library when neither --lib nor TITANVAULT_LIB is given. Search order:
+        1. next to this demo (same folder)   2. the current working directory
+        3. the built output ../../Dist/Native/<rid>/   (the usual location after a build)
+    Returns the first that exists, else the Dist path (so the "not found" message points at the build)."""
     # NOTE: on Windows-on-ARM, platform.machine() reports the HOST arch (ARM64) even for an
     # x64 interpreter running under emulation, which would pick the wrong native binary. The
     # PROCESS arch (what the loaded DLL must match) is in PROCESSOR_ARCHITECTURE ("AMD64" when
@@ -63,7 +71,12 @@ def default_lib_path():
     else:
         rid = "linux-" + arch
         filename = "libTitanVault.so"
-    return os.path.normpath(os.path.join(HERE, "..", "..", "Dist", "Native", rid, filename))
+    dist_path = os.path.normpath(os.path.join(HERE, "..", "..", "Dist", "Native", rid, filename))
+    candidates = [os.path.join(HERE, filename), os.path.abspath(os.path.join(os.getcwd(), filename)), dist_path]
+    for candidate in candidates:
+        if os.path.exists(candidate):
+            return candidate
+    return dist_path
 
 
 def parse_args(argv):
@@ -187,6 +200,40 @@ class Lib:
         d.titan_vault_rotate_keys_pubkey.restype = ci
         d.titan_vault_rotate_keys_pubkey.argtypes = [cp, ci, cp, ci]
 
+        # Library / maintenance utilities.
+        d.titan_vault_detect_vault_format.restype = ci
+        d.titan_vault_detect_vault_format.argtypes = [cp, ci]
+        d.titan_vault_secure_zero_memory.restype = None
+        d.titan_vault_secure_zero_memory.argtypes = [vp, ci]
+        d.titan_vault_backup_files.restype = ci
+        d.titan_vault_backup_files.argtypes = [cp, ci, cp, ci, ci]
+        d.titan_vault_change_cryptomator_password.restype = ci
+        d.titan_vault_change_cryptomator_password.argtypes = [cp, ci, cp, ci, cp, ci]
+        d.titan_vault_change_uvf_admin_password.restype = ci
+        d.titan_vault_change_uvf_admin_password.argtypes = [cp, ci, cp, ci, cp, ci]
+        d.titan_vault_change_uvf_user_password.restype = ci
+        d.titan_vault_change_uvf_user_password.argtypes = [cp, ci, cp, ci, cp, ci, cp, ci]
+        d.titan_vault_remove_user.restype = ci
+        d.titan_vault_remove_user.argtypes = [cp, ci, cp, ci, cp, ci]
+
+        # Text convenience (UTF-8). read_all_text returns a heap char* that must be freed.
+        d.titan_vault_write_all_text.restype = ci
+        d.titan_vault_write_all_text.argtypes = [vp, cp, ci, cp, ci]
+        d.titan_vault_append_all_text.restype = ci
+        d.titan_vault_append_all_text.argtypes = [vp, cp, ci, cp, ci]
+        d.titan_vault_read_all_text.restype = vp
+        d.titan_vault_read_all_text.argtypes = [vp, cp, ci]
+
+        # Fuller stream API (the core read/write/seek are above).
+        d.titan_vault_open_stream_with_flags.restype = vp
+        d.titan_vault_open_stream_with_flags.argtypes = [vp, cp, ci, ci]
+        d.titan_vault_stream_get_position.restype = ctypes.c_int64
+        d.titan_vault_stream_get_position.argtypes = [vp]
+        d.titan_vault_stream_set_length.restype = ci
+        d.titan_vault_stream_set_length.argtypes = [vp, ctypes.c_int64]
+        d.titan_vault_stream_flush.restype = ci
+        d.titan_vault_stream_flush.argtypes = [vp]
+
     def __getattr__(self, name):
         return getattr(self._dll, name)
 
@@ -272,6 +319,14 @@ def run_demo(lib, fmt, vault_dir, password, state):
             state["failed"] += 1
             print(f"  {label} tests for {fmt.upper()}: FAILED — {e}")
 
+    # 0. Detect the on-disk format (path-based — the vault need not be open).
+    def detect_format_section():
+        detected = lib.titan_vault_detect_vault_format(b8(vault_dir), vlen)
+        expected = TITAN_VAULT_FORMAT_UVF if fmt == "uvf" else TITAN_VAULT_FORMAT_CRYPTOMATOR
+        if detected != expected:
+            raise RuntimeError(f"detect_vault_format={detected}, expected {expected}")
+    section("Detect format", detect_format_section)
+
     # A file we deliberately keep around to prove persistence + multi-user access later.
     persist_payload = b"persisted across reopen"
     check(lib, lib.titan_vault_write_file(handle, b"/persist.txt", u8("/persist.txt"),
@@ -299,6 +354,23 @@ def run_demo(lib, fmt, vault_dir, password, state):
             if lib.titan_vault_file_exists(handle, b8(fp), fplen) != 0:
                 raise RuntimeError("exists should be 0 after delete")
         section("File", file_section)
+
+        # 1b. UTF-8 text convenience: write, append, read-back.
+        def text_helpers_section():
+            tf, tflen = "/notes.txt", u8("/notes.txt")
+            first, second = "first line\n", "second line\n"
+            check(lib, lib.titan_vault_write_all_text(handle, b8(tf), tflen, b8(first), u8(first)),
+                  "write_all_text")
+            check(lib, lib.titan_vault_append_all_text(handle, b8(tf), tflen, b8(second), u8(second)),
+                  "append_all_text")
+            ptr = lib.titan_vault_read_all_text(handle, b8(tf), tflen)
+            if not ptr:
+                raise RuntimeError(f"read_all_text: {lib.get_last_error()}")
+            text = ctypes.cast(ptr, ctypes.c_char_p).value.decode("utf-8")
+            lib.titan_vault_free_string(ptr)
+            if text != first + second:
+                raise RuntimeError(f"text round-trip mismatch: {text!r}")
+        section("Text helpers", text_helpers_section)
 
         # 2. Directories: create, write into, list, file-info, move/rename.
         def directory_section():
@@ -357,6 +429,7 @@ def run_demo(lib, fmt, vault_dir, password, state):
                 for _ in range(CHUNKS):
                     if lib.titan_vault_stream_write(ws, chunk_buf, CHUNK) != CHUNK:
                         raise RuntimeError("short write")
+                check(lib, lib.titan_vault_stream_flush(ws), "stream_flush")
             finally:
                 lib.titan_vault_close_stream(ws)
 
@@ -381,6 +454,9 @@ def run_demo(lib, fmt, vault_dir, password, state):
                     off += got
                 if off != total:
                     raise RuntimeError(f"read {off} of {total}")
+                pos_after_read = lib.titan_vault_stream_get_position(rs)
+                if pos_after_read != total:
+                    raise RuntimeError(f"stream_get_position {pos_after_read} != {total}")
                 # random access: seek to a mid-file offset and verify (best-effort)
                 seek_to = 70000
                 pos = lib.titan_vault_stream_seek(rs, seek_to, 0)  # 0 = SEEK_SET
@@ -395,8 +471,31 @@ def run_demo(lib, fmt, vault_dir, password, state):
                     print(f"    wrote+verified {total} bytes; seek to {seek_to} OK")
                 else:
                     print(f"    wrote+verified {total} bytes; seek not supported by this backend (skipped)")
+                # open_stream_with_flags: reopen read-only and confirm the length matches.
+                rs2 = lib.titan_vault_open_stream_with_flags(handle, b8(fp), fplen, OPEN_READONLY)
+                if not rs2:
+                    raise RuntimeError(f"open_stream_with_flags: {lib.get_last_error()}")
+                try:
+                    if lib.titan_vault_stream_get_length(rs2) != total:
+                        raise RuntimeError("flags-open length mismatch")
+                finally:
+                    lib.titan_vault_close_stream(rs2)
             finally:
                 lib.titan_vault_close_stream(rs)
+
+            # stream_set_length: truncation of encrypted streams is backend-dependent; best-effort.
+            try:
+                ts = lib.titan_vault_open_stream_with_flags(
+                    handle, b"/trunc.bin", u8("/trunc.bin"),
+                    OPEN_WRITEONLY | OPEN_CREATE | OPEN_TRUNCATE)
+                if ts:
+                    try:
+                        lib.titan_vault_stream_write(ts, chunk_buf, CHUNK)
+                        lib.titan_vault_stream_set_length(ts, 4096)
+                    finally:
+                        lib.titan_vault_close_stream(ts)
+            except Exception:
+                pass  # optional capability
         section("Streaming", streaming_section)
     finally:
         lib.titan_vault_close_vault(handle)
@@ -517,7 +616,64 @@ def run_demo(lib, fmt, vault_dir, password, state):
                     lib.titan_vault_close_vault(ah)
             except Exception as e:
                 print(f"    ⚠ opening as a secondary user is not yet supported by the library: {e}")
+
+            # Change a member's password (admin-driven), then remove the member and confirm they're gone.
+            alice_new_pw = "alice-passphrase-456"
+            check(lib, lib.titan_vault_change_uvf_user_password(
+                b8(vault_dir), vlen, b8(password), plen, b8(alice), u8(alice),
+                b8(alice_new_pw), u8(alice_new_pw)), "change_uvf_user_password")
+            check(lib, lib.titan_vault_remove_user(b8(vault_dir), vlen, b8(password), plen,
+                                                   b8(alice), u8(alice)), "remove_user")
+            users_buf2 = (ctypes.c_void_p * MAX_LIST)()
+            max_buf2 = ctypes.c_int(MAX_LIST)
+            n2 = lib.titan_vault_get_vault_users(b8(vault_dir), vlen, b8(password), plen,
+                                                 users_buf2, ctypes.byref(max_buf2))
+            users2 = read_string_array(lib, users_buf2, max(n2, 0))
+            if alice in users2:
+                raise RuntimeError(f"removed user still listed (got {users2})")
+            print(f"    changed alice's password, then removed alice; users now: {json_list(users2)}")
         section("Multi-user", multi_user_section)
+
+    # 7. Maintenance (both formats): backup the key files, secure-wipe a buffer, change the
+    #    password, and reopen with the new password.
+    def maintenance_section():
+        backup_dir = os.path.join(tempfile.gettempdir(), f"uvf-backup-{fmt}-{os.getpid()}")
+        shutil.rmtree(backup_dir, ignore_errors=True)
+        check(lib, lib.titan_vault_backup_files(b8(vault_dir), vlen, b8(backup_dir),
+                                                u8(backup_dir), 1), "backup_files")
+        if not os.path.exists(backup_dir) or len(walk(backup_dir)) == 0:
+            raise RuntimeError("backup produced no files")
+
+        secret = ctypes.create_string_buffer(b"super-secret-key-material")
+        secret_len = len(secret.raw) - 1  # exclude the trailing NUL added by create_string_buffer
+        lib.titan_vault_secure_zero_memory(secret, secret_len)
+        if any(b != 0 for b in secret.raw[:secret_len]):
+            raise RuntimeError("secure_zero_memory did not zero the buffer")
+
+        new_pw = password + "-rotated"
+        if fmt == "uvf":
+            check(lib, lib.titan_vault_change_uvf_admin_password(
+                b8(vault_dir), vlen, b8(password), plen, b8(new_pw), u8(new_pw)),
+                "change_uvf_admin_password")
+        else:
+            check(lib, lib.titan_vault_change_cryptomator_password(
+                b8(vault_dir), vlen, b8(password), plen, b8(new_pw), u8(new_pw)),
+                "change_cryptomator_password")
+        h3 = open_vault(lib, fmt, vault_dir, new_pw)
+        if not h3:
+            raise RuntimeError(f"reopen after password change failed: {lib.get_last_error()}")
+        try:
+            size = ctypes.c_int(4096)
+            buf = ctypes.create_string_buffer(size.value)
+            check(lib, lib.titan_vault_read_file(h3, b"/persist.txt", u8("/persist.txt"),
+                                                 buf, ctypes.byref(size)), "read after password change")
+            if buf.raw[:size.value] != persist_payload:
+                raise RuntimeError("content mismatch after password change")
+        finally:
+            lib.titan_vault_close_vault(h3)
+        shutil.rmtree(backup_dir, ignore_errors=True)
+        print(f"    backed up key files, secure-zeroed a buffer, changed the {fmt} password and re-read OK")
+    section("Maintenance", maintenance_section)
 
     print(f"✅ {fmt} demo finished.")
 
@@ -615,6 +771,8 @@ def run_benchmark(lib, size_gb):
     size_bytes = round(size_gb * 1024 * 1024 * 1024)
     CHUNK = 4 * 1024 * 1024  # 4 MiB
     print(f"\n========== Benchmark ({size_gb} GB per format, {CHUNK >> 20} MiB chunks) ==========")
+    print("  (disk read/write rows may just reflect the OS cache — pass --size larger than your RAM "
+          "for disk-bound numbers)")
     for fmt in ["uvf", "cryptomator"]:
         bench_one(lib, fmt, size_bytes, CHUNK)
 
@@ -645,7 +803,7 @@ def bench_one(lib, fmt, size_bytes, CHUNK):
                 w += n
             f.flush()
             os.fsync(f.fileno())
-        report("create file (disk write)", (time.perf_counter() - t) * 1000.0)
+        report("create file (disk write, may be cached)", (time.perf_counter() - t) * 1000.0)
 
         vlen, plen = u8(vault_dir), u8(password)
         if fmt == "uvf":
@@ -703,7 +861,7 @@ def bench_one(lib, fmt, size_bytes, CHUNK):
             with open(plain, "rb") as f:
                 while f.readinto(rbuf2) > 0:
                     pass  # discard
-            report("read file (disk read)", (time.perf_counter() - t) * 1000.0)
+            report("read file (disk read, may be cached)", (time.perf_counter() - t) * 1000.0)
         finally:
             lib.titan_vault_close_vault(handle)
     finally:

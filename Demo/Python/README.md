@@ -28,9 +28,13 @@ python vault_demo.py --benchmark              # throughput only (default 1 GB; -
 python vault_demo.py --cryptomator-interop    # real-Cryptomator-app vault read + md5 verify only
 ```
 
-(With no `--lib`, the demo auto-resolves `../../Dist/Native/<rid>/TitanVault.dll` for your OS/arch — so
-run the `aot` build first. Override with `--lib <path>` or the `TITANVAULT_LIB` env var. With no
-`--format`, both run.)
+**Switches** (`--lib`, `--format`, `--benchmark`, `--size <GB>`, `--cryptomator-interop`, `--vault`,
+`--password`) are the same across all demos — see the shared table in
+[`../README.md`](../README.md#command-line-options-all-native-demos). With no `--format`, both run.
+
+With no `--lib`, the library is auto-discovered in order: `--lib` → `TITANVAULT_LIB` env → **this folder**
+(drop `TitanVault.dll` next to `vault_demo.py`) → the current dir → `../../Dist/Native/<rid>/` — so either
+run the `aot` build first or copy the library here.
 
 The native binary must match the **Python interpreter's** architecture. On **Windows-on-ARM** an x64
 (emulated) Python reports the *host* arch via `platform.machine()` (`ARM64`), so the demo instead reads
