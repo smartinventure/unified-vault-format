@@ -2,7 +2,6 @@
 // Copyright (c) Smart In Venture 2025- https://www.speedbits.io
 // Licensed under AGPL-3.0 (commercial licenses available); see LICENSE.
 
-// Copyright (c) Smart In Venture GmbH 2025 of the C# Porting
 
 
 using System.Security.Cryptography;

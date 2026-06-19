@@ -1,4 +1,3 @@
-// Copyright (c) Smart In Venture GmbH 2025 of the C# Porting
 
 
 using System.Security.Cryptography;
