@@ -2,15 +2,6 @@
 // Copyright (c) Smart In Venture 2025- https://www.speedbits.io
 // Licensed under AGPL-3.0 (commercial licenses available); see LICENSE.
 
-/*******************************************************************************
- * Copyright (c) 2015, 2016 Sebastian Stenzel and others.
- * This file is licensed under the terms of the MIT license.
- * See the LICENSE.txt file for more info.
- *
- * Contributors:
- *     Sebastian Stenzel - initial API and implementation
- *******************************************************************************/
-
 // Copyright (c) Smart In Venture GmbH 2025 of the C# Porting
 
 using System;

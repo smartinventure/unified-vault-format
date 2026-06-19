@@ -1,15 +1,6 @@
-/*******************************************************************************
- * Copyright (c) 2016 Sebastian Stenzel and others 
- * Copyright (c) 2025 Smart In Venture GmbH for C# Porting
- * All rights reserved. This program and the accompanying materials
- * are made available under the terms of the accompanying LICENSE.txt.
- *
- * Contributors:
- *     Sebastian Stenzel - initial API and implementation
- *     
- *     Smart In Venture GmbH - C# Porting (c) 2025
- *     
- *******************************************************************************/
+// Unified Vault Format (UVF) for C# and other languages.
+// Copyright (c) Smart In Venture 2025- https://www.speedbits.io
+// Licensed under AGPL-3.0 (commercial licenses available); see LICENSE.
 
 // Copyright (c) Smart In Venture GmbH 2025 of the C# Porting
 
