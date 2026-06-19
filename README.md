@@ -43,7 +43,7 @@ UvfLib can be consumed two ways — as a managed .NET package, or as the native 
 ### 1. .NET — managed NuGet package (no native dependency)
 
 ```xml
-<PackageReference Include="UvfLib.Master" Version="1.0.3" />
+<PackageReference Include="UvfLib.Master" Version="1.0.4" />
 ```
 
 `UvfLib.Master` provides the high-level vault API and pulls in `UvfLib.Core` + `UvfLib.Vault`. A minimal example (UVF; Cryptomator has the equivalent `*CryptomatorVaultAsync` factories):
