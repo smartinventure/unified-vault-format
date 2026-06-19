@@ -3,14 +3,25 @@
 Runnable examples that create a vault, encrypt files into it, read them back as cleartext, and
 delete them — for both **UVF** (Universal Vault Format v3) and **Cryptomator** (vault format v8).
 
-UvfLib can be consumed two ways, and there is a demo for each:
+UvfLib can be consumed two ways — the **managed** NuGet package (C#) or the **native AOT** `TitanVault`
+C ABI (everything else). Every demo runs the same full flow (all 46 functions for the native ones) and
+the same `--format/--benchmark/--size/--cryptomator-interop` switches:
 
-| Folder | Uses | How |
-|--------|------|-----|
+| Folder | Uses | How (FFI) |
+|--------|------|-----------|
 | [`DotNet/`](DotNet/) | the **managed** `UvfLib` NuGet package | C# / .NET, no native DLL |
-| [`Python/`](Python/) | the **native AOT** library (`TitanVault`) | `ctypes` (stdlib) |
-| [`NodeJs/`](NodeJs/) | the **native AOT** library (`TitanVault`) | [`koffi`](https://koffi.dev) |
-| [`Java/`](Java/) | the **native AOT** library (`TitanVault`) | [JNA](https://github.com/java-native-access/jna) |
+| [`NodeJs/`](NodeJs/) | the native `TitanVault` C ABI | [`koffi`](https://koffi.dev) — **the reference demo** |
+| [`Python/`](Python/) | the native `TitanVault` C ABI | `ctypes` (stdlib) |
+| [`Java/`](Java/) | the native `TitanVault` C ABI | [JNA](https://github.com/java-native-access/jna) |
+| [`Cpp/`](Cpp/) | the native `TitanVault` C ABI | `LoadLibrary`/`dlopen` (runtime), header via `decltype` |
+| [`Rust/`](Rust/) | the native `TitanVault` C ABI | [`libloading`](https://crates.io/crates/libloading) |
+| [`Go/`](Go/) | the native `TitanVault` C ABI | [`purego`](https://github.com/ebitengine/purego) (no cgo) |
+| [`Swift/`](Swift/) | the native `TitanVault` C ABI | C module map + `dlopen` (macOS/Linux) |
+| [`Dart/`](Dart/) | the native `TitanVault` C ABI | `dart:ffi` |
+| [`Php/`](Php/) | the native `TitanVault` C ABI | PHP `FFI` (WSL/Linux) |
+
+The native demos all consume the canonical C header
+[`../Bindings/include/titan_vault.h`](../Bindings/include/titan_vault.h) — the single source of truth.
 
 The native demos all call the same flat C ABI (`titan_vault_*`, cdecl). The canonical C header is
 [`../Bindings/include/titan_vault.h`](../Bindings/include/titan_vault.h) — the single source of truth
