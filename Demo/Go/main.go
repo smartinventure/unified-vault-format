@@ -114,6 +114,7 @@ type api struct {
 
 	openReadStream     func(h uintptr, path []byte, pathLen int32) uintptr
 	openWriteStream    func(h uintptr, path []byte, pathLen int32) uintptr
+	openRandomWriteStream func(h uintptr, path []byte, pathLen int32) uintptr
 	openStreamWithFlags func(h uintptr, path []byte, pathLen int32, flags int32) uintptr
 	streamRead         func(s uintptr, buf []byte, count int32) int32
 	streamWrite        func(s uintptr, buf []byte, count int32) int32
@@ -174,6 +175,7 @@ func bindAPI(handle uintptr) *api {
 
 	purego.RegisterLibFunc(&a.openReadStream, handle, "titan_vault_open_read_stream")
 	purego.RegisterLibFunc(&a.openWriteStream, handle, "titan_vault_open_write_stream")
+	purego.RegisterLibFunc(&a.openRandomWriteStream, handle, "titan_vault_open_random_write_stream")
 	purego.RegisterLibFunc(&a.openStreamWithFlags, handle, "titan_vault_open_stream_with_flags")
 	purego.RegisterLibFunc(&a.streamRead, handle, "titan_vault_stream_read")
 	purego.RegisterLibFunc(&a.streamWrite, handle, "titan_vault_stream_write")
@@ -530,6 +532,57 @@ func runDemo(a *api, format, vaultDir, password string, st *state) {
 			a.streamSetLength(ts, 4096)
 			a.closeStream(ts)
 		}
+	})
+
+	// 3b. Random write: overwrite a slice of an existing file in place, leaving the rest intact.
+	st.section("Random write", format, func() {
+		fp := "/rw.bin"
+		const CHUNK, CHUNKS = 32 * 1024, 3
+		total := CHUNK * CHUNKS
+		chunk := make([]byte, CHUNK)
+		for j := 0; j < CHUNK; j++ {
+			chunk[j] = byte(j % 256)
+		}
+		patch := []byte("RANDOM-WRITE-PATCH!!")
+		const seekTo = 40000
+
+		rws := a.openRandomWriteStream(handle, b(fp), int32(len(fp)))
+		if rws == 0 {
+			panic("open_random_write_stream: " + a.lastError())
+		}
+		func() {
+			defer func() {
+				if r := recover(); r != nil {
+					a.closeStream(rws)
+					panic(r)
+				}
+			}()
+			for i := 0; i < CHUNKS; i++ {
+				if a.streamWrite(rws, chunk, CHUNK) != CHUNK {
+					panic("short write")
+				}
+			}
+			if a.streamSeek(rws, seekTo, seekBegin) != seekTo {
+				panic("random-write stream not seekable")
+			}
+			if a.streamWrite(rws, patch, int32(len(patch))) != int32(len(patch)) {
+				panic("short patch write")
+			}
+			a.check(a.streamFlush(rws), "stream_flush")
+		}()
+		a.closeStream(rws)
+
+		back := a.readFileFull(handle, fp)
+		if len(back) != total {
+			panic(fmt.Sprintf("read %d of %d", len(back), total))
+		}
+		if !bytes.Equal(back[seekTo:seekTo+len(patch)], patch) {
+			panic("patch bytes mismatch")
+		}
+		if back[seekTo-1] != byte((seekTo-1)%256) || back[seekTo+len(patch)] != byte((seekTo+len(patch))%256) {
+			panic("surrounding bytes clobbered")
+		}
+		fmt.Printf("    open_random_write_stream: overwrote %d bytes at offset %d; surroundings intact\n", len(patch), seekTo)
 	})
 
 	a.closeVault(handle)

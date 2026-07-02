@@ -5,7 +5,7 @@ extension to call the native `TitanVault` **C ABI** (the same flat `titan_vault_
 other binding uses). This is a **full-parity port of [`../NodeJs/vault-demo.js`](../NodeJs/vault-demo.js)**:
 it runs the same sections, prints the same `… tests for <FORMAT>: PASSED/FAILED` lines, honors the same
 flags, and (with no arguments) runs everything — both formats' functional sections (**Detect format**,
-**File** + filename-leak check, **Text helpers**, **Directory**, **Streaming**, **Persistence**,
+**File** + filename-leak check, **Text helpers**, **Directory**, **Streaming**, **Random write**, **Persistence**,
 **Maintenance**, and **UVF-only** key rotation, password multi-user, and public-key multi-user), then
 the real-Cryptomator-vault **interop** (md5-compares 3 files), then a quick throughput **benchmark**.
 

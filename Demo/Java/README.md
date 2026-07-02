@@ -4,7 +4,7 @@ Uses [JNA](https://github.com/java-native-access/jna) to call the native `TitanV
 write). This is a **full-parity port of [`../NodeJs/vault-demo.js`](../NodeJs/vault-demo.js)**: it runs
 the same sections, prints the same `… tests for <FORMAT>: PASSED/FAILED` lines, honors the same flags,
 and (with no arguments) runs everything — both formats' functional sections (**File**, **Directory**,
-**Streaming**, **Persistence**, and **UVF-only** key rotation, password multi-user, and public-key
+**Streaming**, **Random write**, **Persistence**, and **UVF-only** key rotation, password multi-user, and public-key
 multi-user), then the real-Cryptomator-vault **interop** (md5-compares 3 files), then a quick
 throughput **benchmark**. Requires JDK 17+ and Maven.
 

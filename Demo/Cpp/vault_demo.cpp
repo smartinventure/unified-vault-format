@@ -101,7 +101,7 @@ struct Api {
     MEMBER(write_file); MEMBER(read_file); MEMBER(file_exists); MEMBER(delete_file); MEMBER(move);
     MEMBER(write_all_text); MEMBER(append_all_text); MEMBER(read_all_text);
     MEMBER(create_directory); MEMBER(directory_exists); MEMBER(delete_directory); MEMBER(list_directory); MEMBER(get_file_info);
-    MEMBER(open_read_stream); MEMBER(open_write_stream); MEMBER(open_stream_with_flags);
+    MEMBER(open_read_stream); MEMBER(open_write_stream); MEMBER(open_random_write_stream); MEMBER(open_stream_with_flags);
     MEMBER(stream_read); MEMBER(stream_write); MEMBER(stream_seek);
     MEMBER(stream_get_position); MEMBER(stream_get_length); MEMBER(stream_set_length); MEMBER(stream_flush); MEMBER(close_stream);
     MEMBER(close_vault);
@@ -123,7 +123,7 @@ static Api bindApi(LibHandle h) {
     LOAD(write_file); LOAD(read_file); LOAD(file_exists); LOAD(delete_file); LOAD(move);
     LOAD(write_all_text); LOAD(append_all_text); LOAD(read_all_text);
     LOAD(create_directory); LOAD(directory_exists); LOAD(delete_directory); LOAD(list_directory); LOAD(get_file_info);
-    LOAD(open_read_stream); LOAD(open_write_stream); LOAD(open_stream_with_flags);
+    LOAD(open_read_stream); LOAD(open_write_stream); LOAD(open_random_write_stream); LOAD(open_stream_with_flags);
     LOAD(stream_read); LOAD(stream_write); LOAD(stream_seek);
     LOAD(stream_get_position); LOAD(stream_get_length); LOAD(stream_set_length); LOAD(stream_flush); LOAD(close_stream);
     LOAD(close_vault);
@@ -318,6 +318,30 @@ static void runDemo(const Api& api, const std::string& format, const std::string
         std::string tp = "/trunc.bin";
         TitanVaultHandle ts = api.open_stream_with_flags(handle, b(tp), len(tp), OPEN_WRITEONLY | OPEN_CREATE | OPEN_TRUNCATE);
         if (ts) { api.stream_write(ts, chunk.data(), CHUNK); api.stream_set_length(ts, 4096); api.close_stream(ts); }
+    });
+
+    // 3b. Random write: overwrite a slice of an existing file at an arbitrary offset; rest preserved.
+    section(st, "Random write", format, [&] {
+        std::string fp = "/rw.bin"; const int CHUNK = 32 * 1024, CHUNKS = 3; const long long total = (long long)CHUNK * CHUNKS;
+        std::vector<unsigned char> chunk(CHUNK);
+        for (int j = 0; j < CHUNK; j++) chunk[j] = (unsigned char)(j % 256);
+        std::string patch = "RANDOM-WRITE-PATCH!!"; const long long seekTo = 40000;
+
+        TitanVaultHandle rws = api.open_random_write_stream(handle, b(fp), len(fp));
+        if (!rws) throw std::runtime_error("open_random_write_stream: " + lastError(api));
+        try {
+            for (int i = 0; i < CHUNKS; i++) if (api.stream_write(rws, chunk.data(), CHUNK) != CHUNK) throw std::runtime_error("short write");
+            if (api.stream_seek(rws, seekTo, TITAN_VAULT_SEEK_BEGIN) != seekTo) throw std::runtime_error("random-write stream not seekable");
+            if (api.stream_write(rws, b(patch), len(patch)) != len(patch)) throw std::runtime_error("short patch write");
+            check(api, api.stream_flush(rws), "stream_flush");
+        } catch (...) { api.close_stream(rws); throw; }
+        api.close_stream(rws);
+
+        auto back = readFileFull(api, handle, fp);
+        if ((long long)back.size() != total) throw std::runtime_error("random-write file length mismatch");
+        for (int k = 0; k < len(patch); k++) if (back[seekTo + k] != (unsigned char)patch[k]) throw std::runtime_error("patch byte mismatch at " + std::to_string(seekTo + k));
+        if (back[seekTo - 1] != (unsigned char)((seekTo - 1) % 256) || back[seekTo + len(patch)] != (unsigned char)((seekTo + len(patch)) % 256)) throw std::runtime_error("surroundings clobbered");
+        std::cout << "    open_random_write_stream: overwrote 20 bytes at offset 40000; surroundings intact\n";
     });
 
     api.close_vault(handle);

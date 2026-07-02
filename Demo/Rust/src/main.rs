@@ -100,6 +100,7 @@ type FnGetFileInfo = unsafe extern "C" fn(Handle, *const u8, i32, *mut i64, *mut
 
 type FnOpenReadStream = unsafe extern "C" fn(Handle, *const u8, i32) -> Handle;
 type FnOpenWriteStream = unsafe extern "C" fn(Handle, *const u8, i32) -> Handle;
+type FnOpenRandomWriteStream = unsafe extern "C" fn(Handle, *const u8, i32) -> Handle;
 type FnOpenStreamWithFlags = unsafe extern "C" fn(Handle, *const u8, i32, i32) -> Handle;
 type FnStreamRead = unsafe extern "C" fn(Handle, *mut u8, i32) -> i32;
 type FnStreamWrite = unsafe extern "C" fn(Handle, *const u8, i32) -> i32;
@@ -162,6 +163,7 @@ struct Api {
 
     open_read_stream: FnOpenReadStream,
     open_write_stream: FnOpenWriteStream,
+    open_random_write_stream: FnOpenRandomWriteStream,
     open_stream_with_flags: FnOpenStreamWithFlags,
     stream_read: FnStreamRead,
     stream_write: FnStreamWrite,
@@ -233,6 +235,7 @@ impl Api {
 
                 open_read_stream: sym(&lib, b"titan_vault_open_read_stream\0"),
                 open_write_stream: sym(&lib, b"titan_vault_open_write_stream\0"),
+                open_random_write_stream: sym(&lib, b"titan_vault_open_random_write_stream\0"),
                 open_stream_with_flags: sym(&lib, b"titan_vault_open_stream_with_flags\0"),
                 stream_read: sym(&lib, b"titan_vault_stream_read\0"),
                 stream_write: sym(&lib, b"titan_vault_stream_write\0"),
@@ -662,6 +665,57 @@ fn run_demo(api: &Api, format: &str, vault_dir: &str, password: &str, st: &mut S
                 (api.close_stream)(ts);
             }
         }
+        Ok(())
+    });
+
+    // 3b. Random write: overwrite a slice mid-file via a seekable write stream, preserving the rest.
+    section(st, "Random write", format, || {
+        let fp = "/rw.bin";
+        const CHUNK: usize = 32 * 1024;
+        const CHUNKS: usize = 3;
+        let total: usize = CHUNK * CHUNKS; // 98304
+        let mut chunk = vec![0u8; CHUNK];
+        for (k, b) in chunk.iter_mut().enumerate() {
+            *b = (k % 256) as u8; // file[O] == O % 256
+        }
+        let patch = b"RANDOM-WRITE-PATCH!!";
+        let seek_to: i64 = 40000;
+
+        unsafe {
+            let rws = (api.open_random_write_stream)(handle, fp.as_bytes().as_ptr(), fp.len() as i32);
+            if rws.is_null() {
+                return Err(format!("open_random_write_stream: {}", api.last_error()));
+            }
+            // Write the base content, patch a slice mid-file, then close — always releasing rws.
+            let result = (|| -> Result<(), String> {
+                for _ in 0..CHUNKS {
+                    if (api.stream_write)(rws, chunk.as_ptr(), CHUNK as i32) != CHUNK as i32 {
+                        return Err("short write".to_string());
+                    }
+                }
+                if (api.stream_seek)(rws, seek_to, TITAN_VAULT_SEEK_BEGIN) != seek_to {
+                    return Err("random-write stream not seekable".to_string());
+                }
+                if (api.stream_write)(rws, patch.as_ptr(), patch.len() as i32) != patch.len() as i32 {
+                    return Err("short patch write".to_string());
+                }
+                api.check((api.stream_flush)(rws), "stream_flush")
+            })();
+            (api.close_stream)(rws);
+            result?;
+        }
+
+        let back = api.read_file_full(handle, fp)?;
+        if back.len() != total {
+            return Err(format!("read {} of {total}", back.len()));
+        }
+        if &back[40000..40020] != patch {
+            return Err("patch not written at offset 40000".to_string());
+        }
+        if back[39999] != (39999 % 256) as u8 || back[40020] != (40020 % 256) as u8 {
+            return Err("surrounding bytes were altered".to_string());
+        }
+        println!("    open_random_write_stream: overwrote 20 bytes at offset 40000; surroundings intact");
         Ok(())
     });
 

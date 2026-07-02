@@ -93,6 +93,7 @@ typealias FnGetFileInfo = @convention(c) (OpaquePointer?, UnsafePointer<UInt8>?,
 
 typealias FnOpenReadStream = @convention(c) (OpaquePointer?, UnsafePointer<UInt8>?, Int32) -> OpaquePointer?
 typealias FnOpenWriteStream = @convention(c) (OpaquePointer?, UnsafePointer<UInt8>?, Int32) -> OpaquePointer?
+typealias FnOpenRandomWriteStream = @convention(c) (OpaquePointer?, UnsafePointer<UInt8>?, Int32) -> OpaquePointer?
 typealias FnOpenStreamWithFlags = @convention(c) (OpaquePointer?, UnsafePointer<UInt8>?, Int32, Int32) -> OpaquePointer?
 typealias FnStreamRead = @convention(c) (OpaquePointer?, UnsafeMutablePointer<UInt8>?, Int32) -> Int32
 typealias FnStreamWrite = @convention(c) (OpaquePointer?, UnsafePointer<UInt8>?, Int32) -> Int32
@@ -151,6 +152,7 @@ final class Api {
 
     let openReadStream: FnOpenReadStream
     let openWriteStream: FnOpenWriteStream
+    let openRandomWriteStream: FnOpenRandomWriteStream
     let openStreamWithFlags: FnOpenStreamWithFlags
     let streamRead: FnStreamRead
     let streamWrite: FnStreamWrite
@@ -226,6 +228,7 @@ final class Api {
 
         openReadStream = sym("titan_vault_open_read_stream", FnOpenReadStream.self)
         openWriteStream = sym("titan_vault_open_write_stream", FnOpenWriteStream.self)
+        openRandomWriteStream = sym("titan_vault_open_random_write_stream", FnOpenRandomWriteStream.self)
         openStreamWithFlags = sym("titan_vault_open_stream_with_flags", FnOpenStreamWithFlags.self)
         streamRead = sym("titan_vault_stream_read", FnStreamRead.self)
         streamWrite = sym("titan_vault_stream_write", FnStreamWrite.self)
@@ -546,6 +549,44 @@ func runDemo(_ api: Api, _ format: String, _ vaultDir: String, _ password: Strin
             _ = api.streamSetLength(ts, 4096)
             _ = api.closeStream(ts)
         }
+    }
+
+    // 3b. Random write: seek into an existing file and overwrite a byte range in
+    // place; the surrounding bytes must be preserved.
+    section(st, "Random write", format) {
+        let fp = "/rw.bin"
+        let CHUNK = 32 * 1024, CHUNKS = 3
+        let total = CHUNK * CHUNKS
+        var chunk = [UInt8](repeating: 0, count: CHUNK)
+        for j in 0..<CHUNK { chunk[j] = UInt8(j % 256) }
+        let patch = Array("RANDOM-WRITE-PATCH!!".utf8)
+        let seekTo: Int64 = 40000
+
+        guard let rws = (withUtf8(fp) { api.openRandomWriteStream(handle, $0, $1) }) else {
+            throw DemoError("open_random_write_stream: \(lastError(api))")
+        }
+        do {
+            for _ in 0..<CHUNKS {
+                let w = chunk.withUnsafeBufferPointer { api.streamWrite(rws, $0.baseAddress, Int32(CHUNK)) }
+                if w != Int32(CHUNK) { _ = api.closeStream(rws); throw DemoError("short write") }
+            }
+            if api.streamSeek(rws, seekTo, TITAN_VAULT_SEEK_BEGIN) != seekTo {
+                _ = api.closeStream(rws); throw DemoError("random-write stream not seekable")
+            }
+            let w = patch.withUnsafeBufferPointer { api.streamWrite(rws, $0.baseAddress, Int32(patch.count)) }
+            if w != Int32(patch.count) { _ = api.closeStream(rws); throw DemoError("short patch write") }
+            try check(api, api.streamFlush(rws), "stream_flush")
+        }
+        _ = api.closeStream(rws)
+
+        let back = try readFileFull(api, handle, fp)
+        if back.count != total { throw DemoError("random-write length \(back.count) != \(total)") }
+        let at = Int(seekTo)
+        if Array(back[at..<at + patch.count]) != patch { throw DemoError("patch not written at \(seekTo)") }
+        if back[at - 1] != UInt8((at - 1) % 256) || back[at + patch.count] != UInt8((at + patch.count) % 256) {
+            throw DemoError("surroundings not intact")
+        }
+        print("    open_random_write_stream: overwrote 20 bytes at offset 40000; surroundings intact")
     }
 
     _ = api.closeVault(handle)

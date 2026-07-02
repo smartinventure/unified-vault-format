@@ -124,6 +124,7 @@ int titan_vault_move(void* vault_handle, const unsigned char* source_path_bytes,
 
 void* titan_vault_open_read_stream(void* vault_handle, const unsigned char* file_path_bytes, int file_path_length);
 void* titan_vault_open_write_stream(void* vault_handle, const unsigned char* file_path_bytes, int file_path_length);
+void* titan_vault_open_random_write_stream(void* vault_handle, const unsigned char* file_path_bytes, int file_path_length);
 void* titan_vault_open_stream_with_flags(void* vault_handle, const unsigned char* file_path_bytes, int file_path_length, int open_flags);
 int titan_vault_stream_read(void* stream_handle, unsigned char* buffer, int count);
 int titan_vault_stream_write(void* stream_handle, const unsigned char* buffer, int count);
@@ -589,6 +590,57 @@ function runDemo(\FFI $ffi, string $format, string $vaultDir, string $password, 
             } catch (\Throwable $e) {
                 /* optional capability */
             }
+        });
+
+        // 3b. Random write: overwrite a mid-file range in place and confirm the surroundings survive.
+        section($st, 'Random write', $format, function () use ($ffi, $handle) {
+            $fp = '/rw.bin';
+            $CHUNK = 32 * 1024;
+            $CHUNKS = 3;
+            $total = $CHUNK * $CHUNKS;
+            $chunk = '';
+            for ($j = 0; $j < $CHUNK; $j++) {
+                $chunk .= chr($j % 256); // file[O] == O % 256
+            }
+            $chunkBuf = buf($ffi, $chunk);
+            $patch = 'RANDOM-WRITE-PATCH!!';
+            $patchLen = strlen($patch);
+            $patchBuf = buf($ffi, $patch);
+            $seekTo = 40000;
+
+            $fpbuf = buf($ffi, $fp);
+            $rws = $ffi->titan_vault_open_random_write_stream($handle, $fpbuf, u8($fp));
+            if ($rws === null || \FFI::isNull($rws)) {
+                throw new VaultException('open_random_write_stream: ' . lastError($ffi));
+            }
+            try {
+                for ($i = 0; $i < $CHUNKS; $i++) {
+                    if ($ffi->titan_vault_stream_write($rws, $chunkBuf, $CHUNK) !== $CHUNK) {
+                        throw new VaultException('short write');
+                    }
+                }
+                if ($ffi->titan_vault_stream_seek($rws, $seekTo, 0) !== $seekTo) { // 0 = SEEK_SET
+                    throw new VaultException('random-write stream not seekable');
+                }
+                if ($ffi->titan_vault_stream_write($rws, $patchBuf, $patchLen) !== $patchLen) {
+                    throw new VaultException('short patch write');
+                }
+                check($ffi, $ffi->titan_vault_stream_flush($rws), 'stream_flush');
+            } finally {
+                $ffi->titan_vault_close_stream($rws);
+            }
+
+            $back = readFileFull($ffi, $handle, $fp);
+            if (strlen($back) !== $total) {
+                throw new VaultException('length ' . strlen($back) . " != $total");
+            }
+            if (substr($back, $seekTo, $patchLen) !== $patch) {
+                throw new VaultException('patch not written at ' . $seekTo);
+            }
+            if (ord($back[39999]) !== 39999 % 256 || ord($back[40020]) !== 40020 % 256) {
+                throw new VaultException('surroundings corrupted');
+            }
+            echo "    open_random_write_stream: overwrote $patchLen bytes at offset $seekTo; surroundings intact\n";
         });
     } finally {
         $ffi->titan_vault_close_vault($handle);

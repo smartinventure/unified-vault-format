@@ -81,6 +81,7 @@ public final class VaultDemo {
 
         Pointer titan_vault_open_read_stream(Pointer handle, byte[] path, int pathLen);
         Pointer titan_vault_open_write_stream(Pointer handle, byte[] path, int pathLen);
+        Pointer titan_vault_open_random_write_stream(Pointer handle, byte[] path, int pathLen);
         int titan_vault_stream_write(Pointer stream, byte[] buffer, int count);
         int titan_vault_stream_read(Pointer stream, byte[] buffer, int count);
         long titan_vault_stream_seek(Pointer stream, long offset, int origin);
@@ -373,6 +374,34 @@ public final class VaultDemo {
                         finally { lib.titan_vault_close_stream(ts); }
                     }
                 } catch (RuntimeException ignored) { /* optional capability */ }
+            });
+
+            // 3b. Random write: overwrite a slice of an existing file via a seekable write stream.
+            section(state, "Random write", format, () -> {
+                final String fp = "/rw.bin";
+                byte[] fpBytes = utf8(fp);
+                final int CHUNK = 32 * 1024, CHUNKS = 3, total = CHUNK * CHUNKS;
+                byte[] chunk = new byte[CHUNK];
+                for (int j = 0; j < CHUNK; j++) chunk[j] = (byte) (j % 256); // file[O] == O % 256
+                byte[] patch = "RANDOM-WRITE-PATCH!!".getBytes(StandardCharsets.UTF_8);
+                final int seekTo = 40000;
+
+                Pointer rws = lib.titan_vault_open_random_write_stream(handle, fpBytes, fpBytes.length);
+                if (isNull(rws)) throw new SectionException("open_random_write_stream: " + lastError(lib));
+                try {
+                    for (int i = 0; i < CHUNKS; i++) if (lib.titan_vault_stream_write(rws, chunk, CHUNK) != CHUNK) throw new SectionException("short write");
+                    long pos = lib.titan_vault_stream_seek(rws, seekTo, 0); // 0 = SEEK_SET
+                    if (pos != seekTo) throw new SectionException("random-write stream not seekable");
+                    if (lib.titan_vault_stream_write(rws, patch, patch.length) != patch.length) throw new SectionException("short patch write");
+                    check(lib, lib.titan_vault_stream_flush(rws), "stream_flush");
+                } finally { lib.titan_vault_close_stream(rws); }
+
+                byte[] back = readFileFull(lib, handle, fp);
+                if (back.length != total) throw new SectionException("size " + back.length + " != " + total);
+                for (int k = 0; k < patch.length; k++) if (back[seekTo + k] != patch[k]) throw new SectionException("patch mismatch at " + (seekTo + k));
+                if ((back[seekTo - 1] & 0xff) != (seekTo - 1) % 256) throw new SectionException("byte before patch clobbered at " + (seekTo - 1));
+                if ((back[seekTo + patch.length] & 0xff) != (seekTo + patch.length) % 256) throw new SectionException("byte after patch clobbered at " + (seekTo + patch.length));
+                System.out.println("    open_random_write_stream: overwrote " + patch.length + " bytes at offset " + seekTo + "; surroundings intact");
             });
         } finally {
             lib.titan_vault_close_vault(handle);

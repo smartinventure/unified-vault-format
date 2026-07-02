@@ -3,8 +3,9 @@
 No third-party packages — uses the standard-library `ctypes`. This is a **full-parity port of
 [`../NodeJs/vault-demo.js`](../NodeJs/vault-demo.js)**: it runs the same sections, prints the same
 `… tests for <FORMAT>: PASSED/FAILED` lines, honors the same flags, and (with no arguments) runs
-everything — both formats' functional sections (**File**, **Directory**, **Streaming**,
-**Persistence**, and **UVF-only** key rotation, password multi-user, and public-key multi-user), then
+everything — both formats' functional sections (**File**, **Directory**, **Streaming**, **Random write**
+(seeks to a mid-file offset and overwrites bytes, preserving the rest), **Persistence**, and **UVF-only**
+key rotation, password multi-user, and public-key multi-user), then
 the real-Cryptomator-vault **interop** (md5-compares 3 files), then a quick throughput **benchmark**.
 
 ## 1. Build the native library (once)

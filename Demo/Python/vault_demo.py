@@ -175,6 +175,8 @@ class Lib:
         d.titan_vault_open_read_stream.argtypes = [vp, cp, ci]
         d.titan_vault_open_write_stream.restype = vp
         d.titan_vault_open_write_stream.argtypes = [vp, cp, ci]
+        d.titan_vault_open_random_write_stream.restype = vp
+        d.titan_vault_open_random_write_stream.argtypes = [vp, cp, ci]
         d.titan_vault_stream_write.restype = ci
         d.titan_vault_stream_write.argtypes = [vp, vp, ci]
         d.titan_vault_stream_read.restype = ci
@@ -501,6 +503,44 @@ def run_demo(lib, fmt, vault_dir, password, state):
             except Exception:
                 pass  # optional capability
         section("Streaming", streaming_section)
+
+        # 3b. Random write: seek to a mid-file offset and overwrite bytes, preserving the rest.
+        def random_write_section():
+            fp, fplen = "/rw.bin", u8("/rw.bin")
+            CHUNK, CHUNKS = 32 * 1024, 3
+            total = CHUNK * CHUNKS
+            chunk = bytes(j % 256 for j in range(CHUNK))  # file[k] == k % 256
+            chunk_buf = ctypes.create_string_buffer(chunk, CHUNK)
+            patch = b"RANDOM-WRITE-PATCH!!"
+            patch_buf = ctypes.create_string_buffer(patch, len(patch))
+            seek_to = 40000
+
+            rws = lib.titan_vault_open_random_write_stream(handle, b8(fp), fplen)
+            if not rws:
+                raise RuntimeError(f"open_random_write_stream: {lib.get_last_error()}")
+            try:
+                for _ in range(CHUNKS):
+                    if lib.titan_vault_stream_write(rws, chunk_buf, CHUNK) != CHUNK:
+                        raise RuntimeError("short write")
+                pos = lib.titan_vault_stream_seek(rws, seek_to, 0)  # 0 = SEEK_SET
+                if pos != seek_to:
+                    raise RuntimeError("random-write stream not seekable")
+                if lib.titan_vault_stream_write(rws, patch_buf, len(patch)) != len(patch):
+                    raise RuntimeError("short patch write")
+                check(lib, lib.titan_vault_stream_flush(rws), "stream_flush")
+            finally:
+                lib.titan_vault_close_stream(rws)
+
+            back = read_file_full(lib, handle, fp)
+            if len(back) != total:
+                raise RuntimeError(f"size {len(back)} != {total}")
+            if back[seek_to:seek_to + len(patch)] != patch:
+                raise RuntimeError("patch not written at the seeked offset")
+            if back[seek_to - 1] != (seek_to - 1) % 256 or back[seek_to + len(patch)] != (seek_to + len(patch)) % 256:
+                raise RuntimeError("surrounding bytes were altered")
+            print(f"    open_random_write_stream: overwrote {len(patch)} bytes at offset {seek_to}; "
+                  f"surroundings intact")
+        section("Random write", random_write_section)
     finally:
         lib.titan_vault_close_vault(handle)
         handle = None
