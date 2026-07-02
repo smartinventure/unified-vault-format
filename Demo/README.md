@@ -4,7 +4,7 @@ Runnable examples that create a vault, encrypt files into it, read them back as 
 delete them — for both **UVF** (Universal Vault Format v3) and **Cryptomator** (vault format v8).
 
 UvfLib can be consumed two ways — the **managed** NuGet package (C#) or the **native AOT** `TitanVault`
-C ABI (everything else). Every demo runs the same full flow (all 46 functions for the native ones) and
+C ABI (everything else). Every demo runs the same full flow (all 47 functions for the native ones) and
 the same `--format/--benchmark/--size/--cryptomator-interop` switches:
 
 | Folder | Uses | How (FFI) |
@@ -98,7 +98,7 @@ In order, first hit wins:
 `<rid>` is your OS + the **process** architecture (e.g. `win-x64`); the binary must match it (an x64
 runtime needs the `win-x64` build, not `win-arm64` — relevant under Windows-on-ARM emulation).
 
-## The full native C ABI — all 46 functions
+## The full native C ABI — all 47 functions
 
 "Demoed" = exercised by [`NodeJs/vault-demo.js`](NodeJs/vault-demo.js) (the reference); the
 Python/Java/… ports mirror it.
@@ -175,8 +175,9 @@ Python/Java/… ports mirror it.
 ### Streams (random access, large files)
 | Function | Purpose | Demoed |
 |----------|---------|:------:|
-| `titan_vault_open_read_stream` | Open a file for reading → stream | ✓ |
-| `titan_vault_open_write_stream` | Open a file for writing → stream | ✓ |
+| `titan_vault_open_read_stream` | Open for reading → **seekable** stream (random-access decryption via `stream_seek`) | ✓ |
+| `titan_vault_open_write_stream` | Open for **sequential** (append-only) writing → stream | ✓ |
+| `titan_vault_open_random_write_stream` | Open for **random-access** writing → seekable+writable stream (overwrite bytes at any offset; new or existing files) | ✓ |
 | `titan_vault_open_stream_with_flags` | Open with explicit flags (read/write/append/…) | ✓ |
 | `titan_vault_stream_read` | Read bytes from a stream | ✓ |
 | `titan_vault_stream_write` | Write bytes to a stream | ✓ |

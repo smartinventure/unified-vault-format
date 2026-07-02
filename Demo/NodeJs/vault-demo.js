@@ -138,6 +138,8 @@ function load(libPath) {
 
     // Fuller stream API (the core read/write/seek are above).
     openStreamWithFlags: lib.func('titan_vault_open_stream_with_flags', 'void *', ['void *', 'char *', 'int', 'int']),
+    // Chunk-aware RANDOM-ACCESS write: seekable + writable (overwrite bytes at an arbitrary offset).
+    openRandomWriteStream: lib.func('titan_vault_open_random_write_stream', 'void *', ['void *', 'char *', 'int']),
     streamGetPosition: lib.func('titan_vault_stream_get_position', 'int64', ['void *']),
     streamSetLength: lib.func('titan_vault_stream_set_length', 'int', ['void *', 'int64']),
     streamFlush: lib.func('titan_vault_stream_flush', 'int', ['void *']),
@@ -317,6 +319,28 @@ function runDemo(lib, format, vaultDir, password, state) {
         const ts = lib.openStreamWithFlags(handle, '/trunc.bin', u8('/trunc.bin'), OPEN_WRITEONLY | OPEN_CREATE | OPEN_TRUNCATE);
         if (ts) { try { lib.streamWrite(ts, chunk, CHUNK); lib.streamSetLength(ts, 4096); } finally { lib.closeStream(ts); } }
       } catch { /* optional capability */ }
+    });
+
+    // 3b. Random-access WRITE: open_random_write_stream is seekable+writable — seek to a mid-file
+    // offset and overwrite bytes there (the covering chunks are re-encrypted; the rest is preserved).
+    section('Random write', () => {
+      const fp = '/rw.bin', CHUNK = 32 * 1024, CHUNKS = 3, total = CHUNK * CHUNKS;
+      const chunk = Buffer.alloc(CHUNK);
+      for (let j = 0; j < CHUNK; j++) chunk[j] = j % 256; // so file[k] === k % 256
+      const patch = Buffer.from('RANDOM-WRITE-PATCH!!', 'utf8'), seekTo = 40000;
+      const rws = lib.openRandomWriteStream(handle, fp, u8(fp));
+      if (!rws) throw new Error(`open_random_write_stream: ${lib.getLastError()}`);
+      try {
+        for (let i = 0; i < CHUNKS; i++) if (lib.streamWrite(rws, chunk, CHUNK) !== CHUNK) throw new Error('short write');
+        if (Number(lib.streamSeek(rws, seekTo, 0)) !== seekTo) throw new Error('random-write stream not seekable'); // 0 = SEEK_SET
+        if (lib.streamWrite(rws, patch, patch.length) !== patch.length) throw new Error('short patch write');
+        check(lib, lib.streamFlush(rws), 'stream_flush');
+      } finally { lib.closeStream(rws); }
+      const back = readFileFull(lib, handle, fp);
+      if (back.length !== total) throw new Error(`size ${back.length} != ${total}`);
+      if (back.toString('utf8', seekTo, seekTo + patch.length) !== patch.toString('utf8')) throw new Error('patch not written at the seeked offset');
+      if (back[seekTo - 1] !== (seekTo - 1) % 256 || back[seekTo + patch.length] !== (seekTo + patch.length) % 256) throw new Error('surrounding bytes were altered');
+      console.log(`    open_random_write_stream: overwrote ${patch.length} bytes at offset ${seekTo}; surroundings intact`);
     });
   } finally {
     lib.closeVault(handle);

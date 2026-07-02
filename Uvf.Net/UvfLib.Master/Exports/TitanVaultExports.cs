@@ -1487,6 +1487,56 @@ namespace UvfLib.Master.Exports
         }
 
         /// <summary>
+        /// Open a file for chunk-aware RANDOM-ACCESS writing. The returned stream is seekable and
+        /// writable, so callers can titan_vault_stream_seek to an arbitrary byte offset and overwrite
+        /// bytes there (the covering chunk(s) are transparently re-encrypted). Higher overhead than
+        /// titan_vault_open_write_stream, which is sequential/append-only. Returns a stream handle or
+        /// zero on error. Close it with titan_vault_close_stream.
+        /// </summary>
+        [UnmanagedCallersOnly(EntryPoint = "titan_vault_open_random_write_stream")]
+        public static unsafe IntPtr OpenRandomWriteStream(
+            IntPtr vaultHandle,
+            IntPtr filePathBytes,
+            int filePathLength)
+        {
+            try
+            {
+                if (vaultHandle == IntPtr.Zero || filePathBytes == IntPtr.Zero || filePathLength <= 0)
+                {
+                    SetLastError("Invalid parameters");
+                    return IntPtr.Zero;
+                }
+
+                var vault = GetVault(vaultHandle);
+                if (vault == null)
+                {
+                    SetLastError("Invalid vault handle");
+                    return IntPtr.Zero;
+                }
+
+                var filePath = GetUtf8String(filePathBytes, filePathLength);
+                if (string.IsNullOrEmpty(filePath))
+                {
+                    SetLastError("Failed to decode file path");
+                    return IntPtr.Zero;
+                }
+
+                var stream = vault.OpenWriteAsync(filePath, requestRandomWrite: true).Result;
+                return CreateStreamHandle(stream);
+            }
+            catch (AggregateException ex) when (ex.InnerException != null)
+            {
+                SetLastError($"Failed to open random-write stream: {ex.InnerException.Message}");
+                return IntPtr.Zero;
+            }
+            catch (Exception ex)
+            {
+                SetLastError($"Failed to open random-write stream: {ex.Message}");
+                return IntPtr.Zero;
+            }
+        }
+
+        /// <summary>
         /// Open file with specific flags as stream.
         /// Returns stream handle or zero on error.
         /// </summary>

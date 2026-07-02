@@ -441,7 +441,9 @@ int titan_vault_move(
  * ========================================================================== */
 
 /**
- * Open a file for reading as a stream.
+ * Open a file for reading as a stream. The stream is SEEKABLE: combine with titan_vault_stream_seek to
+ * read at an arbitrary byte offset — random-access decryption, where only the chunk(s) covering the
+ * requested range are decrypted.
  * @return Stream handle (close with titan_vault_close_stream) or NULL on error.
  */
 TitanVaultHandle titan_vault_open_read_stream(
@@ -450,10 +452,24 @@ TitanVaultHandle titan_vault_open_read_stream(
     int file_path_length);
 
 /**
- * Open a file for writing as a stream.
+ * Open a file for SEQUENTIAL (append-only) writing as a stream. Not seekable — for random-access
+ * writes use titan_vault_open_random_write_stream instead.
  * @return Stream handle (close with titan_vault_close_stream) or NULL on error.
  */
 TitanVaultHandle titan_vault_open_write_stream(
+    TitanVaultHandle vault_handle,
+    const unsigned char* file_path_bytes,
+    int file_path_length);
+
+/**
+ * Open a file for chunk-aware RANDOM-ACCESS writing. The returned stream is seekable AND writable:
+ * titan_vault_stream_seek to any byte offset, then titan_vault_stream_write to overwrite the bytes
+ * there (the covering chunk(s) are transparently re-encrypted; surrounding data is preserved). Works
+ * on both new and existing files — suitable for FUSE-style / partial-update workloads. Higher overhead
+ * than titan_vault_open_write_stream.
+ * @return Stream handle (close with titan_vault_close_stream) or NULL on error.
+ */
+TitanVaultHandle titan_vault_open_random_write_stream(
     TitanVaultHandle vault_handle,
     const unsigned char* file_path_bytes,
     int file_path_length);

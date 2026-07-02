@@ -36,6 +36,22 @@ namespace UvfLib.Master
         }
 
         /// <summary>
+        /// Opens a file for chunk-aware RANDOM-ACCESS writing: the returned stream is seekable and
+        /// writable, so callers can seek to an arbitrary byte offset and overwrite bytes there (the
+        /// covering chunk(s) are re-encrypted). Higher overhead than the sequential write stream.
+        /// Path uses forward slashes.
+        /// </summary>
+        public async Task<Stream> OpenWriteAsync(string path, bool requestRandomWrite, CancellationToken cancellationToken = default)
+        {
+            EnsureOpen();
+            string normalized = NormalizePath(path);
+            if (_vaultStorage is CryptorStorageDecoratorBase decorator)
+                return await decorator.OpenWriteAsync(normalized, requestRandomWrite, cancellationToken);
+            // Fallback: a storage without the random-write overload only supports sequential writes.
+            return await _vaultStorage!.OpenWriteAsync(normalized, cancellationToken);
+        }
+
+        /// <summary>
         /// Opens a file for both reading and writing. Path uses forward slashes.
         /// </summary>
         public async Task<Stream> OpenReadWriteAsync(string path, CancellationToken cancellationToken = default)

@@ -6,7 +6,9 @@ C ABI. This is the **reference demo** — it exercises the **entire 46-function 
 prints a `… tests for <FORMAT>: PASSED/FAILED` line per area: **Detect format**, **File** (+ filename-leak
 check), **Text helpers** (`write`/`append`/`read_all_text`), **Directory** (create / `list_directory` /
 `get_file_info` / `move`), **Streaming** (multi-chunk write, `stream_seek`/`stream_get_position`
-random access, `open_stream_with_flags`, `stream_flush`/`stream_set_length`), **Persistence** (close +
+random access, `open_stream_with_flags`, `stream_flush`/`stream_set_length`), **Random write**
+(`open_random_write_stream` — seek to a mid-file offset and overwrite bytes, preserving the rest),
+**Persistence** (close +
 reopen), **Maintenance** (`backup_files`, `secure_zero_memory`, password change + reopen —
 `change_uvf_admin_password` / `change_cryptomator_password`), and **UVF-only** key rotation, password
 multi-user (`add_user` / `get_vault_users` / `change_uvf_user_password` / `remove_user`), and
