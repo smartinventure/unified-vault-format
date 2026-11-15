@@ -25,9 +25,9 @@
     <PackageReadmeFile>README.md</PackageReadmeFile>
     
     <!-- Version Information -->
-    <AssemblyVersion>1.0.5.0</AssemblyVersion>
-    <FileVersion>1.0.5.0</FileVersion>
-    <Version>1.0.5</Version>
+    <AssemblyVersion>1.0.6.0</AssemblyVersion>
+    <FileVersion>1.0.6.0</FileVersion>
+    <Version>1.0.6</Version>
     
     <!-- Build Configuration -->
     <EnableNETAnalyzers>true</EnableNETAnalyzers>

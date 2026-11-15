@@ -430,7 +430,7 @@ namespace UvfLib.Master.Decorators
             }
         }
 
-        public override async Task<FileObject> GetFileInfoAsync(string filePath, CancellationToken cancellationToken = default)
+        public override async Task<FileObject?> TryGetFileInfoAsync(string filePath, CancellationToken cancellationToken = default)
         {
             // Normalize virtual path
             filePath = PathNormalizer.NormalizeVirtualPath(filePath);
@@ -456,19 +456,14 @@ namespace UvfLib.Master.Decorators
                 var pathResult = await _cryptomatorTranslator.TranslateToStoragePathAsync(filePath);
                 string encryptedFilePath = pathResult.StoragePath;
 
-                FileObject encryptedFileInfo;
-
-                // Check if this is a shortened file
-                if (encryptedFilePath.EndsWith(".c9s"))
+                // A shortened file keeps its ciphertext in contents.c9r inside the .c9s directory.
+                string ciphertextFilePath = encryptedFilePath.EndsWith(".c9s")
+                    ? Path.Combine(encryptedFilePath, "contents.c9r")
+                    : encryptedFilePath;
+                var encryptedFileInfo = await _underlyingStorage.TryGetFileInfoAsync(ciphertextFilePath, cancellationToken).ConfigureAwait(false);
+                if (encryptedFileInfo is null)
                 {
-                    // For shortened files, get info from the contents.c9r file
-                    string contentsFilePath = Path.Combine(encryptedFilePath, "contents.c9r");
-                    encryptedFileInfo = await _underlyingStorage.GetFileInfoAsync(contentsFilePath, cancellationToken);
-                }
-                else
-                {
-                    // Regular file - get the encrypted file info from underlying storage
-                    encryptedFileInfo = await _underlyingStorage.GetFileInfoAsync(encryptedFilePath, cancellationToken);
+                    return null;
                 }
 
                 // Calculate the decrypted size using VaultHandler
@@ -489,15 +484,11 @@ namespace UvfLib.Master.Decorators
                 };
                return virtualFileInfo;
             }
-            // Preserve not-found semantics so callers (e.g. a FUSE layer) map it to ENOENT rather than
-            // EIO — a wrapped IOException here is what makes "stat a not-yet-existing path" fail a mount.
-            catch (FileNotFoundException)
+            // A missing parent directory surfaces from path translation. It is still "not found": a wrapped
+            // IOException here would make a FUSE layer report EIO, which fails "stat a not-yet-existing path".
+            catch (Exception ex) when (ex is FileNotFoundException or DirectoryNotFoundException)
             {
-                throw;
-            }
-            catch (DirectoryNotFoundException)
-            {
-                throw new FileNotFoundException($"File not found: {filePath}");
+                return null;
             }
             catch (Exception ex) when (!(ex is ArgumentException))
             {

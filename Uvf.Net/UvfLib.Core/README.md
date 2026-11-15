@@ -31,7 +31,7 @@ UvfLib.Core is the open-source cryptographic foundation for Universal Vault Form
 
 ## Usage
 
-This is a low-level library intended for integration into higher-level vault management systems. For easier-to-use APIs, see the companion `UvfLib.FileSystem` package.
+This is a low-level library intended for integration into higher-level vault management systems. For easier-to-use APIs, see the companion `UvfLib.Master` package (`VaultManager` and the `IStorage` vault decorators).
 
 ```csharp
 // Example: Creating a cryptor for UVF format

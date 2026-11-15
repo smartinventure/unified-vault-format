@@ -331,7 +331,7 @@ namespace UvfLib.Master.Decorators
             }
         }
 
-        public override async Task<FileObject> GetFileInfoAsync(string filePath, CancellationToken cancellationToken = default)
+        public override async Task<FileObject?> TryGetFileInfoAsync(string filePath, CancellationToken cancellationToken = default)
         {
             try
             {
@@ -355,8 +355,11 @@ namespace UvfLib.Master.Decorators
                 var pathResult = await _uvfTranslator.TranslateToStoragePathAsync(filePath);
                 string encryptedFilePath = pathResult.StoragePath;
 
-                // Get the encrypted file info from underlying storage
-                var encryptedFileInfo = await _underlyingStorage.GetFileInfoAsync(encryptedFilePath, cancellationToken);
+                var encryptedFileInfo = await _underlyingStorage.TryGetFileInfoAsync(encryptedFilePath, cancellationToken).ConfigureAwait(false);
+                if (encryptedFileInfo is null)
+                {
+                    return null;
+                }
                 
                 // Calculate the decrypted size using VaultHandler
                 long decryptedSize = VaultHandler.CalculateExpectedDecryptedSize(encryptedFileInfo.Size);
@@ -378,14 +381,11 @@ namespace UvfLib.Master.Decorators
                 
                 return virtualFileInfo;
             }
-            // Preserve not-found semantics so a FUSE caller maps it to ENOENT (not EIO).
-            catch (FileNotFoundException)
+            // A missing parent directory surfaces from path translation. It is still "not found", which a FUSE
+            // caller must map to ENOENT, not EIO.
+            catch (Exception ex) when (ex is FileNotFoundException or DirectoryNotFoundException)
             {
-                throw;
-            }
-            catch (DirectoryNotFoundException)
-            {
-                throw new FileNotFoundException($"File not found: {filePath}");
+                return null;
             }
             catch (Exception ex) when (!(ex is ArgumentException))
             {

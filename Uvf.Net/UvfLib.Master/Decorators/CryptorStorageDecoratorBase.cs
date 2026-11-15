@@ -326,6 +326,25 @@ namespace UvfLib.Master.Decorators
 
         public virtual async Task FlushAsync(string path, IntPtr fileHandle, CancellationToken cancellationToken = default)
         {
+            // Flush the underlying storage handle so buffered ciphertext reaches the backend.
+            var cryptoHandle = FindOpenUnderlyingHandle(fileHandle);
+            if (cryptoHandle != null)
+            {
+                await _underlyingStorage.FlushAsync(cryptoHandle.PhysicalPath, cryptoHandle.UnderlyingHandle, cancellationToken);
+            }
+        }
+
+        public virtual async Task FlushToDiskAsync(string path, IntPtr fileHandle, CancellationToken cancellationToken = default)
+        {
+            var cryptoHandle = FindOpenUnderlyingHandle(fileHandle);
+            if (cryptoHandle != null)
+            {
+                await _underlyingStorage.FlushToDiskAsync(cryptoHandle.PhysicalPath, cryptoHandle.UnderlyingHandle, cancellationToken).ConfigureAwait(false);
+            }
+        }
+
+        private CryptoHandle? FindOpenUnderlyingHandle(IntPtr fileHandle)
+        {
             if (_disposed) throw new ObjectDisposedException(nameof(CryptorStorageDecoratorBase));
 
             CryptoHandle? cryptoHandle;
@@ -334,11 +353,7 @@ namespace UvfLib.Master.Decorators
                 _openHandles.TryGetValue(fileHandle, out cryptoHandle);
             }
 
-            // Flush the underlying storage handle so buffered ciphertext reaches the backend.
-            if (cryptoHandle != null && cryptoHandle.UnderlyingHandle != IntPtr.Zero)
-            {
-                await _underlyingStorage.FlushAsync(cryptoHandle.PhysicalPath, cryptoHandle.UnderlyingHandle, cancellationToken);
-            }
+            return cryptoHandle != null && cryptoHandle.UnderlyingHandle != IntPtr.Zero ? cryptoHandle : null;
         }
 
         public Task FAllocateAsync(string path, IntPtr fileHandle, int mode, long offset, long length, CancellationToken cancellationToken = default)
@@ -393,7 +408,13 @@ namespace UvfLib.Master.Decorators
         // File operations - format specific
         public abstract Task<bool> FileExistsAsync(string filePath, CancellationToken cancellationToken = default);
         public abstract Task DeleteAsync(string filePath, CancellationToken cancellationToken = default);
-        public abstract Task<FileObject> GetFileInfoAsync(string filePath, CancellationToken cancellationToken = default);
+        public abstract Task<FileObject?> TryGetFileInfoAsync(string filePath, CancellationToken cancellationToken = default);
+
+        public virtual async Task<FileObject> GetFileInfoAsync(string filePath, CancellationToken cancellationToken = default)
+        {
+            return await TryGetFileInfoAsync(filePath, cancellationToken).ConfigureAwait(false)
+                ?? throw new FileNotFoundException($"File not found: {filePath}");
+        }
         public abstract Task MoveAsync(string sourceFilePath, string destinationFilePath, bool overwrite, CancellationToken cancellationToken = default);
 
         // Enumeration operations - format specific
