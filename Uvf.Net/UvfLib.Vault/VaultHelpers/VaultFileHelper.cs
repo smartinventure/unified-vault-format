@@ -56,9 +56,14 @@ namespace UvfLib.Vault.VaultHelpers
         /// <exception cref="ArgumentException">Thrown when the encrypted file size is invalid</exception>
         public static long CalculateExpectedDecryptedSize(long encryptedFileSize)
         {
-            // First remove the header size
+            // An empty cleartext file is stored either as a 0-byte file (header not yet written) or as the header alone.
+            if (encryptedFileSize == 0 || encryptedFileSize == HEADER_SIZE)
+            {
+                return 0;
+            }
+
             long sizeWithoutHeader = encryptedFileSize - HEADER_SIZE;
-            if (sizeWithoutHeader <= 0)
+            if (sizeWithoutHeader < 0)
             {
                 throw new ArgumentException("Encrypted file size is too small to be valid", nameof(encryptedFileSize));
             }

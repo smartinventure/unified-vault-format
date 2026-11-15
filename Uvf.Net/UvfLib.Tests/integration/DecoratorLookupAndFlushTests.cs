@@ -47,6 +47,52 @@ namespace UvfLib.Tests.integration
         [TestMethod]
         [DataRow(TestVaultFormat.Cryptomator)]
         [DataRow(TestVaultFormat.Uvf)]
+        public async Task FlushToDiskAsync_PartialChunk_StoresTheWrittenBytesBeforeClose(TestVaultFormat format)
+        {
+            await using var vault = await RecordedVault.CreateAsync(format);
+            IStorage storage = vault.Manager.EncryptingStorage;
+            IntPtr handle = await storage.OpenAsync(ExistingFilePath, OpenFlags.Create | OpenFlags.ReadWrite);
+            try
+            {
+                await WriteAsync(storage, ExistingFilePath, handle, 0, Content);
+
+                await storage.FlushToDiskAsync(ExistingFilePath, handle);
+
+                FileObject info = await storage.GetFileInfoAsync(ExistingFilePath);
+                Assert.AreEqual(Encoding.UTF8.GetByteCount(Content), info.Size);
+            }
+            finally
+            {
+                await storage.CloseAsync(ExistingFilePath, handle);
+            }
+        }
+
+        [TestMethod]
+        [DataRow(TestVaultFormat.Cryptomator)]
+        [DataRow(TestVaultFormat.Uvf)]
+        public async Task FlushToDiskAsync_ThenMoreWrites_ReadsBackEverything(TestVaultFormat format)
+        {
+            await using var vault = await RecordedVault.CreateAsync(format);
+            IStorage storage = vault.Manager.EncryptingStorage;
+            const string continuation = " — and more after the forced save.";
+            IntPtr handle = await storage.OpenAsync(ExistingFilePath, OpenFlags.Create | OpenFlags.ReadWrite);
+            try
+            {
+                await WriteAsync(storage, ExistingFilePath, handle, 0, Content);
+                await storage.FlushToDiskAsync(ExistingFilePath, handle);
+                await WriteAsync(storage, ExistingFilePath, handle, Encoding.UTF8.GetByteCount(Content), continuation);
+            }
+            finally
+            {
+                await storage.CloseAsync(ExistingFilePath, handle);
+            }
+
+            Assert.AreEqual(Content + continuation, await ReadAllAsync(storage, ExistingFilePath));
+        }
+
+        [TestMethod]
+        [DataRow(TestVaultFormat.Cryptomator)]
+        [DataRow(TestVaultFormat.Uvf)]
         public async Task TryGetFileInfoAsync_MissingFile_ReturnsNullWithoutThrowingLookupBelow(TestVaultFormat format)
         {
             await using var vault = await RecordedVault.CreateAsync(format);
@@ -73,6 +119,21 @@ namespace UvfLib.Tests.integration
             Assert.IsNotNull(info);
             Assert.IsFalse(info.IsDirectory);
             Assert.AreEqual(Encoding.UTF8.GetByteCount(Content), info.Size);
+        }
+
+        [TestMethod]
+        [DataRow(TestVaultFormat.Cryptomator)]
+        [DataRow(TestVaultFormat.Uvf)]
+        public async Task GetFileInfoAsync_EmptyFile_ReportsSizeZero(TestVaultFormat format)
+        {
+            await using var vault = await RecordedVault.CreateAsync(format);
+            IStorage storage = vault.Manager.EncryptingStorage;
+            IntPtr handle = await storage.OpenAsync(ExistingFilePath, OpenFlags.Create | OpenFlags.ReadWrite);
+            await storage.CloseAsync(ExistingFilePath, handle);
+
+            FileObject info = await storage.GetFileInfoAsync(ExistingFilePath);
+
+            Assert.AreEqual(0, info.Size);
         }
 
         [TestMethod]
@@ -114,18 +175,40 @@ namespace UvfLib.Tests.integration
             }
         }
 
-        private static async Task WriteAsync(IStorage storage, string path, IntPtr handle, string content)
+        private static Task WriteAsync(IStorage storage, string path, IntPtr handle, string content) =>
+            WriteAsync(storage, path, handle, 0, content);
+
+        private static async Task WriteAsync(IStorage storage, string path, IntPtr handle, long offset, string content)
         {
             byte[] data = Encoding.UTF8.GetBytes(content);
             IntPtr buffer = Marshal.AllocHGlobal(data.Length);
             try
             {
                 Marshal.Copy(data, 0, buffer, data.Length);
-                await storage.WriteAsync(path, handle, 0, data.Length, buffer);
+                await storage.WriteAsync(path, handle, offset, data.Length, buffer);
             }
             finally
             {
                 Marshal.FreeHGlobal(buffer);
+            }
+        }
+
+        private static async Task<string> ReadAllAsync(IStorage storage, string path)
+        {
+            const int maxBytes = 4096;
+            IntPtr handle = await storage.OpenAsync(path, OpenFlags.ReadOnly);
+            IntPtr buffer = Marshal.AllocHGlobal(maxBytes);
+            try
+            {
+                int read = await storage.ReadAsync(path, handle, 0, maxBytes, buffer);
+                byte[] data = new byte[read];
+                Marshal.Copy(buffer, data, 0, read);
+                return Encoding.UTF8.GetString(data);
+            }
+            finally
+            {
+                Marshal.FreeHGlobal(buffer);
+                await storage.CloseAsync(path, handle);
             }
         }
     }

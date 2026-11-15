@@ -38,6 +38,7 @@ namespace UvfLib.Vault.VaultHelpers
         private readonly byte[] _aadBuffer; // Buffer for AAD (chunkNumber + headerNonce)
         private int _bufferPosition = 0;
         private long _currentChunkNumber = 0;
+        private bool _isPendingChunkWritten = false;
         private bool _headerWritten = false;
         private bool _isDisposed = false;
 
@@ -172,6 +173,7 @@ namespace UvfLib.Vault.VaultHelpers
                 
                 Buffer.BlockCopy(buffer, currentOffset, _cleartextChunkBuffer, _bufferPosition, bytesToCopy);
                 _bufferPosition += bytesToCopy;
+                _isPendingChunkWritten = false;
                 currentOffset += bytesToCopy;
                 bytesToProcess -= bytesToCopy;
                 _virtualPosition += bytesToCopy;
@@ -307,6 +309,13 @@ namespace UvfLib.Vault.VaultHelpers
         {
             // Check environment variable directly - works across AOT compilation boundary
             bool isVerbose = DebugLog.IsEnabled;
+
+            // A flushed partial chunk is rewritten in place once later writes extend it, so every chunk is
+            // written at its own slot rather than wherever the previous write left the stream.
+            if (_outputStream.CanSeek)
+            {
+                _outputStream.Position = GetEncryptedChunkStartPosition(_currentChunkNumber);
+            }
             
             if (isVerbose)
             {
@@ -446,22 +455,25 @@ namespace UvfLib.Vault.VaultHelpers
 
             EnsureHeaderWritten(); // Ensure header is written even if no data follows
 
-            // Encrypt and write any remaining data in the buffer as the final chunk
-            if (_bufferPosition > 0)
+            // The partly filled chunk stays buffered so later writes complete it. Writing it now is only
+            // possible where its slot can be rewritten then; a non-seekable output gets it on Dispose.
+            if (_outputStream.CanSeek)
             {
-                // CRITICAL FIX: Position stream to correct chunk location before writing
-                long correctChunkPosition = GetEncryptedChunkStartPosition(_currentChunkNumber);
-                if (_outputStream.CanSeek)
-                {
-                    _outputStream.Position = correctChunkPosition;
-                }
-                
-                EncryptAndWriteChunk(_cleartextChunkBuffer.AsMemory(0, _bufferPosition));
-                _bufferPosition = 0; // Clear buffer after flushing
+                WritePendingChunk();
             }
 
-            // CRITICAL: Ensure underlying stream is properly flushed
-            _outputStream.Flush(); // Flush the underlying stream
+            _outputStream.Flush();
+        }
+
+        private void WritePendingChunk()
+        {
+            if (_bufferPosition == 0 || _isPendingChunkWritten)
+            {
+                return;
+            }
+
+            EncryptAndWriteChunk(_cleartextChunkBuffer.AsMemory(0, _bufferPosition));
+            _isPendingChunkWritten = true;
         }
 
         protected override void Dispose(bool disposing)
@@ -472,9 +484,8 @@ namespace UvfLib.Vault.VaultHelpers
                 {
                     try
                     {
-                        Flush();
-                        
-                        // ADDITIONAL SAFETY: Explicit flush and sync before closing
+                        EnsureHeaderWritten();
+                        WritePendingChunk();
                         _outputStream.Flush();
                         
                         // Force OS to sync to disk if it's a FileStream

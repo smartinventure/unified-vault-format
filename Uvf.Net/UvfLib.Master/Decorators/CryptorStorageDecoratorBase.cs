@@ -339,6 +339,7 @@ namespace UvfLib.Master.Decorators
             var cryptoHandle = FindOpenUnderlyingHandle(fileHandle);
             if (cryptoHandle != null)
             {
+                await cryptoHandle.FlushEncryptingStreamAsync(cancellationToken).ConfigureAwait(false);
                 await _underlyingStorage.FlushToDiskAsync(cryptoHandle.PhysicalPath, cryptoHandle.UnderlyingHandle, cancellationToken).ConfigureAwait(false);
             }
         }

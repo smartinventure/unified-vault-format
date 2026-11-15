@@ -59,6 +59,18 @@ namespace UvfLib.Master.Decorators
             return _encryptingStream;
         }
 
+        /// <summary>
+        /// Writes the cleartext the encrypting stream still holds (its partly filled chunk) to the underlying
+        /// stream. Later writes keep extending that chunk.
+        /// </summary>
+        public async Task FlushEncryptingStreamAsync(CancellationToken cancellationToken)
+        {
+            if (_encryptingStream != null)
+            {
+                await _encryptingStream.FlushAsync(cancellationToken).ConfigureAwait(false);
+            }
+        }
+
         public void Dispose()
         {
             if (!_disposed)
